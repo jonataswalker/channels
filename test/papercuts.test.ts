@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { describeEvent, formatAdded, formatAfter, formatStatus, formatTask, formatTasks } from "../src/format.ts";
 import { memberLoad } from "../src/load.ts";
 import { wellFormedEvent, type Event, type Kind, type Message } from "../src/protocol.ts";
-import { unmatchedGlobs, runSh } from "../src/sh.ts";
+import { runSh } from "../src/sh.ts";
 import { fold as foldWith, similarOpenTasks, titlesLookAlike, waitingOn, type Roster, type Task } from "../src/state.ts";
 import { generateIdentity, sign, verify, type Identity } from "../src/identity.ts";
 
@@ -147,18 +147,27 @@ describe("kiwi sh empty globs", () => {
   const files = { "/channel/tasks/T2.md": "hello\n", "/channel/nope/": "" };
 
   test("a glob that matches nothing is named on stderr and the script still runs", async () => {
-    const r = await runSh(files, "echo /channel/nope/*.md");
+    const r = await runSh(files, "echo /channel/nope/*.md; echo after");
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe("/channel/nope/*.md");
-    expect(r.stderr).toBe("kiwi sh: no match: /channel/nope/*.md\n");
+    expect(r.stdout).toBe("after\n");
+    expect(r.stderr).toBe("bash: no match: /channel/nope/*.md\n");
   });
 
-  test("a glob that matches, a quoted glob, and a comment do not warn", async () => {
+  test("a glob that matches nothing, and nothing after it, exits nonzero", async () => {
+    const r = await runSh(files, "echo /channel/nope/*.md");
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toBe("bash: no match: /channel/nope/*.md\n");
+  });
+
+  test("a matching glob is quiet, and test, arithmetic and prefix removal are not globs", async () => {
     const hit = await runSh(files, "echo /channel/tasks/*.md");
-    expect(hit.stderr).toBe("");
-    expect(hit.stdout.trim()).toBe("/channel/tasks/T2.md");
-    expect(unmatchedGlobs("echo '/channel/nope/*.md'", files)).toEqual([]);
-    expect(unmatchedGlobs("echo hi # *.md\npat=*.md", files)).toEqual([]);
-    expect(unmatchedGlobs("echo \\*.md", files)).toEqual([]);
+    expect(hit).toMatchObject({ stdout: "/channel/tasks/T2.md\n", stderr: "", exitCode: 0 });
+    const testCmd = await runSh(files, "[ -f x ]; echo after");
+    expect(testCmd).toMatchObject({ stdout: "after\n", stderr: "", exitCode: 0 });
+    const arith = await runSh(files, "echo $((2*3))");
+    expect(arith).toMatchObject({ stdout: "6\n", stderr: "", exitCode: 0 });
+    const trim = await runSh(files, "x=a/b; echo ${x#*/}");
+    expect(trim).toMatchObject({ stdout: "b\n", stderr: "", exitCode: 0 });
   });
 });
