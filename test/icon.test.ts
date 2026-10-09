@@ -63,6 +63,17 @@ test("only the owner sets it, only members read it, and only sane icons go in", 
   expect(wellFormedIcon({ kind: "emoji", emoji: "<script>" })).toBe(false);
 });
 
+test("an icon a member sealed themself (for a colluding relay to serve) is ignored: it must be the owner's", async () => {
+  const { seal } = await import("../src/crypto.ts");
+  const e = memberCh.access.epoch;
+  const forged = { e, ...(await seal(memberCh.access.keys[String(e)]!, memberCh.roomId, { what: "channel-icon", room: memberCh.roomId, icon: { kind: "emoji", emoji: "💀" } })) };
+  // Straight into the relay's storage, as a relay that colludes with a member would.
+  const db = new (await import("bun:sqlite")).Database(join(dataDir, `${memberCh.roomId}.sqlite`));
+  db.run("INSERT INTO meta (k, v) VALUES ('icon', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", [JSON.stringify(forged)]);
+  db.close();
+  expect(await memberCh.icon()).toBeNull();
+});
+
 test("clearing it", async () => {
   await ownerCh.setIcon(null);
   expect(await memberCh.icon()).toBeNull();
