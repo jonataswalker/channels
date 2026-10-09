@@ -27,9 +27,9 @@
 4. **The pure core stays plain functions.** `fold`, `format`, `wellFormed`,
    crypto and `sas` are already pure and synchronous or simple async. Wrapping
    them in Effect adds cost and nothing else. Effect code calls them directly.
-5. **The surface the web imports stays Promise and plain data** unless the owner
-   decides the web moves too (see "The web"). Effect inside, `runPromise` at the
-   edge.
+5. **The surface the web imports keeps working at every step** until the web's
+   own move (see "The web"): the Promise methods stay until Claude-1 switches
+   the web over, then they can go.
 
 ## How the pieces map
 
@@ -116,24 +116,18 @@ Each step is a few days, and each is shippable on its own.
 - **Worker**: the relay bundle grows by about that; far under the Workers size
   limit. Cold-start cost: to measure in step 2 under `wrangler dev`.
 - **Binary**: +~1MB on a 64MB `kiwi` binary; negligible.
-- **Web**: zero extra while the web only imports the Promise surface *and* the
-  modules it imports don't pull in Effect. If the web doesn't move, step 3
-  splits `client.ts` so the browser entry reaches only a plain module (the
-  Effect implementation in its own file), and CI fails if `effect` shows up in
-  `web/dist`. If the web moves, it accepts ~30KB gzipped (dist is ~689KB raw
-  today) and the split is skipped.
+- **Web**: ~30KB gzipped once it imports Effect code (dist is ~689KB raw
+  today); accepted, since the web moves to Effect too.
 
 ## The web
 
-Open question for the owner (#463, #465, #466): does the dashboard move to
-Effect too?
-
-- **If yes**: a separate step after 3 (Claude-1 owns it): the channel stream as
-  an Effect `Stream`, vault and passkey steps as typed errors, services as
-  Layers, React at the edge. Then the "keep Effect out of the web's import
-  graph" care above goes away, and the Promise surface can shrink.
-- **If no**: the web keeps calling `Channel`, `vault.ts` and friends as Promises
-  and plain data, and steps 3–4 guarantee that surface.
+Decided (#475, owner delegated to Coordinator): **the web moves to Effect too**,
+as its own step after backend step 3, owned by Claude-1, with React at the edge:
+the channel as an Effect `Stream` one hook subscribes to, vault and passkey steps
+as typed errors, services as Layers (`Storage`, `KeyStore`, `Relay`). So there's
+no `client.ts` split and no bundle check for `effect` in `web/dist`; the web
+accepts the ~30KB gzipped. Step 1 still exports plain tagged errors the web can
+branch on before it moves.
 
 ## Risks
 
