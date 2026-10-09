@@ -83,6 +83,20 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
     if (replyTo) area.current?.focus()
   }, [replyTo])
 
+  // A drop anywhere else in the window must not navigate the dashboard away.
+  useEffect(() => {
+    const block = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("Files")) return
+      e.preventDefault()
+    }
+    window.addEventListener("dragover", block)
+    window.addEventListener("drop", block)
+    return () => {
+      window.removeEventListener("dragover", block)
+      window.removeEventListener("drop", block)
+    }
+  }, [])
+
   const canSend = !disabled && !sending && (body.trim().length > 0 || files.length > 0)
 
   const pick = (list: FileList | File[] | null) => {
@@ -251,7 +265,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
               .filter((file): file is File => !!file)
             const images = (e.clipboardData.files.length ? [...e.clipboardData.files] : fromItems).filter((f) => f.type.startsWith("image/"))
             if (!images.length) return
-            e.preventDefault()
+            if (!e.clipboardData.getData("text/plain")) e.preventDefault()
             pick(images)
           }}
           onKeyDown={(e) => {
