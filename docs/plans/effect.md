@@ -68,15 +68,34 @@
   they're runtime-specific by nature; the frame handling inside them uses the
   room service.
 
+## Before step 1: two guard tests (review #473)
+
+- **An auth table.** One test lists every relay route with the check it needs
+  (owner signature, member signature, the owner's human session, a checked join
+  request, a vault writer signature, sign-in only) and asserts each refuses
+  without it. It runs before and after every step, so a lost `owner()` in the
+  router rewrite can't slip through.
+- **Error texts are API.** `client.ts` matches `/removed|denied/`, the web
+  matches `/sign in required/` and shows relay messages as they are. A test
+  snapshots every error text the relay can return; changing one is then a
+  deliberate edit to the snapshot.
+
 ## Order (one PR each)
 
-1. **Errors and Schemas only.** Add the tagged errors and request Schemas;
+1. **Errors and Schemas only.** The tags are also exported from a plain module
+   the browser can import without the Effect runtime (an `Error` with a `_tag`),
+   so the web can branch on `NotOwner`, `SignInRequired`, `VaultExists`,
+   `Conflict`… right away, instead of matching message text or DOMException
+   names (#474). Add the tagged errors and request Schemas;
    `room.ts` throws them through a thin bridge so behaviour is identical. Small,
    and it sets the vocabulary.
 2. **Relay core on Effect.** `room.ts`, `policy.ts`, `vault.ts`, `devices.ts`,
    `machines.ts`, `human.ts` as services and Effect handlers. Both adapters
    provide Layers. Run the suite against Bun *and* `wrangler dev`
-   (`KIWI_TEST_RELAY`, plus the Worker vault test).
+   (`KIWI_TEST_RELAY`, plus the Worker vault test). It ships as a relay deploy
+   on its own, with a canary: the workers.dev URL first, the suite run against
+   it, then the custom domain; per-request CPU in the Durable Object recorded
+   before and after.
 3. **Client: `Relay` service and the stream.** `client.ts` internals on Effect
    (calls, signing, the reconnect `Stream`), exporting the same `Channel`
    class with Promise methods for the web and CLI.
@@ -98,10 +117,11 @@ Each step is a few days, and each is shippable on its own.
   limit. Cold-start cost: to measure in step 2 under `wrangler dev`.
 - **Binary**: +~1MB on a 64MB `kiwi` binary; negligible.
 - **Web**: zero extra while the web only imports the Promise surface *and* the
-  modules it imports don't pull in Effect. That needs care: `client.ts` is
-  imported by the web, so step 3 keeps Effect out of the import graph the web
-  sees (Effect code in separate modules the browser entry doesn't reach), or
-  accepts ~30KB gzipped in the dashboard. To decide with Claude-1 in step 3.
+  modules it imports don't pull in Effect. If the web doesn't move, step 3
+  splits `client.ts` so the browser entry reaches only a plain module (the
+  Effect implementation in its own file), and CI fails if `effect` shows up in
+  `web/dist`. If the web moves, it accepts ~30KB gzipped (dist is ~689KB raw
+  today) and the split is skipped.
 
 ## The web
 
