@@ -10,12 +10,16 @@ import {
   openVault,
   putVault,
   recoverySecret,
+  requestVaultReset,
+  resealVault,
   rotateVault,
   seat,
   syncVault,
   unlock,
   vaultKey,
   wrapsOf,
+  type OpenedVault,
+  type PublicWrap,
   type VaultContents,
   type VaultKey,
   type WrapInput,
@@ -32,9 +36,17 @@ import { forgetVaultKey, keepVaultKey, loadVaultKey } from "./vault-store"
 // holds ciphertext; the vault key stays in this browser (non-extractable) and
 // in memory right after a touch, for adding or removing passkeys.
 
-export type Wrap = ReturnType<typeof wrapsOf>[number]
+export type Wrap = PublicWrap
 
-export type VaultState = { kind: "off" } | { kind: "loading" } | { kind: "none" } | { kind: "locked"; wraps: Wrap[] } | { kind: "open"; wraps: Wrap[] } | { kind: "error"; message: string }
+export type VaultState =
+  | { kind: "off" }
+  | { kind: "loading" }
+  | { kind: "none" }
+  /** `resetAt`: someone asked to reset the vault; it's erased then unless a device that has it saves first. */
+  | { kind: "locked"; wraps: Wrap[]; resetAt?: number }
+  /** `cancelled`: this browser just stopped a reset someone asked for (when it was asked to happen). */
+  | { kind: "open"; wraps: Wrap[]; cancelled?: number }
+  | { kind: "error"; message: string }
 
 interface Session {
   user: string
@@ -78,6 +90,12 @@ async function token(): Promise<string> {
   return t
 }
 
+async function current() {
+  const got = await fetchVault(location.origin, await token())
+  if (!got) throw new VaultError("there’s no vault yet")
+  return got
+}
+
 function wellFormed(m: StoredMember): boolean {
   try {
     return typeof m.identity?.pk === "string" && typeof m.identity.sk === "string" && typeof m.access?.ownerPk === "string" && decodeJoinCode(m.code).roomId === m.access.roomId
@@ -106,6 +124,9 @@ function deviceLabel(): string {
   return `${browser} on ${os}`
 }
 
+const ids = (wraps: Wrap[]) => wraps.flatMap((w) => (w.credentialId ? [w.credentialId] : []))
+const known = () => (state.kind === "locked" || state.kind === "open" ? state.wraps : [])
+
 /** Bring in every seat the vault has and this browser doesn't. A seat held here under another key stays as it is. */
 function take(c: VaultContents<StoredMember>): number {
   let added = 0
@@ -122,14 +143,26 @@ function take(c: VaultContents<StoredMember>): number {
   return added
 }
 
-/** Open the vault with a key: pull, then push whatever this browser had that the vault didn't. */
-async function opened(blob: string, version: number, k: VaultKey): Promise<number> {
+/**
+ * Open the vault with a key: cancel any pending reset (only someone without a
+ * device that has the vault asks for one, so from here it's never wanted
+ * silently), pull, then push whatever this browser had that the vault didn't.
+ */
+async function opened(got: { version: number; blob: string; resetAt?: number }, k: VaultKey): Promise<number> {
   const s = session!
-  const c = await openVault<StoredMember>(blob, s.user, k, version, seen(s.user))
-  saw(s.user, version)
+  const v = await openVault<StoredMember>(got.blob, s.user, k, got.version, seen(s.user))
+  saw(s.user, got.version)
   key = k
-  const added = take(c)
-  set({ kind: "open", wraps: wrapsOf(blob) })
+  let cancelled: number | undefined
+  if (got.resetAt) {
+    const r = await putVault(location.origin, await token(), s.user, got.version, await resealVault(got.blob, s.user, k, v, got.version + 1, v), v.writer)
+    if ("version" in r) {
+      saw(s.user, r.version)
+      cancelled = got.resetAt
+    }
+  }
+  const added = take(v)
+  set({ kind: "open", wraps: v.wraps, ...(cancelled ? { cancelled } : {}) })
   await push()
   return added
 }
@@ -148,14 +181,14 @@ export async function startVault(next: Session | null): Promise<void> {
     const stored = await loadVaultKey(next.user)
     if (stored) {
       try {
-        await opened(got.blob, got.version, stored)
+        await opened(got, stored)
         return
       } catch {
         // The vault was rotated elsewhere (a passkey removed): this browser's key no longer opens it.
         await forgetVaultKey(next.user)
       }
     }
-    set({ kind: "locked", wraps: wrapsOf(got.blob) })
+    set({ kind: "locked", wraps: wrapsOf(got.blob), ...(got.resetAt ? { resetAt: got.resetAt } : {}) })
   } catch (err) {
     set({ kind: "error", message: err instanceof Error ? err.message : String(err) })
   }
@@ -167,46 +200,57 @@ export async function setUpVault(): Promise<string> {
   const pk = await createPasskey({ id: s.user, name: s.email || s.name, displayName: s.name }, PRF_SALT)
   const contents: VaultContents<StoredMember> = { channels: allMembers(), gone: {} }
   const made = await newVault(s.user, contents, { kind: "passkey", label: deviceLabel(), secret: pk.secret, credentialId: pk.credentialId })
+  const first = await openVault<StoredMember>(made.blob, s.user, made.key, 1)
   const code = newRecoveryCode()
-  const blob = await addWrap(made.blob, s.user, made.key, 1, contents, { kind: "recovery", label: "Recovery code", secret: recoverySecret(code)! })
-  const r = await putVault(location.origin, await token(), 0, blob)
+  const blob = await addWrap(made.blob, s.user, made.key, first, 1, { kind: "recovery", label: "Recovery code", secret: recoverySecret(code)! })
+  const r = await putVault(location.origin, await token(), s.user, 0, blob, made.writer, made.writer.pk)
   if ("conflict" in r) throw new VaultError("another device just set up your vault. Reload to unlock it.")
   saw(s.user, r.version)
-  await settle(made.key, blob)
+  rawKey = made.key
+  key = await vaultKey(made.key)
+  await keepVaultKey(s.user, key)
   synced = new Set(contents.channels.map(seat))
-  return code
-}
-
-async function settle(raw: string, blob: string) {
-  rawKey = raw
-  key = await vaultKey(raw)
-  await keepVaultKey(session!.user, key)
   set({ kind: "open", wraps: wrapsOf(blob) })
+  return code
 }
 
 async function unlockWith(secret: Uint8Array, credentialId?: string): Promise<number> {
   const s = session!
-  const got = await fetchVault(location.origin, await token())
-  if (!got) throw new VaultError("there’s no vault yet")
+  const got = await current()
   const raw = await unlock(got.blob, s.user, secret, credentialId)
-  if (!raw) throw new VaultError(credentialId ? "that passkey doesn’t open this vault" : "that recovery code doesn’t open this vault")
+  if (!raw) throw new VaultError(credentialId ? "That passkey doesn’t open this vault." : "That recovery code doesn’t open this vault.")
   rawKey = raw
   const k = await vaultKey(raw)
   await keepVaultKey(s.user, k)
-  return opened(got.blob, got.version, k)
+  return opened(got, k)
 }
 
 /** Touch any of the vault's passkeys. Returns how many channels came in. */
 export async function unlockWithPasskey(): Promise<number> {
-  const ids = state.kind === "locked" || state.kind === "open" ? state.wraps.flatMap((w) => (w.credentialId ? [w.credentialId] : [])) : []
-  const pk = await touchPasskey(PRF_SALT, ids)
+  const pk = await touchPasskey(PRF_SALT, ids(known()))
   return unlockWith(pk.secret, pk.credentialId)
 }
 
 export async function unlockWithCode(code: string): Promise<number> {
   const secret = recoverySecret(code)
-  if (!secret) throw new VaultError("that isn’t a recovery code: it’s 32 letters and digits")
+  if (!secret) throw new VaultError("That isn’t a recovery code: it’s 32 letters and digits.")
   return unlockWith(secret)
+}
+
+/**
+ * Lost every passkey and the recovery code, or the vault wasn't made with
+ * yours: ask for a reset. It waits a day, and any device that still opens the
+ * vault cancels it, so a stolen sign-in can't erase it quietly.
+ */
+export async function resetVault(): Promise<number> {
+  const { resetAt } = await requestVaultReset(location.origin, await token())
+  if (state.kind === "locked") set({ ...state, resetAt })
+  return resetAt
+}
+
+/** The warning about a cancelled reset has been read. */
+export function dismissCancelled() {
+  if (state.kind === "open" && state.cancelled) set({ kind: "open", wraps: state.wraps })
 }
 
 /** Save what changed in this browser since the vault last saw it: seats gained, seats left. */
@@ -223,7 +267,7 @@ async function push(): Promise<void> {
     s.user,
     key,
     (c) => {
-      let next = c
+      let next: VaultContents<StoredMember> = { channels: c.channels, gone: c.gone }
       for (const k of left) {
         const [code, pk] = k.split(" ")
         next = forgetSeat(next, { code: code!, identity: { pk: pk! } })
@@ -246,30 +290,31 @@ window.addEventListener(CHANGED, () => {
 
 /** Adding or removing a passkey needs the raw key, which only a fresh touch gives. */
 async function freshKey(): Promise<{ raw: string; keep: WrapInput }> {
-  const ids = state.kind === "open" ? state.wraps.flatMap((w) => (w.credentialId ? [w.credentialId] : [])) : []
-  const pk = await touchPasskey(PRF_SALT, ids)
-  const got = await fetchVault(location.origin, await token())
-  const raw = got && (await unlock(got.blob, session!.user, pk.secret, pk.credentialId))
-  if (!raw) throw new VaultError("that passkey doesn’t open this vault")
-  const label = (state.kind === "open" && state.wraps.find((w) => w.credentialId === pk.credentialId)?.label) || deviceLabel()
+  const pk = await touchPasskey(PRF_SALT, ids(known()))
+  const got = await current()
+  const raw = await unlock(got.blob, session!.user, pk.secret, pk.credentialId)
+  if (!raw) throw new VaultError("That passkey doesn’t open this vault.")
+  const label = known().find((w) => w.credentialId === pk.credentialId)?.label || deviceLabel()
   return { raw, keep: { kind: "passkey", label, secret: pk.secret, credentialId: pk.credentialId } }
+}
+
+async function openNow(k: VaultKey): Promise<{ got: { version: number; blob: string }; v: OpenedVault<StoredMember> }> {
+  const got = await current()
+  return { got, v: await openVault<StoredMember>(got.blob, session!.user, k, got.version, seen(session!.user)) }
 }
 
 /** Another passkey that opens the same vault: a phone, a security key. */
 export async function addPasskey(): Promise<void> {
   const s = session!
   const raw = rawKey ?? (await freshKey()).raw
-  const exclude = state.kind === "open" ? state.wraps.flatMap((w) => (w.credentialId ? [w.credentialId] : [])) : []
-  const pk = await createPasskey({ id: s.user, name: s.email || s.name, displayName: s.name }, PRF_SALT, exclude)
-  const got = await fetchVault(location.origin, await token())
-  if (!got) throw new VaultError("there’s no vault yet")
-  const c = await openVault<StoredMember>(got.blob, s.user, raw, got.version, seen(s.user))
-  const blob = await addWrap(got.blob, s.user, raw, got.version + 1, c, { kind: "passkey", label: deviceLabel(), secret: pk.secret, credentialId: pk.credentialId })
-  const r = await putVault(location.origin, await token(), got.version, blob)
-  if ("conflict" in r) throw new VaultError("your vault changed on another device; try again")
+  const pk = await createPasskey({ id: s.user, name: s.email || s.name, displayName: s.name }, PRF_SALT, ids(known()))
+  const { got, v } = await openNow(raw)
+  const blob = await addWrap(got.blob, s.user, raw, v, got.version + 1, { kind: "passkey", label: deviceLabel(), secret: pk.secret, credentialId: pk.credentialId })
+  const r = await putVault(location.origin, await token(), s.user, got.version, blob, v.writer)
+  if ("conflict" in r) throw new VaultError("Your vault changed on another device. Try again.")
   saw(s.user, r.version)
   rawKey = raw
-  set({ kind: "open", wraps: wrapsOf(blob) })
+  set({ kind: "open", wraps: (await openVault(blob, s.user, raw, r.version)).wraps })
 }
 
 /**
@@ -280,14 +325,15 @@ export async function addPasskey(): Promise<void> {
 export async function removePasskey(w: Wrap): Promise<string> {
   const s = session!
   const { keep } = await freshKey()
-  if (keep.credentialId === w.credentialId) throw new VaultError("use a different passkey than the one you’re removing")
-  const got = await fetchVault(location.origin, await token())
-  if (!got) throw new VaultError("there’s no vault yet")
-  const c = await openVault<StoredMember>(got.blob, s.user, key!, got.version, seen(s.user))
-  const next = await rotateVault(s.user, got.version + 1, c, keep)
-  const r = await putVault(location.origin, await token(), got.version, next.blob)
-  if ("conflict" in r) throw new VaultError("your vault changed on another device; try again")
+  if (keep.credentialId === w.credentialId) throw new VaultError("Touch a different passkey than the one you’re removing.")
+  const { got, v } = await openNow(key!)
+  const next = await rotateVault(s.user, v, got.version + 1, keep)
+  const r = await putVault(location.origin, await token(), s.user, got.version, next.blob, v.writer, next.writer.pk)
+  if ("conflict" in r) throw new VaultError("Your vault changed on another device. Try again.")
   saw(s.user, r.version)
-  await settle(next.key, next.blob)
+  rawKey = next.key
+  key = await vaultKey(next.key)
+  await keepVaultKey(s.user, key)
+  set({ kind: "open", wraps: (await openVault(next.blob, s.user, next.key, r.version)).wraps })
   return next.recoveryCode
 }

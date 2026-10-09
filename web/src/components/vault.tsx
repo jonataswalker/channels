@@ -1,9 +1,9 @@
 import { Copy01Icon, Delete02Icon, FingerPrintIcon } from "@hugeicons/core-free-icons"
 import { useEffect, useState, type ReactNode } from "react"
 
-import { formatShort } from "@/lib/format"
+import { formatFull, formatShort } from "@/lib/format"
 import { cancelled, passkeysAvailable } from "@/lib/passkey"
-import { addPasskey, removePasskey, setUpVault, unlockWithCode, unlockWithPasskey, useVault } from "@/lib/vault"
+import { addPasskey, dismissCancelled, removePasskey, resetVault, setUpVault, unlockWithCode, unlockWithPasskey, useVault } from "@/lib/vault"
 import { cx } from "@/lib/utils"
 import { Icon } from "./icon"
 import { Alert, Button, IconButton, Modal, Spinner, TextField, errorText, toast } from "./kit"
@@ -30,14 +30,18 @@ export function VaultCard() {
   const [busy, setBusy] = useState(false)
   const [code, setCode] = useState<string | null>(null)
   const [entering, setEntering] = useState(false)
+  // A passkey touch that didn't open the vault: maybe it isn't the person's at all.
+  const [stuck, setStuck] = useState(false)
+  const [resetting, setResetting] = useState(false)
   useEffect(() => void passkeysAvailable().then(setSupported), [])
 
-  const run = async <T,>(fn: () => Promise<T>, then: (v: T) => void) => {
+  const run = async <T,>(fn: () => Promise<T>, then: (v: T) => void, onFail?: () => void) => {
     setBusy(true)
     try {
       then(await fn())
     } catch (err) {
       failed(err)
+      onFail?.()
     } finally {
       setBusy(false)
     }
@@ -51,8 +55,17 @@ export function VaultCard() {
           state={vault.kind === "none" ? "none" : "locked"}
           busy={busy}
           onSetUp={() => void run(setUpVault, setCode)}
-          onUnlock={() => void run(unlockWithPasskey, (n) => toast(brought(n)))}
+          onUnlock={() =>
+            void run(
+              unlockWithPasskey,
+              (n) => toast(brought(n)),
+              () => setStuck(true)
+            )
+          }
           onRecovery={() => setEntering(true)}
+          stuck={stuck}
+          resetAt={vault.kind === "locked" ? vault.resetAt : undefined}
+          onReset={() => setResetting(true)}
           onLater={
             vault.kind === "none"
               ? () => {
@@ -64,6 +77,27 @@ export function VaultCard() {
         />
       )}
       <RecoveryCodeModal code={code} onDone={() => setCode(null)} />
+      <Alert
+        open={resetting}
+        onClose={() => setResetting(false)}
+        title="Reset your vault?"
+        message="In 24 hours the list of channels saved to it is erased, and you can set up a new one with your passkey. If any device of yours still opens it before then, the reset is cancelled. Your channels themselves aren’t touched."
+      >
+        <Button variant="secondary" onClick={() => setResetting(false)}>
+          Cancel
+        </Button>
+        <Button variant="danger" onClick={() => (setResetting(false), void run(resetVault, (at) => toast(`Your vault resets ${formatFull(at)}`)))}>
+          Reset vault
+        </Button>
+      </Alert>
+      <Alert
+        open={vault.kind === "open" && !!vault.cancelled}
+        onClose={dismissCancelled}
+        title="Someone tried to reset your vault"
+        message="A reset was asked for from a session signed in as you, and this browser cancelled it. If that wasn’t you, someone may have your sign-in: sign out everywhere and change your password."
+      >
+        <Button onClick={dismissCancelled}>OK</Button>
+      </Alert>
       <RecoveryEntryModal
         open={entering}
         onClose={() => setEntering(false)}
@@ -123,6 +157,9 @@ export function VaultPrompt({
   onUnlock,
   onRecovery,
   onLater,
+  stuck,
+  resetAt,
+  onReset,
 }: {
   state: "none" | "locked"
   busy: boolean
@@ -130,23 +167,41 @@ export function VaultPrompt({
   onUnlock: () => void
   onRecovery: () => void
   onLater?: () => void
+  /** A touch didn't open it. */
+  stuck?: boolean
+  resetAt?: number
+  onReset?: () => void
 }) {
+  const text =
+    state === "none"
+      ? "Save them to a passkey. On any browser you sign in to, a touch brings them all back."
+      : stuck
+        ? "This vault doesn’t open with that passkey. If you didn’t set it up, or you’ve lost every passkey and the recovery code, reset it."
+        : "They’re saved to a passkey. Touch it to bring every channel to this browser."
   return (
     <div className="mx-3 mt-1 mb-2 rounded-[10px] bg-wash p-3">
       <p className="flex items-center gap-1.5 text-[13px] font-semibold">
         <Icon icon={FingerPrintIcon} size={15} className="text-ink-2" />
         {state === "none" ? "Your channels on every device" : "Unlock your channels"}
       </p>
-      <p className="mt-1 text-[12.5px] leading-normal text-ink-2">
-        {state === "none" ? "Save them to a passkey. On any browser you sign in to, a touch brings them all back." : "They’re saved to a passkey. Touch it to bring every channel to this browser."}
-      </p>
-      <div className="mt-2.5 flex items-center gap-1">
+      <p className="mt-1 text-[12.5px] leading-normal text-ink-2">{text}</p>
+      {resetAt && (
+        <p className="mt-1.5 text-[12.5px] leading-normal font-medium text-alert">
+          A reset was asked for. Your vault is erased {formatFull(resetAt)} unless a device that has it opens Channels first.
+        </p>
+      )}
+      <div className="mt-2.5 flex flex-wrap items-center gap-1">
         <Button size="sm" onClick={state === "none" ? onSetUp : onUnlock} disabled={busy}>
           {busy ? <Spinner className="size-3.5 border-accent-ink/30 border-t-accent-ink" /> : state === "none" ? "Set up passkey" : "Use passkey"}
         </Button>
         {state === "locked" && (
           <Button size="sm" variant="ghost" onClick={onRecovery} disabled={busy}>
             Use recovery code
+          </Button>
+        )}
+        {state === "locked" && stuck && !resetAt && onReset && (
+          <Button size="sm" variant="danger" onClick={onReset} disabled={busy}>
+            Reset vault
           </Button>
         )}
         {onLater && (
