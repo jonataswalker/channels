@@ -237,6 +237,7 @@ export function fold(messages: Message[], roster: Roster, now = Date.now()): Cha
           const task = tasks.get(ev.task);
           if (!task) reject(`no task ${taskId(ev.task)}`);
           else if (task.state === "done") reject(`${taskId(task.id)} is already done`);
+          else if (task.state === "cancelled") reject(`${taskId(task.id)} is cancelled`);
           else if (task.owner && task.owner !== m.from) reject(`${taskId(task.id)} is owned by ${task.owner}`);
           else {
             task.owner = m.from;
@@ -251,6 +252,13 @@ export function fold(messages: Message[], roster: Roster, now = Date.now()): Cha
           if (!task) {
             reject(`no task ${taskId(ev.task)}`);
             break;
+          }
+          if (ev.after?.length) {
+            const why = appendAfter(tasks, task, ev.after);
+            if (why) {
+              reject(why);
+              break;
+            }
           }
           if (ev.owner !== undefined) task.owner = ev.owner || undefined;
           if (ev.state) task.state = ev.state;
@@ -316,7 +324,63 @@ export function fold(messages: Message[], roster: Roster, now = Date.now()): Cha
   };
 }
 
-/** Tasks still waiting on unfinished dependencies. */
+/** A dependency that no longer blocks: finished, in review, or cancelled. */
+export function depSatisfied(state: TaskState | undefined): boolean {
+  return state === "done" || state === "review" || state === "cancelled";
+}
+
+/** Tasks still waiting on unfinished dependencies. Review, done and cancelled count as ready. */
 export function waitingOn(state: ChannelState, task: Task): number[] {
-  return task.after.filter((d) => state.tasks.get(d)?.state !== "done");
+  return task.after.filter((d) => !depSatisfied(state.tasks.get(d)?.state));
+}
+
+/** True if making `task` wait on `dep` would loop (including waiting on itself). */
+export function wouldCycle(tasks: Map<number, Task>, task: number, dep: number): boolean {
+  if (dep === task) return true;
+  const seen = new Set<number>();
+  const stack = [dep];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (id === task) return true;
+    if (!seen.add(id)) continue;
+    const next = tasks.get(id);
+    if (next) for (const d of next.after) stack.push(d);
+  }
+  return false;
+}
+
+function appendAfter(tasks: Map<number, Task>, task: Task, deps: number[]): string | undefined {
+  for (const d of deps) {
+    if (!tasks.has(d)) return `no task ${taskId(d)}`;
+    if (wouldCycle(tasks, task.id, d)) return `${taskId(task.id)} waiting on ${taskId(d)} would cycle`;
+  }
+  for (const d of deps) if (!task.after.includes(d)) task.after.push(d);
+  return undefined;
+}
+
+const OPEN_FOR_TITLE = new Set<TaskState>(["todo", "doing", "blocked", "review"]);
+
+function normTitle(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** Equal, one title contains the other, or at least 60% of the shorter title's words (longer than 2 characters) overlap. */
+export function titlesLookAlike(a: string, b: string): boolean {
+  const na = normTitle(a);
+  const nb = normTitle(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const shorter = na.length <= nb.length ? na : nb;
+  const longer = shorter === na ? nb : na;
+  if (shorter.length >= 8 && longer.includes(shorter)) return true;
+  const wa = [...new Set(na.split(" ").filter((w) => w.length > 2))];
+  const wb = new Set(nb.split(" ").filter((w) => w.length > 2));
+  if (!wa.length || !wb.size) return false;
+  const shared = wa.filter((w) => wb.has(w)).length;
+  return shared / Math.min(wa.length, wb.size) >= 0.6;
+}
+
+/** Open tasks (not done, not cancelled) whose title looks like `title`. */
+export function similarOpenTasks(state: ChannelState, title: string): Task[] {
+  return [...state.tasks.values()].filter((t) => OPEN_FOR_TITLE.has(t.state) && titlesLookAlike(title, t.title)).sort((a, b) => a.id - b.id);
 }

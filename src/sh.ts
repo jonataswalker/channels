@@ -165,6 +165,143 @@ export async function sessionViews(s: AgentSession, script: string): Promise<Cha
   return views;
 }
 
+/**
+ * Unquoted globs in `script` that match nothing in `files`. just-bash leaves an
+ * unmatched glob as the literal pattern (failglob is off), which reads as a
+ * silent skip. The note names the pattern; the script still runs.
+ */
+export function unmatchedGlobs(script: string, files: Record<string, string>, cwd = "/channel"): string[] {
+  const paths = knownPaths(files);
+  const missing: string[] = [];
+  for (const pattern of unquotedGlobs(script)) {
+    if (!globHits(absPattern(pattern, cwd), paths)) missing.push(pattern);
+  }
+  return missing;
+}
+
+function withGlobNote(stderr: string, script: string, files: Record<string, string>, cwd: string): string {
+  const lines = unmatchedGlobs(script, files, cwd)
+    .filter((p) => !stderr.includes(p))
+    .map((p) => `kiwi sh: no match: ${p}\n`)
+    .join("");
+  if (!lines) return stderr;
+  const gap = stderr && !stderr.endsWith("\n") ? "\n" : "";
+  return stderr + gap + lines;
+}
+
+/** Words that contain an unquoted glob metacharacter. Quoted text, comments and `\*` stay literal. */
+function unquotedGlobs(script: string): string[] {
+  const found: string[] = [];
+  let i = 0;
+  let quote: "'" | '"' | null = null;
+  let word = "";
+  let glob = false;
+  let escape = false;
+  const flush = () => {
+    if (!quote && glob && word && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) found.push(word);
+    word = "";
+    glob = false;
+  };
+  while (i < script.length) {
+    const c = script[i]!;
+    if (escape) {
+      word += c;
+      escape = false;
+      i++;
+      continue;
+    }
+    if (quote) {
+      if (c === "\\" && quote === '"') {
+        escape = true;
+        i++;
+        continue;
+      }
+      if (c === quote) quote = null;
+      else word += c;
+      i++;
+      continue;
+    }
+    if (c === "\\") {
+      escape = true;
+      i++;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      i++;
+      continue;
+    }
+    if (c === "#" && word === "") {
+      while (i < script.length && script[i] !== "\n") i++;
+      continue;
+    }
+    if (" \t\n;|&()<>".includes(c)) {
+      flush();
+      i++;
+      continue;
+    }
+    if (c === "*" || c === "?" || c === "[") glob = true;
+    word += c;
+    i++;
+  }
+  flush();
+  return [...new Set(found)];
+}
+
+function knownPaths(files: Record<string, string>): string[] {
+  const set = new Set<string>();
+  for (const raw of Object.keys(files)) {
+    const p = raw.endsWith("/") ? raw.slice(0, -1) : raw;
+    if (!p.startsWith("/")) continue;
+    const parts = p.split("/");
+    for (let n = 1; n < parts.length; n++) set.add(parts.slice(0, n + 1).join("/"));
+  }
+  return [...set];
+}
+
+function absPattern(pattern: string, cwd: string): string {
+  const flat = pattern.replace(/\/+/g, "/");
+  if (flat.startsWith("/")) return flat;
+  const base = cwd.endsWith("/") ? cwd.slice(0, -1) : cwd;
+  return `${base}/${flat}`.replace(/\/+/g, "/");
+}
+
+/** `*` and `?` stay inside one path segment. A leading dot is matched only when the pattern asks for it. */
+function globHits(pattern: string, paths: string[]): boolean {
+  const segs = pattern.split("/");
+  return paths.some((path) => {
+    const ps = path.split("/");
+    if (ps.length !== segs.length) return false;
+    return segs.every((seg, i) => segMatch(seg, ps[i] ?? ""));
+  });
+}
+
+function segMatch(pat: string, seg: string): boolean {
+  if (seg.startsWith(".") && !pat.startsWith(".")) return false;
+  return new RegExp(`^${segmentRegex(pat)}$`).test(seg);
+}
+
+function segmentRegex(pat: string): string {
+  let re = "";
+  for (let i = 0; i < pat.length; i++) {
+    const c = pat[i]!;
+    if (c === "*") re += "[^/]*";
+    else if (c === "?") re += "[^/]";
+    else if (c === "[") {
+      const end = pat.indexOf("]", i + 1);
+      if (end === -1) re += "\\[";
+      else {
+        let body = pat.slice(i + 1, end);
+        const neg = body.startsWith("!") || body.startsWith("^");
+        if (neg) body = body.slice(1);
+        re += `[${neg ? "^" : ""}${body.replace(/[\\\]^-]/g, "\\$&")}]`;
+        i = end;
+      }
+    } else re += c.replace(/[\\^$+?.()|{}\[\]]/g, "\\$&");
+  }
+  return re;
+}
+
 /** Run `script` against `files` (paths ending in "/" are empty directories). Never throws: every failure is a nonzero exit with a reason on stderr. */
 export async function runSh(files: Record<string, string>, script: string, opts: { cwd?: string } = {}): Promise<ShResult> {
   if (new TextEncoder().encode(script).length > MAX_SCRIPT_BYTES) return { stdout: "", stderr: `kiwi sh: script longer than ${MAX_SCRIPT_BYTES} bytes\n`, exitCode: 2 };
@@ -192,7 +329,7 @@ export async function runSh(files: Record<string, string>, script: string, opts:
     });
     const run = bash.exec(script, { replaceEnv: false, signal: stop.signal }).then((r) => ({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }));
     const r = await Promise.race([run, timeout]);
-    return { stdout: cap(r.stdout), stderr: cap(r.stderr), exitCode: r.exitCode };
+    return { stdout: cap(r.stdout), stderr: cap(withGlobNote(r.stderr, script, files, opts.cwd ?? "/channel")), exitCode: r.exitCode };
   } catch (err) {
     // A failed redirect into the read-only file system rejects instead of exiting nonzero (just-bash #557).
     return { stdout: "", stderr: `kiwi sh: ${err instanceof Error ? err.message : String(err)}\n`, exitCode: 1 };

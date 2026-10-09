@@ -13,10 +13,10 @@ import { TOO_MANY_REQUESTS } from "../sas.ts";
 import { DEFAULT_RELAY, forgetIdentity, home, forgetMember, identitiesIn, loadConfig, loadIdentity, readCursor, updateConfig, wipeChannel, writeCursor, type ChannelConfig } from "../config.ts";
 import { b64url, decodeJoinCode, newRoomId, type ChannelAccess } from "../crypto.ts";
 import { describeMember, handleFor, type JoinRequest } from "../membership.ts";
-import { ago, describeEvent, formatClaims, formatMessage, formatStatus, formatTask, formatTasks, parseDuration, statusJson } from "../format.ts";
+import { ago, describeEvent, formatAdded, formatAfter, formatClaims, formatMessage, formatStatus, formatTask, formatTasks, looksLikeLine, parseDuration, statusJson } from "../format.ts";
 import { fingerprint } from "../identity.ts";
 import { CHAT_KINDS, TASK_STATES, type Kind, type Message, type TaskState } from "../protocol.ts";
-import { parseTaskId, taskId, type ChannelState } from "../state.ts";
+import { parseTaskId, similarOpenTasks, taskId, type ChannelState } from "../state.ts";
 import { VERSION } from "../version.ts";
 import { channelFiles, runSh, sessionViews } from "../sh.ts";
 import { forgetMachine, linkUrl, loadMachine, machineCode, machineStatus, newMachine, registerMachine, saveMachine, unlinkMachine, vouchFor } from "../machine.ts";
@@ -65,7 +65,8 @@ Talk
 
 Coordinate
   kiwi task add "title" [--owner NAME] [--after T3,T4] [--detail "…"]
-  kiwi task claim|start|block|review|done|drop T7 ["note"]
+  kiwi task claim|start|block|review|done|cancel|drop T7 ["note"]
+   kiwi task after T69 T68 [T70…]
    kiwi task assign T7 NAME          kiwi task note T7 "…"          kiwi task show T7
    kiwi tasks [--mine] [--all] [--global]   (--global: every channel you joined)
   kiwi claim PATH… [--ttl 30m] [--note "…"]      reserve paths before editing; fails if someone holds them
@@ -831,19 +832,34 @@ const commands: Record<string, () => Promise<void>> = {
 
   async task() {
     const s = await session();
-    const sub = args[1] ?? die("usage: kiwi task add|claim|start|block|review|done|drop|assign|note|show …");
-    const STATE_FOR: Record<string, TaskState> = { start: "doing", block: "blocked", review: "review", done: "done" };
+    const sub = args[1] ?? die("usage: kiwi task add|claim|start|block|review|done|cancel|drop|after|assign|note|show …");
+    const STATE_FOR: Record<string, TaskState> = { start: "doing", block: "blocked", review: "review", done: "done", cancel: "cancelled" };
     if (sub === "add") {
       const title = await text(2);
       if (!title.trim()) die('usage: kiwi task add "title" [--owner NAME] [--after T3]');
       const after = list(opt.after)?.map((x) => parseTaskId(x) ?? die(`"${x}" isn't a task id`));
-      return out(`added ${taskId(await s.taskAdd(title, { owner: opt.owner, after, detail: opt.detail }))}`);
+      const { state: before } = await s.state();
+      const id = await s.taskAdd(title, { owner: opt.owner, after, detail: opt.detail });
+      const like = similarOpenTasks(before, title).map((t) => t.id);
+      const lines = [formatAdded(before, id, after ?? [])];
+      if (like.length) lines.push(looksLikeLine(like));
+      return out(lines.join("\n"));
     }
     if (sub === "list") return commands.tasks!();
     const id = taskArg();
     if (sub === "show") {
       const { state } = await s.state();
       return out(formatTask(state, state.tasks.get(id) ?? die(`no task ${taskId(id)}`)));
+    }
+    if (sub === "after") {
+      const deps = args
+        .slice(3)
+        .flatMap((a) => a.split(","))
+        .filter(Boolean)
+        .map((x) => parseTaskId(x) ?? die(`"${x}" isn't a task id`));
+      if (!deps.length) die("usage: kiwi task after T69 T68");
+      const state = await s.taskAfter(id, deps);
+      return out(formatAfter(state, id, deps));
     }
     const note = (sub === "assign" ? undefined : args.slice(3).join(" ")) || opt.note || undefined;
     let state: ChannelState;
