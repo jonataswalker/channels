@@ -1,14 +1,17 @@
 import { Add01Icon, Copy01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons"
 import { createContext, useContext, useState, type ReactNode } from "react"
 
+import { decodeJoinCode } from "@mc/crypto.ts"
 import { loadLine, memberLoad, showsLoad, type Load } from "@mc/load.ts"
 import { NAME_RE, type JoinRequest, type Member as RosterMember } from "@mc/membership.ts"
-import type { Event } from "@mc/protocol.ts"
+import type { ChannelIcon, Event } from "@mc/protocol.ts"
 import { TOO_MANY_REQUESTS } from "@mc/sas.ts"
 import { taskId, type ChannelState, type Member } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
 import { formatAgo, memberLine, memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
+import { IconDialog } from "./channel-icon"
+import { cachedIcon } from "@/lib/icons"
 import { Icon } from "./icon"
 import { Alert, Button, IconButton, Modal, Monogram, Tabs, TextField, errorText, toast } from "./kit"
 import { Menu, MenuItem, MenuSeparator } from "./ui/menu"
@@ -53,6 +56,8 @@ export interface ControlsProps {
   onRole: (ev: Extract<Event, { op: "role.set" | "role.refuse" }>) => Promise<void>
   onCloseChannel: () => Promise<void>
   onLeaveChannel: () => Promise<void>
+  /** Owner: set or clear the channel icon. Absent for a visitor who can't. */
+  onSetIcon?: (icon: ChannelIcon | null) => Promise<void>
 }
 
 interface Api {
@@ -598,7 +603,9 @@ function Requests({ onDone }: { onDone: () => void }) {
 export function ChannelMenu() {
   const { p, ask, openInvite, openRequests } = useControls()
   const auth = useAuth()
+  const [iconOpen, setIconOpen] = useState(false)
   return (
+    <>
     <Menu
       align="end"
       className="w-56"
@@ -616,6 +623,7 @@ export function ChannelMenu() {
           {auth.status === "signed-out" ? "Sign in to review join requests" : `Join requests (${p.requests.length})`}
         </MenuItem>
       )}
+      {p.isOwner && p.onSetIcon && <MenuItem onClick={() => setIconOpen(true)}>Channel icon…</MenuItem>}
       {p.isOwner && <MenuSeparator />}
       {p.isOwner ? (
         <MenuItem tone="danger" onClick={() => ask({ kind: "close" })}>
@@ -627,5 +635,15 @@ export function ChannelMenu() {
         </MenuItem>
       )}
     </Menu>
+    {p.onSetIcon && <IconDialog open={iconOpen} onClose={() => setIconOpen(false)} icon={cachedIcon(roomOf(p.code))} onSave={p.onSetIcon} />}
+    </>
   )
+}
+
+function roomOf(code: string): string {
+  try {
+    return decodeJoinCode(code).roomId
+  } catch {
+    return ""
+  }
 }
