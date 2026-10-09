@@ -140,19 +140,22 @@ export function Sidebar({
               type="button"
               onClick={() => onSelect(c.code)}
               aria-current={selected ? "page" : undefined}
-              className={cx("mb-0.5 flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-colors", selected ? "bg-pick shadow-[0_0_0_1px_var(--pick-edge)]" : "hover:bg-wash")}
+              className={cx(
+                "mb-0.5 flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-colors",
+                selected ? "bg-pick shadow-[0_0_0_1px_var(--pick-edge)]" : "hover:bg-wash"
+              )}
             >
               <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={28} />
               <span className="min-w-0 flex-1">
-              <span className="flex items-baseline gap-2">
-                <span className={cx("min-w-0 flex-1 truncate text-[14px] font-medium tracking-[-0.01em]", !reachable && "text-ink-2")}>{c.title}</span>
-                {reachable ? (
-                  <span className="shrink-0 text-[11.5px] text-ink-3 tabular-nums">{formatShort(c.ts)}</span>
-                ) : c.state !== "pending" ? (
-                  <Icon icon={LockIcon} size={12} className="shrink-0 self-center text-ink-3" />
-                ) : null}
-              </span>
-              <span className={cx("mt-0.5 block truncate text-[12.5px]", selected ? "text-ink-2" : "text-ink-3")}>{rowNote(c)}</span>
+                <span className="flex items-baseline gap-2">
+                  <span className={cx("min-w-0 flex-1 truncate text-[14px] font-medium tracking-[-0.01em]", !reachable && "text-ink-2")}>{c.title}</span>
+                  {reachable ? (
+                    <span className="shrink-0 text-[11.5px] text-ink-3 tabular-nums">{formatShort(c.ts)}</span>
+                  ) : c.state !== "pending" ? (
+                    <Icon icon={LockIcon} size={12} className="shrink-0 self-center text-ink-3" />
+                  ) : null}
+                </span>
+                <span className={cx("mt-0.5 block truncate text-[12.5px]", selected ? "text-ink-2" : "text-ink-3")}>{rowNote(c)}</span>
               </span>
             </button>
           )

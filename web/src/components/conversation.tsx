@@ -269,6 +269,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         await ch.remove(m.pk)
         await refreshRoster()
       }}
+      roomId={member.access.roomId}
       onSetIcon={
         isOwner
           ? async (next) => {
