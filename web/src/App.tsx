@@ -76,7 +76,19 @@ export default function App() {
         />
       ) : (
         <div className="flex h-svh overflow-hidden">
-          <Sidebar rows={rows} active={code} onSelect={open} onNew={() => setSheet("new")} onJoin={() => setSheet("join")} onComputers={() => setSheet("computers")} onAddDevice={() => setSheet("device")} onPasskeys={() => setSheet("passkeys")} usage={usage} onUsage={() => setSheet("usage")} className={code ? "hidden md:flex" : "flex"} />
+          <Sidebar
+            rows={rows}
+            active={code}
+            onSelect={open}
+            onNew={() => setSheet("new")}
+            onJoin={() => setSheet("join")}
+            onComputers={() => setSheet("computers")}
+            onAddDevice={() => setSheet("device")}
+            onPasskeys={() => setSheet("passkeys")}
+            usage={usage}
+            onUsage={() => setSheet("usage")}
+            className={code ? "hidden md:flex" : "flex"}
+          />
           <main className={cx("min-w-0 flex-1", code ? "flex" : "hidden md:flex")}>
             {code ? (
               <Boundary resetKey={code}>

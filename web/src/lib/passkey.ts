@@ -48,11 +48,11 @@ export async function createPasskey(user: { id: string; name: string; displayNam
   const credentialId = b64url(new Uint8Array(cred.rawId))
   if (prf?.results?.first) return { credentialId, secret: new Uint8Array(prf.results.first) }
   if (prf?.enabled === false) throw new PrfUnsupported()
-  return usePasskey(salt, [credentialId])
+  return touchPasskey(salt, [credentialId])
 }
 
 /** Touch a passkey and get its PRF secret. With several credentials, one prompt covers them all. */
-export async function usePasskey(salt: Uint8Array<ArrayBuffer>, credentialIds: string[]): Promise<PrfSecret> {
+export async function touchPasskey(salt: Uint8Array<ArrayBuffer>, credentialIds: string[]): Promise<PrfSecret> {
   const cred = (await navigator.credentials.get({
     publicKey: {
       rpId: location.hostname,

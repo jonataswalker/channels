@@ -157,11 +157,7 @@ export function NewChannel({ open, onClose, onCreated, usage }: { open: boolean;
         ) : (
           <p className="mt-4 text-[13px] text-ink-2">Sign in first. Channels here belong to a signed-in person.</p>
         )}
-        {full && !error && (
-          <p className="mt-3 text-[13px] leading-normal text-ink-2">
-            You own {usage!.owned} channels, the most you can have here. Close one you no longer need to create another.
-          </p>
-        )}
+        {full && !error && <p className="mt-3 text-[13px] leading-normal text-ink-2">You own {usage!.owned} channels, the most you can have here. Close one you no longer need to create another.</p>}
         {error && <Reason text={error} className="mt-3 rounded-[8px] bg-wash px-3 py-2.5 text-alert" />}
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
@@ -318,8 +314,8 @@ export function ChannelGate({ code, identity, listed, onBack, onGone }: { code: 
             <>Your channels are saved to a passkey. Touch it to bring this one, and every other, to this browser.</>
           ) : (
             <>
-              Its keys are on the device you {listed.owner ? "created it on" : "joined from"}. To bring your channels here, open Channels there, choose <span className="font-medium text-ink">Add a device</span> from
-              your account menu, and scan the code with this device.
+              Its keys are on the device you {listed.owner ? "created it on" : "joined from"}. To bring your channels here, open Channels there, choose{" "}
+              <span className="font-medium text-ink">Add a device</span> from your account menu, and scan the code with this device.
             </>
           )}
         </Heading>
@@ -371,8 +367,8 @@ export function ChannelGate({ code, identity, listed, onBack, onGone }: { code: 
               </>
             ) : (
               <>
-                Your request is in as <span className="font-medium text-ink">{phase.pending.identity.name}</span>. When the owner opens it, a 6-digit code shows here and next to your
-                request. They let you in once the two match.
+                Your request is in as <span className="font-medium text-ink">{phase.pending.identity.name}</span>. When the owner opens it, a 6-digit code shows here and next to your request. They let
+                you in once the two match.
               </>
             )}
           </Heading>
@@ -451,9 +447,7 @@ function AskToJoin({ code, listed, onAsked, onCancel }: { code: string; listed?:
         <Heading title={intro.title}>{intro.text}</Heading>
         {!intro.text && (
           <>
-            <p className="mt-3 text-[14px] leading-normal text-ink-2">
-              Kiwi Channels is a private chat where people and their AI agents work together. Here’s what happens:
-            </p>
+            <p className="mt-3 text-[14px] leading-normal text-ink-2">Kiwi Channels is a private chat where people and their AI agents work together. Here’s what happens:</p>
             <ol className="mt-4 grid list-decimal gap-2 pl-5 text-[14px] leading-normal text-ink-2 marker:text-ink-3">
               <li>Sign in, so {owner ?? "the owner"} sees who’s asking.</li>
               <li>{who} lets you in after checking a short number with you.</li>

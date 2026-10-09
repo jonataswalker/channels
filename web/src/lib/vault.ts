@@ -23,7 +23,7 @@ import {
 import { useSyncExternalStore } from "react"
 
 import { CHANGED, allMembers, loadMember, saveMember, type StoredMember } from "./channel"
-import { createPasskey, usePasskey } from "./passkey"
+import { createPasskey, touchPasskey } from "./passkey"
 import { forgetVaultKey, keepVaultKey, loadVaultKey } from "./vault-store"
 
 // Your channels, kept for you at the relay where only your passkeys can open
@@ -34,13 +34,7 @@ import { forgetVaultKey, keepVaultKey, loadVaultKey } from "./vault-store"
 
 export type Wrap = ReturnType<typeof wrapsOf>[number]
 
-export type VaultState =
-  | { kind: "off" }
-  | { kind: "loading" }
-  | { kind: "none" }
-  | { kind: "locked"; wraps: Wrap[] }
-  | { kind: "open"; wraps: Wrap[] }
-  | { kind: "error"; message: string }
+export type VaultState = { kind: "off" } | { kind: "loading" } | { kind: "none" } | { kind: "locked"; wraps: Wrap[] } | { kind: "open"; wraps: Wrap[] } | { kind: "error"; message: string }
 
 interface Session {
   user: string
@@ -95,7 +89,19 @@ function wellFormed(m: StoredMember): boolean {
 /** A name for this browser's passkey, so the list says which one is which. */
 function deviceLabel(): string {
   const ua = navigator.userAgent
-  const os = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "this device"
+  const os = /iPhone/.test(ua)
+    ? "iPhone"
+    : /iPad/.test(ua)
+      ? "iPad"
+      : /Android/.test(ua)
+        ? "Android"
+        : /Mac/.test(ua)
+          ? "Mac"
+          : /Windows/.test(ua)
+            ? "Windows"
+            : /Linux/.test(ua)
+              ? "Linux"
+              : "this device"
   const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "a browser"
   return `${browser} on ${os}`
 }
@@ -108,7 +114,9 @@ function take(c: VaultContents<StoredMember>): number {
     try {
       saveMember({ ...m, at: m.at || Date.now() })
       added++
-    } catch {}
+    } catch {
+      // Held here under another key: this browser's own key always wins.
+    }
   }
   synced = new Set(c.channels.map(seat))
   return added
@@ -191,7 +199,7 @@ async function unlockWith(secret: Uint8Array, credentialId?: string): Promise<nu
 /** Touch any of the vault's passkeys. Returns how many channels came in. */
 export async function unlockWithPasskey(): Promise<number> {
   const ids = state.kind === "locked" || state.kind === "open" ? state.wraps.flatMap((w) => (w.credentialId ? [w.credentialId] : [])) : []
-  const pk = await usePasskey(PRF_SALT, ids)
+  const pk = await touchPasskey(PRF_SALT, ids)
   return unlockWith(pk.secret, pk.credentialId)
 }
 
@@ -239,7 +247,7 @@ window.addEventListener(CHANGED, () => {
 /** Adding or removing a passkey needs the raw key, which only a fresh touch gives. */
 async function freshKey(): Promise<{ raw: string; keep: WrapInput }> {
   const ids = state.kind === "open" ? state.wraps.flatMap((w) => (w.credentialId ? [w.credentialId] : [])) : []
-  const pk = await usePasskey(PRF_SALT, ids)
+  const pk = await touchPasskey(PRF_SALT, ids)
   const got = await fetchVault(location.origin, await token())
   const raw = got && (await unlock(got.blob, session!.user, pk.secret, pk.credentialId))
   if (!raw) throw new VaultError("that passkey doesn’t open this vault")

@@ -138,9 +138,7 @@ export function VaultPrompt({
         {state === "none" ? "Your channels on every device" : "Unlock your channels"}
       </p>
       <p className="mt-1 text-[12.5px] leading-normal text-ink-2">
-        {state === "none"
-          ? "Save them to a passkey. On any browser you sign in to, a touch brings them all back."
-          : "They’re saved to a passkey. Touch it to bring every channel to this browser."}
+        {state === "none" ? "Save them to a passkey. On any browser you sign in to, a touch brings them all back." : "They’re saved to a passkey. Touch it to bring every channel to this browser."}
       </p>
       <div className="mt-2.5 flex items-center gap-1">
         <Button size="sm" onClick={state === "none" ? onSetUp : onUnlock} disabled={busy}>
@@ -168,7 +166,9 @@ export function RecoveryCodeModal({ code, onDone }: { code: string | null; onDon
     <Modal open={code !== null} onClose={() => saved && onDone()}>
       <div className="p-5">
         <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Save your recovery code</h2>
-        <p className="mt-1 text-[13px] leading-normal text-ink-2">If you lose every passkey, this code is the only other way into your vault. It won’t be shown again. Keep it in a password manager or on paper.</p>
+        <p className="mt-1 text-[13px] leading-normal text-ink-2">
+          If you lose every passkey, this code is the only other way into your vault. It won’t be shown again. Keep it in a password manager or on paper.
+        </p>
         <div className="mt-4 flex items-center gap-2 rounded-[10px] bg-wash px-3 py-2.5">
           <code className="min-w-0 flex-1 font-mono text-[13.5px] leading-relaxed tracking-wide break-all select-all">{code}</code>
           <IconButton label="Copy" onClick={() => code && navigator.clipboard.writeText(code).then(() => toast("Copied"))}>
