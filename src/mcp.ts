@@ -14,10 +14,11 @@ import { loadImages } from "./attach.ts";
 import { loadSummary, memberLoad, showsLoad } from "./load.ts";
 import { forgetMember, home, identitiesIn, loadConfig, signingBudget, wipeChannel } from "./config.ts";
 import { ChannelGone } from "./client.ts";
-import { formatAdded, formatAfter, formatClaims, formatMessage, formatStatus, formatTask, formatTasks, looksLikeLine, parseDuration } from "./format.ts";
+import { formatAdded, formatAfter, formatClaims, formatFact, formatMessage, formatStatus, formatTask, formatTasks, looksLikeLine, parseDuration } from "./format.ts";
 import { CHAT_KINDS, type Kind, type Message } from "./protocol.ts";
 import { TOO_MANY_REQUESTS } from "./sas.ts";
 import { parseTaskId, similarOpenTasks, taskId } from "./state.ts";
+import { claimPlace } from "./where.ts";
 import { VERSION } from "./version.ts";
 import { channelFiles, runSh, sessionViews } from "./sh.ts";
 
@@ -373,11 +374,11 @@ export async function runMcp(s: AgentSession, opts: { push?: boolean } = {}): Pr
   server.registerTool(
     "claim",
     {
-      description: "Reserve paths (files, dirs, or any named resource) before editing them. Fails if another agent holds an overlapping claim.",
+      description: "Reserve paths before editing them. A path#Symbol claim shares the file; a whole-file claim still locks it. Records this machine and git checkout. Fails if another agent holds an overlapping claim, and names their checkout.",
       inputSchema: { paths: z.array(z.string()).min(1), ttl: z.string().optional().describe("like 30m or 2h (default 30m)"), note: z.string().optional() },
     },
     guard(async ({ paths, ttl, note }) => {
-      const state = await s.claim(paths, parseDuration(ttl ?? "30m"), note);
+      const state = await s.claim(paths, parseDuration(ttl ?? "30m"), note, claimPlace());
       return formatClaims({ ...state, claims: state.claims.filter((c) => c.owner === s.me) });
     }),
   );
@@ -393,12 +394,12 @@ export async function runMcp(s: AgentSession, opts: { push?: boolean } = {}): Pr
 
   server.registerTool(
     "facts",
-    { description: "Shared key/value facts: read all, or set/unset one.", inputSchema: { set: z.string().optional(), value: z.string().optional(), unset: z.string().optional() } },
-    guard(async ({ set, value, unset }) => {
-      if (set) await s.setFact(set, value ?? "");
+    { description: "Shared key/value facts: read all, or set/unset one. Anyone may set or unset a key. ttl (like 7d) makes a fact expire on its own.", inputSchema: { set: z.string().optional(), value: z.string().optional(), unset: z.string().optional(), ttl: z.string().optional() } },
+    guard(async ({ set, value, unset, ttl }) => {
+      if (set) await s.setFact(set, value ?? "", ttl ? parseDuration(ttl) : undefined);
       if (unset) await s.delFact(unset);
       const { facts } = (await s.state()).state;
-      return [...facts.values()].map((f) => `${f.key} = ${f.value}  (${f.by})`).join("\n") || "no facts";
+      return [...facts.values()].map((f) => formatFact(f)).join("\n") || "no facts";
     }),
   );
 

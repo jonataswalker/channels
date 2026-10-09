@@ -69,6 +69,10 @@ export interface Claim {
   since: number;
   expires: number;
   note?: string;
+  /** This computer's label, when the claim recorded one. */
+  machine?: string;
+  /** Git checkout the claim was made from, so another agent can see which tree it guards. */
+  checkout?: string;
 }
 
 export interface Fact {
@@ -77,6 +81,8 @@ export interface Fact {
   by: string;
   ts: number;
   seq: number;
+  /** When a --ttl fact stops being visible. Absent facts stay until unset. */
+  expires?: number;
 }
 
 export interface ChannelState {
@@ -103,12 +109,34 @@ export function parseTaskId(s: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** Two claim paths overlap if one contains the other ("*" covers everything). */
+/** `file#Symbol` is a claim on one function. Anything else, including a trailing slash, is the whole path. */
+export function splitClaim(path: string): { file: string; symbol?: string } {
+  const hash = path.lastIndexOf("#");
+  if (hash > 0) {
+    const symbol = path.slice(hash + 1);
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(symbol)) return { file: path.slice(0, hash).replace(/\/+$/, ""), symbol };
+  }
+  return { file: path.replace(/\/+$/, "") };
+}
+
+/**
+ * Two claims overlap when one path contains the other ("*" covers everything).
+ * `file#A` and `file#B` do not: a symbol claim shares the file. A whole-file claim still locks every symbol in it.
+ */
 export function overlaps(a: string, b: string): boolean {
-  const norm = (p: string) => p.replace(/\/+$/, "");
-  const x = norm(a);
-  const y = norm(b);
-  return x === "*" || y === "*" || x === y || x.startsWith(y + "/") || y.startsWith(x + "/");
+  const ca = splitClaim(a);
+  const cb = splitClaim(b);
+  const x = ca.file;
+  const y = cb.file;
+  if (x === "*" || y === "*") return true;
+  if (x !== y) return x.startsWith(y + "/") || y.startsWith(x + "/");
+  if (!ca.symbol || !cb.symbol) return true;
+  return ca.symbol === cb.symbol;
+}
+
+/** Why a new claim lost: name the other checkout when the claim recorded one. */
+export function claimConflict(c: Claim): string {
+  return c.checkout ? `${c.path} is claimed by ${c.owner} in ${c.owner}'s checkout (${c.checkout})` : `${c.path} is claimed by ${c.owner}`;
 }
 
 /**
@@ -277,12 +305,13 @@ export function fold(messages: Message[], roster: Roster, now = Date.now()): Cha
             .map((p) => live.find((c) => c.owner !== m.from && overlaps(c.path, p)))
             .find(Boolean);
           if (conflict) {
-            reject(`${conflict.path} is claimed by ${conflict.owner}`);
+            reject(claimConflict(conflict));
             break;
           }
           claims = live.filter((c) => !(c.owner === m.from && ev.paths.includes(c.path)));
+          const place = { ...(ev.machine ? { machine: ev.machine } : {}), ...(ev.checkout ? { checkout: ev.checkout } : {}) };
           for (const path of ev.paths) {
-            claims.push({ owner: m.from, path, seq: m.seq, since: at, expires: at + ttl, note: ev.note });
+            claims.push({ owner: m.from, path, seq: m.seq, since: at, expires: at + ttl, note: ev.note, ...place });
           }
           break;
         }
@@ -291,9 +320,11 @@ export function fold(messages: Message[], roster: Roster, now = Date.now()): Cha
           claims = claims.filter((c) => c.owner !== m.from || (ev.paths?.length ? !ev.paths.includes(c.path) : false));
           break;
 
-        case "fact.set":
-          facts.set(ev.key, { key: ev.key, value: ev.value, by: m.from, ts: at, seq: m.seq });
+        case "fact.set": {
+          const ttl = ev.ttl === undefined ? undefined : Math.min(Math.max(Number(ev.ttl) || 0, 60), 30 * 24 * 3600) * 1000;
+          facts.set(ev.key, { key: ev.key, value: ev.value, by: m.from, ts: at, seq: m.seq, ...(ttl ? { expires: at + ttl } : {}) });
           break;
+        }
 
         case "fact.del":
           facts.delete(ev.key);
@@ -311,6 +342,8 @@ export function fold(messages: Message[], roster: Roster, now = Date.now()): Cha
     const by = answered.get(m.seq);
     return !by || [...by].every((n) => n === m.from);
   });
+
+  for (const [key, fact] of facts) if (fact.expires !== undefined && fact.expires <= now) facts.delete(key);
 
   return {
     members,

@@ -4,7 +4,7 @@ import { loadJson, loadSummary, memberLoad, showsLoad } from "./load.ts";
 import { inlineText } from "./membership.ts";
 import { imageMarker } from "./protocol.ts";
 import type { Message, TaskState, Trust } from "./protocol.ts";
-import { taskId, waitingOn, type ChannelState, type Claim, type Task } from "./state.ts";
+import { taskId, waitingOn, type ChannelState, type Claim, type Fact, type Task } from "./state.ts";
 
 export function ago(ts: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - ts) / 1000));
@@ -24,8 +24,8 @@ export function left(expires: number, now = Date.now()): string {
 export function parseDuration(s: string): number {
   if (/^\d+$/.test(s)) return Number(s);
   let total = 0;
-  for (const [, n, u] of s.matchAll(/(\d+)\s*([hms])/g)) total += Number(n) * (u === "h" ? 3600 : u === "m" ? 60 : 1);
-  if (!total) throw new Error(`bad duration "${s}" (try 30m, 2h, 90s)`);
+  for (const [, n, u] of s.matchAll(/(\d+)\s*([dhms])/g)) total += Number(n) * (u === "d" ? 86400 : u === "h" ? 3600 : u === "m" ? 60 : 1);
+  if (!total) throw new Error(`bad duration "${s}" (try 30m, 2h, 7d, 90s)`);
   return total;
 }
 
@@ -146,7 +146,14 @@ function taskLine(state: ChannelState, t: Task): string {
 }
 
 function claimLine(c: Claim, now: number): string {
-  return `  ${c.path}  @${c.owner}, ${left(c.expires, now)}${c.note ? ` — ${c.note}` : ""}`;
+  const where = c.checkout ? ` in ${c.owner}'s checkout (${c.checkout}${c.machine ? `, on ${c.machine}` : ""})` : "";
+  return `  ${c.path}  @${c.owner}, ${left(c.expires, now)}${where}${c.note ? ` — ${c.note}` : ""}`;
+}
+
+/** `build.cmd = cargo test  (win, 2h ago, 5h left)`. */
+export function formatFact(f: Fact, now = Date.now()): string {
+  const remain = f.expires ? `, ${left(f.expires, now)}` : "";
+  return `${f.key} = ${f.value}  (${f.by}, ${ago(f.ts, now)}${remain})`;
 }
 
 export interface Snapshot {

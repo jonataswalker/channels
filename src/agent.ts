@@ -9,7 +9,7 @@ import type { ChannelAccess } from "./crypto.ts";
 import type { JoinRequest } from "./membership.ts";
 import type { Identity } from "./identity.ts";
 import { TASK_STATES, type Event, type ImageAttachment, type Kind, type Message, type Presence, type TaskState } from "./protocol.ts";
-import { fold, overlaps, taskId, waitingOn, wouldCycle, type ChannelState, type Roster } from "./state.ts";
+import { claimConflict, fold, overlaps, taskId, waitingOn, wouldCycle, type ChannelState, type Roster } from "./state.ts";
 
 /** How often a listening agent re-announces itself. Receivers treat 2.5x this as offline. */
 export const PRESENCE_EVERY_MS = 60_000;
@@ -414,13 +414,16 @@ export class AgentSession {
     }
   }
 
-  async claim(paths: string[], ttlSec: number, note?: string): Promise<ChannelState> {
+  async claim(paths: string[], ttlSec: number, note?: string, place?: { machine?: string; checkout?: string }): Promise<ChannelState> {
     const { state } = await this.state();
     for (const p of paths) {
       const c = state.claims.find((x) => x.owner !== this.me && overlaps(x.path, p));
-      if (c) throw new Rejected(`${c.path} is claimed by ${c.owner}`);
+      if (c) throw new Rejected(claimConflict(c));
     }
-    const seq = await this.event({ op: "claim", paths, ttl: ttlSec, ...(note ? { note } : {}) }, `claimed ${paths.join(", ")}`);
+    const seq = await this.event(
+      { op: "claim", paths, ttl: ttlSec, ...(note ? { note } : {}), ...(place?.machine ? { machine: place.machine } : {}), ...(place?.checkout ? { checkout: place.checkout } : {}) },
+      `claimed ${paths.join(", ")}`,
+    );
     return this.confirm(seq);
   }
 
@@ -428,8 +431,8 @@ export class AgentSession {
     return this.event({ op: "release", ...(paths?.length ? { paths } : {}) }, paths?.length ? `released ${paths.join(", ")}` : "released all claims");
   }
 
-  async setFact(key: string, value: string): Promise<number> {
-    return this.event({ op: "fact.set", key, value }, `${key} = ${value}`);
+  async setFact(key: string, value: string, ttlSec?: number): Promise<number> {
+    return this.event({ op: "fact.set", key, value, ...(ttlSec ? { ttl: ttlSec } : {}) }, `${key} = ${value}`);
   }
 
   async delFact(key: string): Promise<number> {
