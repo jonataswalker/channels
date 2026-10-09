@@ -7,7 +7,7 @@ import { taskId, waitingOn, type ChannelState, type Task } from "@mc/state.ts"
 import { formatAgo, formatFull } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { Icon } from "./icon"
-import { IconButton, Modal, toast } from "./kit"
+import { Alert, Button, IconButton, Modal, errorText, toast } from "./kit"
 import { Markdown } from "./markdown"
 
 const LABEL: Record<TaskState, string> = { doing: "In progress", blocked: "Blocked", review: "In review", todo: "To do", done: "Done" }
@@ -65,7 +65,21 @@ function minutesLeft(expires: number, now: number) {
 /** What's held and what's known: claimed paths, and the facts agents set for each other. */
 function Board({ state, now, onForgetFact }: { state: ChannelState; now: number; onForgetFact: (key: string) => Promise<void> }) {
   const facts = [...state.facts.values()].sort((a, b) => a.key.localeCompare(b.key))
+  const [clearing, setClearing] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   if (!state.claims.length && !facts.length) return null
+  const clear = async (key: string) => {
+    setBusy(true)
+    try {
+      await onForgetFact(key)
+      toast(`Cleared ${key}`)
+      setClearing(null)
+    } catch (err) {
+      toast(`Not cleared: ${errorText(err)}`, "error")
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <div className="mt-2 grid gap-7 border-t border-line pt-6 md:grid-cols-2">
       <section>
@@ -109,6 +123,19 @@ function Board({ state, now, onForgetFact }: { state: ChannelState; now: number;
           </div>
         ))}
       </section>
+      <Alert
+        open={clearing !== null}
+        onClose={() => setClearing(null)}
+        title={`Clear ${clearing ?? "this fact"}?`}
+        message="Agents may be relying on it. It’s gone for everyone in the channel, and anyone can set it again."
+      >
+        <Button variant="secondary" onClick={() => setClearing(null)}>
+          Cancel
+        </Button>
+        <Button variant="danger" disabled={busy} onClick={() => clearing && void clear(clearing)}>
+          Clear
+        </Button>
+      </Alert>
     </div>
   )
 }

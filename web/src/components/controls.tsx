@@ -10,7 +10,7 @@ import { useAuth } from "@/lib/auth"
 import { formatAgo, memberLine, memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { Icon } from "./icon"
-import { Alert, Button, IconButton, Modal, Monogram, TextField, errorText, toast } from "./kit"
+import { Alert, Button, IconButton, Modal, Monogram, Tabs, TextField, errorText, toast } from "./kit"
 import { Menu, MenuItem, MenuSeparator } from "./ui/menu"
 import { Popover } from "./ui/popover"
 
@@ -448,19 +448,16 @@ function Invite({ onDone }: { onDone: () => void }) {
     <div className="p-5">
       <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Invite to this channel</h2>
       <p className="mt-1 text-[13px] leading-normal text-ink-2">Everyone who joins waits for you to approve them with a 6-digit code.</p>
-      <div className="mt-4 flex gap-0.5 rounded-[9px] bg-wash p-0.5" role="tablist">
-        {(["agent", "person"] as const).map((w) => (
-          <button
-            key={w}
-            type="button"
-            role="tab"
-            aria-selected={who === w}
-            onClick={() => setWho(w)}
-            className={cx("h-7 flex-1 rounded-[7px] text-[13px] font-medium transition-colors", who === w ? "bg-wash-2 text-ink" : "text-ink-2 hover:text-ink")}
-          >
-            {w === "agent" ? "An agent" : "A person"}
-          </button>
-        ))}
+      <div className="mt-4">
+        <Tabs
+          stretch
+          value={who}
+          onChange={setWho}
+          options={[
+            { value: "agent", label: "An agent" },
+            { value: "person", label: "A person" },
+          ]}
+        />
       </div>
       {who === "person" ? (
         <div className="mt-4 grid gap-2">
@@ -538,7 +535,9 @@ function Requests({ onDone }: { onDone: () => void }) {
     <div className="p-5">
       <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{requests.length === 1 ? "Wants to join" : `${requests.length} want to join`}</h2>
       <p className="mt-1 text-[13px] leading-normal text-ink-2">Show the code, compare it with theirs, then approve.</p>
-      {requests.some((r) => r.check === "unchecked") && requests.length > 3 && <p className="mt-3 rounded-[10px] bg-wash p-3 text-[12.5px] leading-normal text-ink-2">{TOO_MANY_REQUESTS}</p>}
+      {/* 'unchecked' on a plain join means this device's daily signing budget is spent: say so even for one. Reclaims are never checked on their own. */}
+      {requests.some((r) => r.check === "unchecked" && !r.reclaims) && <p className="mt-3 rounded-[10px] bg-wash p-3 text-[12.5px] leading-normal text-ink-2">{TOO_MANY_REQUESTS}</p>}
+      {requests.some((r) => r.check === "unchecked" && r.reclaims) && <p className="mt-3 text-[12.5px] leading-normal text-ink-3">A reclaim’s code is shown only when you ask for it.</p>}
       <div className="mt-4 grid gap-4">
         {requests.length === 0 && <p className="text-[13px] text-ink-3">Nobody’s waiting.</p>}
         {requests.map((r) => (
@@ -598,6 +597,7 @@ function Requests({ onDone }: { onDone: () => void }) {
 /** Things you do to the channel itself, the dangerous ones last and in red. */
 export function ChannelMenu() {
   const { p, ask, openInvite, openRequests } = useControls()
+  const auth = useAuth()
   return (
     <Menu
       align="end"
@@ -608,10 +608,15 @@ export function ChannelMenu() {
         </IconButton>
       }
     >
-      <MenuItem onClick={() => navigator.clipboard.writeText(inviteLink(p.code)).then(() => toast("Invite link copied"))}>Copy invite link</MenuItem>
-      {p.isOwner && <MenuItem onClick={openInvite}>Invite an agent…</MenuItem>}
-      {p.isOwner && p.requests.length > 0 && <MenuItem onClick={openRequests}>Join requests ({p.requests.length})</MenuItem>}
-      <MenuSeparator />
+      {/* Inviting is the owner's, as it was in the old panel: they approve everyone who asks. */}
+      {p.isOwner && <MenuItem onClick={() => navigator.clipboard.writeText(inviteLink(p.code)).then(() => toast("Invite link copied"))}>Copy invite link</MenuItem>}
+      {p.isOwner && <MenuItem onClick={openInvite}>Invite…</MenuItem>}
+      {p.isOwner && p.requests.length > 0 && (
+        <MenuItem onClick={auth.status === "signed-out" ? auth.signIn : openRequests}>
+          {auth.status === "signed-out" ? "Sign in to review join requests" : `Join requests (${p.requests.length})`}
+        </MenuItem>
+      )}
+      {p.isOwner && <MenuSeparator />}
       {p.isOwner ? (
         <MenuItem tone="danger" onClick={() => ask({ kind: "close" })}>
           Close channel…
