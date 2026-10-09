@@ -6,11 +6,13 @@ import type { ChannelRow } from "@/lib/channel"
 import { atChannelLimit, type MyUsage } from "@/lib/usage"
 import { formatShort } from "@/lib/format"
 import { setAppearance, useAppearance, type Appearance } from "@/lib/theme"
+import { useVault } from "@/lib/vault"
 import { cx } from "@/lib/utils"
 import { Icon } from "./icon"
 import { Button, IconButton, Monogram, Wordmark } from "./kit"
 import { Menu, MenuItem, MenuLabel, MenuNote, MenuRadioGroup, MenuRadioItem, MenuSeparator } from "./ui/menu"
 import { usageLine } from "./usage"
+import { VaultCard } from "./vault"
 
 /** The second line of a row: what was said last, or why this browser can't open it yet. */
 function rowNote(c: ChannelRow): string {
@@ -30,6 +32,7 @@ export function Sidebar({
   onJoin,
   onComputers,
   onAddDevice,
+  onPasskeys,
   usage,
   onUsage,
   className,
@@ -41,6 +44,7 @@ export function Sidebar({
   onJoin: () => void
   onComputers: () => void
   onAddDevice: () => void
+  onPasskeys: () => void
   usage: MyUsage | null
   onUsage: () => void
   className?: string
@@ -48,6 +52,7 @@ export function Sidebar({
   const auth = useAuth()
   const [query, setQuery] = useState("")
   const appearance = useAppearance()
+  const vault = useVault()
   const q = query.trim().toLowerCase()
   const shown = q ? rows.filter((c) => c.title.toLowerCase().includes(q) || c.recent?.text.toLowerCase().includes(q)) : rows
 
@@ -67,6 +72,7 @@ export function Sidebar({
           >
             <MenuNote>{auth.user?.email}</MenuNote>
             <MenuItem onClick={onComputers}>Your computers</MenuItem>
+            {vault.kind === "open" && <MenuItem onClick={onPasskeys}>Passkeys</MenuItem>}
             <MenuItem onClick={onAddDevice}>Add a device</MenuItem>
             {usage && <MenuItem onClick={onUsage}>Usage</MenuItem>}
             <MenuSeparator />
@@ -99,6 +105,8 @@ export function Sidebar({
           <MenuItem onClick={onJoin}>Join with a code</MenuItem>
         </Menu>
       </div>
+
+      {auth.status === "signed-in" && <VaultCard />}
 
       {rows.length > 6 && (
         <label className="mx-3 mt-1 mb-1 flex h-8 items-center gap-2 rounded-[8px] bg-wash px-2.5 text-ink-3">

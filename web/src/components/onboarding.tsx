@@ -4,7 +4,9 @@ import { useEffect, useState, type ReactNode } from "react"
 import type { Identity } from "@mc/identity.ts"
 import { handleFor, NAME_RE } from "@mc/membership.ts"
 import { useAuth } from "@/lib/auth"
+import { cancelled } from "@/lib/passkey"
 import { atChannelLimit, type MyUsage } from "@/lib/usage"
+import { unlockWithPasskey, useVault } from "@/lib/vault"
 import {
   askToJoin,
   checkJoin,
@@ -23,7 +25,7 @@ import {
 import { Conversation } from "./conversation"
 import { Reason } from "./usage"
 import { Icon } from "./icon"
-import { Button, Modal, Monogram, Spinner, TextField, Wordmark, errorText } from "./kit"
+import { Button, Modal, Monogram, Spinner, TextField, Wordmark, errorText, toast } from "./kit"
 
 /** Every screen that isn't a conversation: one calm, left-aligned column. */
 function Stage({ children, width = 380 }: { children: ReactNode; width?: number }) {
@@ -224,6 +226,8 @@ type Phase =
 export function ChannelGate({ code, identity, listed, onBack, onGone }: { code: string; identity: Identity | null; listed?: ChannelRow; onBack: () => void; onGone: () => void }) {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" })
   const [askHere, setAskHere] = useState(false)
+  const vault = useVault()
+  const [unlocking, setUnlocking] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -304,15 +308,42 @@ export function ChannelGate({ code, identity, listed, onBack, onGone }: { code: 
     )
   }
 
-  // This person holds the channel's keys on another device: bring them here from there.
+  // This person holds the channel's keys on another device: unlock the vault, or bring them here from there.
   if (phase.kind === "ask" && listed?.state === "elsewhere" && !askHere) {
+    const locked = vault.kind === "locked"
     return (
       <Stage>
         <Heading title="This channel is on another device of yours">
-          Its keys are on the device you {listed.owner ? "created it on" : "joined from"}. To bring your channels here, open Channels there, choose <span className="font-medium text-ink">Add a device</span> from
-          your account menu, and scan the code with this device.
+          {locked ? (
+            <>Your channels are saved to a passkey. Touch it to bring this one, and every other, to this browser.</>
+          ) : (
+            <>
+              Its keys are on the device you {listed.owner ? "created it on" : "joined from"}. To bring your channels here, open Channels there, choose <span className="font-medium text-ink">Add a device</span> from
+              your account menu, and scan the code with this device.
+            </>
+          )}
         </Heading>
         <div className="mt-6 flex flex-wrap gap-2">
+          {locked && (
+            <Button
+              disabled={unlocking}
+              onClick={async () => {
+                setUnlocking(true)
+                try {
+                  const n = await unlockWithPasskey()
+                  const here = loadMember(code)
+                  if (here) setPhase({ kind: "member", member: here })
+                  toast(n === 1 ? "1 channel added" : `${n} channels added`)
+                } catch (err) {
+                  if (!cancelled(err)) toast(errorText(err), "error")
+                } finally {
+                  setUnlocking(false)
+                }
+              }}
+            >
+              {unlocking ? <Spinner className="size-3.5 border-accent-ink/30 border-t-accent-ink" /> : "Use passkey"}
+            </Button>
+          )}
           <Button variant="secondary" onClick={onBack}>
             Back to channels
           </Button>
