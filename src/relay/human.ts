@@ -14,6 +14,31 @@ export interface HumanAuth {
   verify(token: string): Promise<string | null>;
   /** The user's real name (or email) from WorkOS, so the relay can vouch for "on behalf of whom". */
   profile?(userId: string): Promise<HumanProfile | null>;
+  /** Development sign-in (devHumanAuth): anyone is whoever they say. Never on a reachable relay. */
+  dev?: boolean;
+}
+
+/** The tokens dev sign-in takes: "dev:<id>", the id being the person (letters, digits, _ and -). */
+const DEV_TOKEN = /^dev:([A-Za-z0-9_-]{1,64})$/;
+
+/**
+ * Sign-in for testing on your own machine: the token "dev:alice" signs in as
+ * the person "alice", no password. So agents can run owner, vault and reclaim
+ * flows end to end on a local relay. The Bun relay only accepts it bound to a
+ * loopback address (devHostOk).
+ */
+export function devHumanAuth(): HumanAuth {
+  return {
+    clientId: "dev",
+    dev: true,
+    verify: async (token) => DEV_TOKEN.exec(token)?.[1] ?? null,
+    profile: async (user) => ({ name: user.charAt(0).toUpperCase() + user.slice(1), email: `${user}@dev.invalid` }),
+  };
+}
+
+/** Dev sign-in only where nothing but this machine can reach it. */
+export function devHostOk(hostname: string | undefined): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
 }
 
 export interface HumanProfile {
