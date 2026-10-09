@@ -115,8 +115,8 @@ function Board({ state, now, onForgetFact }: { state: ChannelState; now: number;
             </button>
             <IconButton
               label={`Clear ${f.key}`}
-              className="size-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-              onClick={() => void onForgetFact(f.key).then(() => toast(`Cleared ${f.key}`))}
+              className="size-7 focus-visible:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
+              onClick={() => setClearing(f.key)}
             >
               <Icon icon={Cancel01Icon} size={14} />
             </IconButton>
