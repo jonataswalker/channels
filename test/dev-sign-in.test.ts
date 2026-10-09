@@ -36,7 +36,10 @@ test("only on this machine", () => {
 test("the relay says it's dev, and dev tokens are the only ones it takes", async () => {
   expect(await relayConfig(relay)).toMatchObject({ workosClientId: "dev", dev: true });
   const auth = devHumanAuth();
-  expect(await auth.verify("dev:alice")).toBe("alice");
+  // Namespaced, so a dev relay on a copy of real data can never sign in as a real WorkOS user.
+  expect(await auth.verify("dev:alice")).toBe("dev_alice");
+  expect(await auth.verify("dev:user_01HREALID")).toBe("dev_user_01HREALID");
+  expect((await auth.profile!("dev_alice"))?.name).toBe("Alice (dev)");
   for (const bad of ["alice", "dev:", "dev:../x", "dev:a b", "Bearer dev:alice"]) expect(await auth.verify(bad)).toBeNull();
 });
 
@@ -53,17 +56,29 @@ test("a signed-in owner, a vouched agent and a vault, end to end", async () => {
   const agent = await generateIdentity("win");
   const ask = await Channel.requestJoin(relay, code, agent, { name: "win" }, null, await vouchFor({ ...m, linked: { name: null, at: Date.now() } }, decodeJoinCode(code).roomId, agent.pk));
   const [req] = await checked(ownerCh, relay, code, [{ id: agent, requestId: ask.requestId }]);
-  expect(req!.sponsoredBy?.user).toBe("alice");
+  expect(req!.sponsoredBy?.user).toBe("dev_alice");
   const admitted = await ownerCh.approve(req!);
-  expect(admitted.sponsor?.name).toBe("Alice");
+  expect(admitted.sponsor?.name).toBe("Alice (dev)");
 
   // Owner actions still need the session: without it, nothing.
   const noSession = new Channel(access, relay, owner);
   await expect(noSession.rotate()).rejects.toThrow();
 
   // Her vault, saved and read back as her.
-  const v = await newVault("alice", { channels: [], gone: {} }, { kind: "passkey", label: "test", secret: crypto.getRandomValues(new Uint8Array(32)), credentialId: "c" });
-  expect(await putVault(relay, "dev:alice", "alice", 0, v.blob, v.writer, v.writer.pk)).toEqual({ version: 1 });
+  const v = await newVault("dev_alice", { channels: [], gone: {} }, { kind: "passkey", label: "test", secret: crypto.getRandomValues(new Uint8Array(32)), credentialId: "c" });
+  expect(await putVault(relay, "dev:alice", "dev_alice", 0, v.blob, v.writer, v.writer.pk)).toEqual({ version: 1 });
   expect((await fetchVault(relay, "dev:alice"))?.version).toBe(1);
   expect(await fetchVault(relay, "dev:bob")).toBeNull();
+});
+
+test("a dev token is refused unless the request comes straight from this machine", async () => {
+  const get = (headers: Record<string, string>) => fetch(`${relay}/v1/me/vault`, { headers: { "x-human-token": "dev:alice", ...headers } });
+  expect((await get({})).status).not.toBe(403);
+  // Passed on by a reverse proxy on this machine, or asked for under a public name: no.
+  const proxied: Record<string, string>[] = [{ "x-forwarded-for": "203.0.113.9" }, { forwarded: "for=203.0.113.9" }, { "x-real-ip": "203.0.113.9" }, { via: "1.1 caddy" }, { host: "relay.example.com" }];
+  for (const h of proxied) {
+    const res = await get(h);
+    expect(res.status).toBe(403);
+    expect(await res.text()).toContain("only takes requests made on this machine");
+  }
 });

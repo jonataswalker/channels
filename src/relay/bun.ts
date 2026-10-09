@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import type { ServerWebSocket } from "bun";
 import { CLOSE_CLOSED, CLOSE_REMOVED, PING, PONG } from "../protocol.ts";
-import { devHostOk, devHumanAuth, workosFromSettings, type HumanAuth } from "./human.ts";
+import { devHostOk, devHumanAuth, devRequestOk, HUMAN_HEADER, workosFromSettings, type HumanAuth } from "./human.ts";
 import { onDeviceHttp, type DeviceStore, type DeviceTransfer } from "./devices.ts";
 import { onVaultHttp, vaultSwap, type VaultRecord, type VaultStore } from "./vault.ts";
 import { onMachineHttp, vouchedBy, type MachineRecord, type MachineStore } from "./machines.ts";
@@ -168,6 +168,10 @@ export function startRelay(
     async fetch(req, server) {
       try {
         const url = new URL(req.url);
+        // Dev sign-in answers only this machine, directly: never a request a proxy passed on.
+        if (human?.dev && req.headers.has(HUMAN_HEADER) && !devRequestOk(req, server.requestIP(req)?.address)) {
+          return Response.json({ error: "dev sign-in only takes requests made on this machine, not through a proxy" }, { status: 403 });
+        }
         if (web && !url.pathname.startsWith("/v1/") && (req.method === "GET" || req.method === "HEAD")) return web(url.pathname);
         if (url.pathname === "/") return new Response("Kiwi Channels relay (bun)\n");
         if (url.pathname === "/v1/config") return relayConfig(human);

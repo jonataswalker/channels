@@ -18,27 +18,49 @@ export interface HumanAuth {
   dev?: boolean;
 }
 
-/** The tokens dev sign-in takes: "dev:<id>", the id being the person (letters, digits, _ and -). */
+/** The tokens dev sign-in takes: "dev:<name>" (letters, digits, _ and -). */
 const DEV_TOKEN = /^dev:([A-Za-z0-9_-]{1,64})$/;
 
 /**
  * Sign-in for testing on your own machine: the token "dev:alice" signs in as
- * the person "alice", no password. So agents can run owner, vault and reclaim
- * flows end to end on a local relay. The Bun relay only accepts it bound to a
- * loopback address (devHostOk).
+ * the person "dev_alice" (never a real WorkOS id), no password. So agents can run
+ * owner, vault and reclaim flows end to end on a local relay. The Bun relay only
+ * starts it bound to loopback (devHostOk) and only takes it on requests made
+ * from this machine directly (devRequestOk).
  */
 export function devHumanAuth(): HumanAuth {
   return {
     clientId: "dev",
     dev: true,
-    verify: async (token) => DEV_TOKEN.exec(token)?.[1] ?? null,
-    profile: async (user) => ({ name: user.charAt(0).toUpperCase() + user.slice(1), email: `${user}@dev.invalid` }),
+    verify: async (token) => {
+      const name = DEV_TOKEN.exec(token)?.[1];
+      return name ? `dev_${name}` : null;
+    },
+    profile: async (user) => {
+      const name = user.replace(/^dev_/, "");
+      return { name: `${name.charAt(0).toUpperCase()}${name.slice(1)} (dev)`, email: `${name}@dev.invalid` };
+    },
   };
 }
 
-/** Dev sign-in only where nothing but this machine can reach it. */
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]", "::ffff:127.0.0.1"]);
+
+/** Dev sign-in only bound where nothing but this machine can reach it. */
 export function devHostOk(hostname: string | undefined): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+  return !!hostname && LOOPBACK.has(hostname);
+}
+
+/**
+ * Binding to loopback isn't enough: a reverse proxy on the same machine (the
+ * setup our self-hosting guide describes) forwards the internet to it. So each
+ * request must come from this machine, to a local host name, and not through a
+ * proxy.
+ */
+export function devRequestOk(req: Request, peer: string | undefined): boolean {
+  if (!peer || !LOOPBACK.has(peer)) return false;
+  const host = (req.headers.get("host") ?? "").replace(/:\d+$/, "");
+  if (!LOOPBACK.has(host)) return false;
+  return !["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "via", "cf-connecting-ip"].some((h) => req.headers.has(h));
 }
 
 export interface HumanProfile {

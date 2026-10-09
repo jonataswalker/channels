@@ -2,7 +2,7 @@
 // and MCP tool. Keeps a local cache of the decrypted log so folding shared
 // state (tasks, claims, facts, members) costs one incremental fetch.
 
-import { Channel, isDirectedAt, isForAgent, type SendOptions } from "./client.ts";
+import { Channel, ChannelGone, isDirectedAt, isForAgent, QUIET_DROP_MS, RelayError, type SendOptions } from "./client.ts";
 import { appendCache, loadIdentity, markSeen, readCache, readCursor, readSeen, saveAccess, signingBudget, writeCursor, type ChannelConfig } from "./config.ts";
 import { TOO_MANY_REQUESTS } from "./sas.ts";
 import type { ChannelAccess } from "./crypto.ts";
@@ -148,12 +148,31 @@ export class AgentSession {
     onMessage: (m: Message, state: ChannelState) => void | Promise<void>,
     opts: Delivery & { signal?: AbortSignal; client: string; onStatus?: (s: string) => void; onNotice?: (text: string) => void | Promise<void> },
   ): Promise<void> {
-    await this.ownerChores();
     // Lets the Claude Code Stop hook know this agent can hear the channel.
     const { registerListener } = await import("./hooks.ts");
     registerListener(this.alias, this.me);
-    const since = await this.cursor();
-    let { messages, state } = await this.state();
+    // Starting up when the relay is briefly out of reach (a deploy, a blip) waits and retries, like any drop later.
+    let since = 0;
+    let messages: Message[] = [];
+    let state!: ChannelState;
+    for (let backoff = 500, downSince = Date.now(), told = false; ; backoff = Math.min(backoff * 2, 30_000)) {
+      try {
+        await this.ownerChores();
+        since = await this.cursor();
+        ({ messages, state } = await this.state());
+        if (told) opts.onStatus?.(`reached the relay after ${Math.round((Date.now() - downSince) / 1000)}s`);
+        break;
+      } catch (err) {
+        // Gone (removed, closed) and refusals are answers, not outages.
+        if (err instanceof ChannelGone || err instanceof Rejected || (err instanceof RelayError && err.status < 500 && err.status !== 429)) throw err;
+        if (opts.signal?.aborted) return;
+        if (!told && Date.now() - downSince >= QUIET_DROP_MS) {
+          told = true;
+          opts.onStatus?.(`can't reach the relay (${err instanceof Error ? err.message : String(err)}); still retrying`);
+        }
+        await Bun.sleep(backoff);
+      }
+    }
     const seen = readSeen(this.alias, this.me);
     const role = state.members.get(this.me)?.role;
     let lastQueryReply = 0;

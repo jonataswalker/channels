@@ -52,3 +52,27 @@ test("drops are silent, a long outage is one line, and nothing is missed", async
   await listening;
   server.stop(true);
 });
+
+test("tail started while the relay is down keeps waiting instead of exiting", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "kiwi-reconnect-home-"));
+  let server = startRelay({ port: 0, hostname: "127.0.0.1", dataDir });
+  const port = server.port;
+  const env = { ...process.env, KIWI_HOME: dir, KIWI_RELAY: server.url.origin, CLAUDE_CONFIG_DIR: dir, CLAUDECODE: "" };
+  const cli = (...args: string[]) => Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], { cwd: dir, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  try {
+    expect(await cli("create", "r", "--as", "lead").exited).toBe(0);
+    server.stop(true);
+    // Its first fetch fails (0.5.0 exited here for good); it must keep trying.
+    const tail = cli("-c", "r", "--as", "lead", "tail");
+    await Bun.sleep(2_000);
+    expect(tail.exitCode).toBeNull();
+    server = startRelay({ port, hostname: "127.0.0.1", dataDir });
+    await Bun.sleep(2_000);
+    expect(tail.exitCode).toBeNull();
+    tail.kill();
+    expect(await new Response(tail.stderr).text()).not.toContain("socket");
+  } finally {
+    server.stop(true);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
