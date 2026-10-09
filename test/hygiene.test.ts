@@ -4,7 +4,8 @@ import { describe, expect, test } from "bun:test";
 import { formatClaims, formatFact, parseDuration } from "../src/format.ts";
 import { wellFormedEvent, type Event, type Kind, type Message } from "../src/protocol.ts";
 import { claimConflict, fold as foldWith, overlaps, type Roster } from "../src/state.ts";
-import { claimPlace } from "../src/where.ts";
+import { homedir } from "node:os";
+import { claimPlace, hideHome } from "../src/where.ts";
 import { generateIdentity, sign, verify, type Identity } from "../src/identity.ts";
 
 const roster: Roster = [];
@@ -76,7 +77,15 @@ describe("facts are shared and can expire", () => {
   });
 });
 
-test("claimPlace sees this checkout", () => {
+test("a claim's checkout never carries the home directory", () => {
+  const home = homedir();
+  expect(hideHome(home + "/.t3/worktrees/modelchannel/t3-07c0ed11")).toBe("~/.t3/worktrees/modelchannel/t3-07c0ed11");
+  expect(hideHome(home)).toBe("~");
+  expect(hideHome("/opt/src")).toBe("/opt/src");
+  expect(hideHome(home + "2/proj")).toBe(home + "2/proj");
   const place = claimPlace();
+  expect(place.checkout?.startsWith("~/")).toBe(true);
   expect(place.checkout).toContain("t3-papercuts");
+  expect(place.checkout?.includes(home)).toBe(false);
+  expect(JSON.stringify(place).includes(home)).toBe(false);
 });
