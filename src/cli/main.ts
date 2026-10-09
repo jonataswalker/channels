@@ -7,13 +7,13 @@ import { join as joinPath, join } from "node:path";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { AgentSession, Rejected } from "../agent.ts";
-import { loadImages } from "../attach.ts";
+import { loadImages, saveImages } from "../attach.ts";
 import { Channel, ChannelGone, RelayError, relayConfig } from "../client.ts";
 import { TOO_MANY_REQUESTS } from "../sas.ts";
 import { DEFAULT_RELAY, forgetIdentity, home, forgetMember, identitiesIn, loadConfig, loadIdentity, readCursor, updateConfig, wipeChannel, writeCursor, type ChannelConfig } from "../config.ts";
 import { b64url, decodeJoinCode, newRoomId, type ChannelAccess } from "../crypto.ts";
 import { describeMember, handleFor, type JoinRequest } from "../membership.ts";
-import { ago, describeEvent, formatClaims, formatMessage, formatStatus, formatTask, formatTasks, parseDuration, statusJson } from "../format.ts";
+import { ago, describeEvent, formatClaims, formatMessage, formatShown, formatStatus, formatTask, formatTasks, parseDuration, statusJson } from "../format.ts";
 import { fingerprint } from "../identity.ts";
 import { CHAT_KINDS, TASK_STATES, type Kind, type Message, type TaskState } from "../protocol.ts";
 import { parseTaskId, taskId, type ChannelState } from "../state.ts";
@@ -54,6 +54,7 @@ Talk
   kiwi send "text" [--to a,b|role:x] [--kind K] [--re N] [--image f.png …]   (text from stdin if omitted)
   kiwi ask --to NAME "question" [--wait 10m]     with --wait, block until answered and print the answer
   kiwi reply N "text" [--kind done]              answer message #N (goes to its sender)
+  kiwi show N [dir]                              message #N in full: its replies, what it answers, its images saved
   kiwi save N [dir]                              download message #N's images into dir
   kiwi tail [--for-me|--all] [--json]            stream messages for you, one per line (for a Monitor)
   kiwi wait [--for-me|--all] [--timeout 10m]     block until the next message for you, print, exit
@@ -710,14 +711,17 @@ const commands: Record<string, () => Promise<void>> = {
     const { messages } = await s.state();
     const m = messages.find((x) => x.seq === seq) ?? die(`no message #${seq}`);
     if (!m.imgs?.length) die(`message #${seq} has no images`);
-    const dir = args[2] ?? ".";
-    mkdirSync(dir, { recursive: true });
-    for (const img of m.imgs) {
-      const safe = img.name.replace(/[^A-Za-z0-9_.-]/g, "_") || "image";
-      const path = joinPath(dir, `#${seq}-${safe}`);
-      writeFileSync(path, Buffer.from(img.data, "base64"));
-      out(path);
-    }
+    for (const path of saveImages(seq, m.imgs, args[2] ?? ".")) out(path);
+  },
+
+  async show() {
+    const s = await session();
+    const seq = Number((args[1] ?? "").replace(/^#/, "")) || die("usage: kiwi show N [dir]");
+    const { messages, state } = await s.state();
+    const m = messages.find((x) => x.seq === seq) ?? die(`no message #${seq}`);
+    // Images land under the channel's own folder (closing it deletes them), or where asked.
+    const saved = m.imgs?.length ? saveImages(seq, m.imgs, args[2] ?? joinPath(home(), "downloads", s.ch.roomId)) : [];
+    out(formatShown(m, messages, state, saved));
   },
 
   async log() {

@@ -235,6 +235,25 @@ export function formatClaims(state: ChannelState, now = Date.now()): string {
   return state.claims.length ? state.claims.map((c) => claimLine(c, now).trimStart()).join("\n") : "no active claims";
 }
 
+/**
+ * One message in full (`kiwi show`, the MCP message tool): the message itself,
+ * the one it answers, and every verified reply to it, so nothing needs the log.
+ */
+export function formatShown(m: Message, messages: Message[], state: ChannelState, savedImages: string[] = []): string {
+  const out = [formatMessage(m, state.trust.get(m.seq), state)];
+  if (savedImages.length) out.push(`  images saved: ${savedImages.join(", ")}`);
+  for (const r of m.re ?? []) {
+    const parent = messages.find((x) => x.seq === r);
+    if (parent && state.trust.get(parent.seq) !== "forged") out.push(`answers #${parent.seq} ${who(parent.from, state)}: ${oneLine(parent.kind === "event" ? describeEvent(parent, state) : parent.body)}`);
+  }
+  const replies = messages.filter((x) => x.re?.includes(m.seq) && state.trust.get(x.seq) !== "forged");
+  if (replies.length) {
+    out.push(`replies (${replies.length}):`);
+    for (const x of replies) out.push(`  #${x.seq} ${who(x.from, state)}: ${oneLine(x.body)}`);
+  }
+  return out.join("\n");
+}
+
 function oneLine(s: string, max = 140): string {
   const flat = s.replace(/\s+/g, " ").trim();
   return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;

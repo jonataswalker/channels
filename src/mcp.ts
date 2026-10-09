@@ -6,15 +6,14 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { AgentSession, Rejected } from "./agent.ts";
-import { loadImages } from "./attach.ts";
+import { loadImages, saveImages } from "./attach.ts";
 import { loadSummary, memberLoad, showsLoad } from "./load.ts";
 import { forgetMember, home, identitiesIn, loadConfig, signingBudget, wipeChannel } from "./config.ts";
 import { ChannelGone } from "./client.ts";
-import { formatClaims, formatMessage, formatStatus, formatTask, formatTasks, parseDuration } from "./format.ts";
+import { formatClaims, formatMessage, formatShown, formatStatus, formatTask, formatTasks, parseDuration } from "./format.ts";
 import { CHAT_KINDS, type Kind, type Message } from "./protocol.ts";
 import { TOO_MANY_REQUESTS } from "./sas.ts";
 import { parseTaskId, taskId } from "./state.ts";
@@ -272,17 +271,27 @@ export async function runMcp(s: AgentSession, opts: { push?: boolean } = {}): Pr
       if (!m) throw new Rejected(`no message #${seq}`);
       if (!m.imgs?.length) throw new Rejected(`message #${seq} has no images`);
       // Under the channel's own folder, so closing the channel deletes them too.
-      const out = dir ?? join(home(), "downloads", s.ch.roomId);
-      mkdirSync(out, { recursive: true });
-      const paths: string[] = [];
-      for (const img of m.imgs) {
-        const safe = img.name.replace(/[^A-Za-z0-9_.-]/g, "_") || "image";
-        const path = join(out, `#${seq}-${safe}`);
-        writeFileSync(path, Buffer.from(img.data, "base64"));
-        paths.push(path);
-      }
-      return paths.join("\n");
+      return saveImages(seq, m.imgs, dir ?? join(home(), "downloads", s.ch.roomId)).join("\n");
     }),
+  );
+
+  server.registerTool(
+    "message",
+    {
+      description: "One message in full, never cut short: its text, the message it answers, its replies, and its images (as image blocks, also saved to disk).",
+      inputSchema: { seq: z.number().int() },
+    },
+    async ({ seq }) => {
+      try {
+        const { messages, state } = await s.state();
+        const m = messages.find((x) => x.seq === seq);
+        if (!m) return fail(`no message #${seq}`);
+        const saved = m.imgs?.length ? saveImages(seq, m.imgs, join(home(), "downloads", s.ch.roomId)) : [];
+        return withImages(formatShown(m, messages, state, saved), [m]);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
   );
 
   server.registerTool(
