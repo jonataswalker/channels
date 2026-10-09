@@ -6,7 +6,7 @@ import type { ChannelRow } from "@/lib/channel"
 import { atChannelLimit, type MyUsage } from "@/lib/usage"
 import { formatShort } from "@/lib/format"
 import { setAppearance, useAppearance, type Appearance } from "@/lib/theme"
-import { useVault } from "@/lib/vault"
+import { lockVault, useVault } from "@/lib/vault"
 import { cx } from "@/lib/utils"
 import { Icon } from "./icon"
 import { Button, IconButton, Monogram, Wordmark } from "./kit"
@@ -83,7 +83,7 @@ export function Sidebar({
               <MenuRadioItem value="dark">Dark</MenuRadioItem>
             </MenuRadioGroup>
             <MenuSeparator />
-            <MenuItem onClick={auth.signOut}>Sign out</MenuItem>
+            <MenuItem onClick={() => void lockVault().finally(auth.signOut)}>Sign out</MenuItem>
           </Menu>
         ) : (
           <Wordmark className="pl-1 text-[15px]" />

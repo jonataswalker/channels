@@ -26,8 +26,9 @@ import {
 } from "@mc/vault.ts"
 import { useSyncExternalStore } from "react"
 
-import { CHANGED, allMembers, loadMember, saveMember, type StoredMember } from "./channel"
+import { CHANGED, allMembers, forgetChannel, saveMember, type StoredMember } from "./channel"
 import { createPasskey, touchPasskey } from "./passkey"
+import { freshSeats, reconcile } from "./vault-merge"
 import { forgetVaultKey, keepVaultKey, loadVaultKey } from "./vault-store"
 
 // Your channels, kept for you at the relay where only your passkeys can open
@@ -127,16 +128,18 @@ function deviceLabel(): string {
 const ids = (wraps: Wrap[]) => wraps.flatMap((w) => (w.credentialId ? [w.credentialId] : []))
 const known = () => (state.kind === "locked" || state.kind === "open" ? state.wraps : [])
 
-/** Bring in every seat the vault has and this browser doesn't. A seat held here under another key stays as it is. */
+/** Make this browser agree with the vault (see reconcile). Returns how many channels came in. */
 function take(c: VaultContents<StoredMember>): number {
+  const { drop, add } = reconcile(allMembers(), c)
+  for (const code of drop) forgetChannel(code)
   let added = 0
-  for (const m of c.channels) {
-    if (!wellFormed(m) || loadMember(m.code)) continue
+  for (const m of add) {
+    if (!wellFormed(m)) continue
     try {
       saveMember({ ...m, at: m.at || Date.now() })
       added++
     } catch {
-      // Held here under another key: this browser's own key always wins.
+      // Held here under another live key: this browser's own key wins, and merge reports the conflict.
     }
   }
   synced = new Set(c.channels.map(seat))
@@ -197,6 +200,7 @@ export async function startVault(next: Session | null): Promise<void> {
 /** First time: make a passkey, put every channel this browser has in a new vault. Returns the recovery code to show once. */
 export async function setUpVault(): Promise<string> {
   const s = session!
+  // The WebAuthn user handle is the WorkOS user id: stable, and not personal data.
   const pk = await createPasskey({ id: s.user, name: s.email || s.name, displayName: s.name }, PRF_SALT)
   const contents: VaultContents<StoredMember> = { channels: allMembers(), gone: {} }
   const made = await newVault(s.user, contents, { kind: "passkey", label: deviceLabel(), secret: pk.secret, credentialId: pk.credentialId })
@@ -272,13 +276,35 @@ async function push(): Promise<void> {
         const [code, pk] = k.split(" ")
         next = forgetSeat(next, { code: code!, identity: { pk: pk! } })
       }
-      const have = new Set(next.channels.map(seat))
-      return { ...next, channels: [...next.channels, ...added.filter((k) => !have.has(k)).map((k) => mine.get(k)!)] }
+      // Never bring back a seat the vault has tombstoned: another device left it, or it was taken over.
+      return {
+        ...next,
+        channels: [
+          ...next.channels,
+          ...freshSeats(
+            added.map((k) => mine.get(k)!),
+            next
+          ),
+        ],
+      }
     },
     seen(s.user)
   )
   saw(s.user, r.version)
-  synced = new Set(r.contents.channels.map(seat))
+  take(r.contents)
+}
+
+/**
+ * Signing out locks the vault in this browser: the key kept for syncing is
+ * forgotten, so whoever signs in here next needs a passkey or the recovery code.
+ */
+export async function lockVault(): Promise<void> {
+  const user = session?.user
+  key = rawKey = null
+  synced = new Set()
+  session = null
+  set({ kind: "off" })
+  if (user) await forgetVaultKey(user)
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined
