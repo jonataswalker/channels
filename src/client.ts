@@ -348,17 +348,20 @@ export class Channel {
     if (!this.access.keys[String(icon.e)]) await this.refreshKeys();
     const key = this.access.keys[String(icon.e)];
     if (!key) return null;
-    const opened = (await open(key, this.roomId, icon.iv, icon.ct).catch(() => null)) as { icon?: unknown } | null;
-    // Whatever the relay hands back, only a well-formed emoji or raster image comes out.
-    return wellFormedIcon(opened?.icon) ? opened.icon : null;
+    const opened = (await open(key, this.roomId, icon.iv, icon.ct).catch(() => null)) as { what?: unknown; room?: unknown; icon?: unknown; pk?: string; sig?: string } | null;
+    // Only an icon the owner signed, for this channel: a member holds the channel key too, and could
+    // otherwise seal one of their own for a colluding relay to serve. And only a sane emoji or raster image.
+    if (!opened || opened.what !== "channel-icon" || opened.room !== this.roomId || opened.pk !== this.access.ownerPk || !(await verify(opened))) return null;
+    return wellFormedIcon(opened.icon) ? opened.icon : null;
   }
 
-  /** Owner only: set the channel's icon (null clears it), sealed with the current channel key. */
+  /** Owner only: set the channel's icon (null clears it), signed by the owner and sealed with the current channel key. */
   async setIcon(icon: ChannelIcon | null): Promise<void> {
     this.ownerOnly();
     if (icon !== null && !wellFormedIcon(icon)) throw new Error(`an icon is one emoji, or a png, jpg, gif or webp image of at most ${MAX_ICON_BYTES / 1024}KB`);
     const e = this.access.epoch;
-    const sealed = icon ? { e, ...(await seal(this.access.keys[String(e)]!, this.roomId, { icon })) } : null;
+    const signed = icon ? await sign(this.identity, { what: "channel-icon", room: this.roomId, icon }) : null;
+    const sealed = signed ? { e, ...(await seal(this.access.keys[String(e)]!, this.roomId, signed)) } : null;
     await this.request("/icon", { method: "PUT", body: JSON.stringify({ icon: sealed }) });
   }
 
