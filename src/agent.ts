@@ -13,13 +13,19 @@ import { fold, overlaps, taskId, waitingOn, type ChannelState, type Roster } fro
 
 /** How often a listening agent re-announces itself. Receivers treat 2.5x this as offline. */
 export const PRESENCE_EVERY_MS = 60_000;
+/** What `--to` takes for "everyone, on purpose". */
+const EVERYONE = new Set(["all", "everyone", "*"]);
 export const PRESENCE_TTL_MS = 150_000;
 
 export interface Delivery {
   /** Show every message, including all coordination events. */
   all?: boolean;
+  /** Every chat message, whoever it's for (what a coordinator wants). */
+  chat?: boolean;
   /** Only messages addressed to this agent (by name or role, or broadcast asks). */
   forMe?: boolean;
+  /** Only messages in the thread this message (root or reply) is in. */
+  thread?: number;
 }
 
 export class Rejected extends Error {}
@@ -246,6 +252,8 @@ export class AgentSession {
 
   /** Expand `role:x` recipients to the members holding that role. */
   async resolveTo(to: string[] | undefined, state?: ChannelState): Promise<string[] | undefined> {
+    // "--to all": for everyone, on purpose. It reaches every agent; a message with no --to only reaches those following all chat.
+    if (to?.some((t) => EVERYONE.has(t.toLowerCase()))) return ["*"];
     if (!to?.length || !to.some((t) => t.startsWith("role:"))) return to;
     const s = state ?? (await this.state()).state;
     const out = new Set<string>();
@@ -420,14 +428,27 @@ export class AgentSession {
 
 export type { Presence };
 
-/** `AgentSession.wants`, for callers that have the state but no session (kiwi sh). */
+/**
+ * `AgentSession.wants`, for callers that have the state but no session (kiwi sh).
+ * By default an agent gets what's for it: messages to it or its role, broadcasts
+ * from people and broadcast questions, and every message in a thread it's in.
+ * Other agents' conversations stay out unless it asks for all chat.
+ */
 export function wants(me: string, m: Message, state: ChannelState | null, d: Delivery = {}): boolean {
   if (m.from === me) return false;
   // Forged messages never reach an agent: they're noise at best, prompt injection at worst.
   if (state?.trust.get(m.seq) === "forged") return false;
   if (d.all) return true;
+  // Any message of a thread names it: its root, or a reply in it.
+  if (d.thread !== undefined) return m.kind !== "event" && (state?.threadOf.get(m.seq) ?? m.seq) === (state?.threadOf.get(d.thread) ?? d.thread);
   const role = state?.members.get(me)?.role;
-  const addressed = isDirectedAt(m, me) || (!!role && !!m.to?.includes(`role:${role}`));
+  const addressed = isDirectedAt(m, me) || !!m.to?.includes("*") || (!!role && !!m.to?.includes(`role:${role}`));
   if (m.kind === "event") return addressed || m.ev?.op === "hello";
-  return d.forMe ? addressed || isForAgent(m, me) && (m.kind === "ask" || m.kind === "blocking") : true;
+  if (d.chat) return true;
+  const asking = isForAgent(m, me) && (m.kind === "ask" || m.kind === "blocking");
+  if (d.forMe) return addressed || asking;
+  const sender = state?.members.get(m.from);
+  const fromPerson = !m.to?.length && (sender?.kind === "human" || !!sender?.owner);
+  const inMyThread = !!state?.threadPeople.get(state.threadOf.get(m.seq) ?? m.seq)?.has(me);
+  return addressed || asking || fromPerson || inMyThread;
 }

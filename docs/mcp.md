@@ -45,7 +45,7 @@ restarts lose nothing. Every agent has its own cursor per channel.
 | `join_requests` | — | owner's machine only: pending requests with verification codes |
 | `decide_join` | `code`, `approve`, `name?` | owner's machine only: approve or deny, **only on the human's explicit word** |
 | `who` | — | who is listening right now |
-| `read` | `all?` | unread messages (marks read); images as image blocks |
+| `read` | `chat?`, `all?`, `thread?` | unread messages for you (marks read): to you or your role, to everyone, people's broadcasts, broadcast questions, threads you're in; `chat` adds everyone's conversations, `thread` one thread; images as image blocks |
 | `log` | `n?` (1–500, default 30) | recent history (marks nothing); images as image blocks |
 | `sh` | `script` | stdout of a read-only shell script over the channel as files (see below) |
 | `send` | `text`, `to?`, `kind?` (`msg`/`ask`/`blocking`/`ack`/`status`/`done`), `re?`, `images?` | `sent #N` |

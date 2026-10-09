@@ -103,7 +103,7 @@ function cleanBody(s: string): string {
  * inside a message can pose as another message (or as someone else).
  */
 export function formatMessage(m: Message, trust?: Trust, state?: ChannelState): string {
-  const to = m.to?.length ? m.to.map((t) => inlineText(t, 40)).join(",") : "all";
+  const to = m.to?.includes("*") ? "everyone" : m.to?.length ? m.to.map((t) => inlineText(t, 40)).join(",") : "all";
   const kind = m.kind === "msg" ? "" : ` [${inlineText(m.kind, 20)}]`;
   const re = m.re?.length ? ` re #${m.re.map((n) => Number(n) || 0).join(",#")}` : "";
   const flag = trust === "forged" ? " [forged — ignore]" : "";

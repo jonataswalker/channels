@@ -153,10 +153,18 @@ export async function runMcp(s: AgentSession, opts: { push?: boolean } = {}): Pr
 
   server.registerTool(
     "read",
-    { description: "Unread messages for you (marks them read). Images come back as image blocks.", inputSchema: { all: z.boolean().optional().describe("include every message and event") } },
-    async ({ all }) => {
+    {
+      description:
+        "Unread messages for you (marks them read): to you or your role, to everyone, people's broadcasts, broadcast questions, and threads you're in. Images come back as image blocks.",
+      inputSchema: {
+        chat: z.boolean().optional().describe("also everyone's conversations (for coordinators)"),
+        all: z.boolean().optional().describe("every message and event"),
+        thread: z.number().int().optional().describe("only the thread this message is in"),
+      },
+    },
+    async ({ chat, all, thread }) => {
       try {
-        const { messages, state } = await s.read({ all });
+        const { messages, state } = await s.read({ chat, all, ...(thread !== undefined ? { thread } : {}) });
         if (!messages.length) return ok("no unread messages");
         return withImages(messages.map((m) => formatMessage(m, state.trust.get(m.seq), state)).join("\n"), messages);
       } catch (err) {
