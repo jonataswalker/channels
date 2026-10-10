@@ -4,6 +4,7 @@ import { createContext, createElement, useContext, useEffect, useMemo, useState,
 import { relayConfig } from "@mc/client.ts"
 
 import { DevSignIn } from "@/components/dev-sign-in"
+import { forgetAllHistory } from "@/lib/history"
 import { SIGN_IN_GONE } from "@/lib/session"
 
 /**
@@ -142,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             user,
             signIn: () => setDev((d) => d && { ...d, asking: true }),
             signOut: () => {
+              void forgetAllHistory().catch(() => {})
               localStorage.removeItem(DEV_KEY)
               setDev({ name: null, asking: false })
               setUser(null)
@@ -154,7 +156,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             expired,
             user,
             signIn: () => void client?.signIn({ state: { returnTo: location.pathname + location.hash } }),
-            signOut: () => client?.signOut({ returnTo: location.origin + "/" }),
+            signOut: () => {
+              // Clear the cache before the redirect, so the next account on this browser does not inherit it.
+              void forgetAllHistory()
+                .catch(() => {})
+                .finally(() => client?.signOut({ returnTo: location.origin + "/" }))
+            },
             token: async () => {
               if (!client || !client.getUser()) return null
               try {
