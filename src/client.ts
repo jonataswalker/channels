@@ -113,15 +113,23 @@ async function call<T>(
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, String(v));
   const method = (init.method ?? "GET").toUpperCase();
   const body = typeof init.body === "string" ? init.body : "";
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  // The signature covers the query too, so a captured token can't be replayed with other parameters.
-  if (init.identity) headers.authorization = `Bearer ${await signRequest(init.identity, roomId, method, path + u.search, body)}`;
-  if (init.human) headers["x-human-token"] = init.human;
-  const res = await fetch(u, { method, body: method === "GET" || method === "DELETE" ? undefined : body, headers });
-  const json = (await res.json().catch(() => ({}))) as T & { error?: string; tag?: string };
-  if (!res.ok) throw new RelayError(res.status, json.error ?? `relay returned ${res.status}`, json.tag);
-  return json;
+  for (let attempt = 0; ; attempt++) {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    // The signature covers the query too, so a captured token can't be replayed with other parameters.
+    if (init.identity) headers.authorization = `Bearer ${await signRequest(init.identity, roomId, method, path + u.search, body)}`;
+    if (init.human) headers["x-human-token"] = init.human;
+    const res = await fetch(u, { method, body: method === "GET" || method === "DELETE" ? undefined : body, headers });
+    const json = (await res.json().catch(() => ({}))) as T & { error?: string; tag?: string };
+    // Signed, then the machine slept past the signature's window before it was sent: sign again,
+    // once. The relay refused before doing anything, so even a write is safe to send twice.
+    if (res.status === 401 && json.error === EXPIRED_SIGNATURE && init.identity && attempt === 0) continue;
+    if (!res.ok) throw new RelayError(res.status, json.error ?? `relay returned ${res.status}`, json.tag);
+    return json;
+  }
 }
+
+/** What the relay answers a signature that's wrong or outside its time window. */
+const EXPIRED_SIGNATURE = "bad or expired signature";
 
 export interface Info {
   ownerPk: string;
