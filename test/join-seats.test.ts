@@ -275,6 +275,14 @@ describe("Claude Code's hooks do the listening", () => {
     expect(await orphan.exited).toBe(0);
     await ok(owner, ["send", "--to", "claude", "after the session ended"]);
     expect(await ok(h, ["read"], S)).toContain("after the session ended");
+
+    // Read, hand over, then commit: a listener that hears a message but has nobody to hand it to
+    // (its session is gone) leaves it unread.
+    await ok(owner, ["send", "--to", "claude", "nobody to hand this to"]);
+    const late = await run(h, ["hook", "listen"], { ...S, CLAUDE_CODE_SESSION_ID: "L3", CLAUDE_PID: DEAD }, h, JSON.stringify({ session_id: "L3", cwd: h }));
+    expect(late.code).toBe(0);
+    expect(late.err).toBe("");
+    expect(await ok(h, ["read"], S)).toContain("nobody to hand this to");
   });
 
   test("an older Claude Code, or none, gets the Monitor instructions and no listener", async () => {

@@ -25,11 +25,11 @@ import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { openSession, type AgentSession } from "./agent.ts";
-import { home, Keystore, loadConfig, type ChannelConfig } from "./config.ts";
+import { home, Keystore, loadConfig, writeCursor, type ChannelConfig } from "./config.ts";
 import { ChannelGone } from "./client.ts";
 import { charterLines, formatMessage, holdLine } from "./format.ts";
 import { bindingFor as seatFor, here, seatsNear, type Binding, type Here, type SeatOptions } from "./seats.ts";
@@ -658,6 +658,13 @@ const answer = Effect.fn("Hooks.answer")(function* (event: string, input: HookIn
 const listen = Effect.fn("Hooks.listen")(function* (b: Binding, cfg: ChannelConfig, who: Here) {
   if (!hooksListen() || isListening(b.alias, b.as) || !takeListenSlot(b.alias, b.as, who.session ?? "")) return 0;
   const s = yield* openSession(b.alias, cfg, b.as);
+  // Read, hand over, then commit: listen moves the cursor as messages arrive, so until stderr has
+  // them, any way out (its session ending, Claude Code stopping it, a failed write) puts it back.
+  const since = yield* s.cursor();
+  let handedOver = false;
+  process.on("exit", () => {
+    if (!handedOver) writeCursor(b.alias, b.as, since);
+  });
   const got: string[] = [];
   const enough = yield* Deferred.make<void>();
   const woke = Effect.suspend(() =>
@@ -674,14 +681,21 @@ const listen = Effect.fn("Hooks.listen")(function* (b: Binding, cfg: ChannelConf
     Effect.as(hearing, "heard" as const),
     Effect.raceFirst(Effect.as(Deferred.await(enough), "heard" as const), Effect.raceFirst(Effect.as(Effect.sleep(LISTEN_SECONDS * 1000), "day" as const), Effect.as(sessionGone, "gone" as const))),
   ).pipe(Effect.scoped);
-  if (ended === "gone" && !got.length) return 0;
+  // Nobody to hand them to: they stay unread (the exit puts the cursor back).
+  if (ended === "gone") return 0;
   const mc = mcFor(b.alias, b.as, process.cwd(), who);
   const text = got.join("\n");
-  process.stderr.write(
-    got.length
-      ? `New Kiwi Channels messages for you (${b.alias}). Handle them; answer with \`${mc} reply N "…"\`:\n${text.length > MAX_CONTEXT ? `${text.slice(0, MAX_CONTEXT)}\n… (more: run \`${mc} log\`)` : text}\n`
-      : "Kiwi Channels: a day with no messages for you. Nothing to do; just end your turn.\n",
-  );
+  try {
+    writeSync(
+      2,
+      got.length
+        ? `New Kiwi Channels messages for you (${b.alias}). Handle them; answer with \`${mc} reply N "…"\`:\n${text.length > MAX_CONTEXT ? `${text.slice(0, MAX_CONTEXT)}\n… (more: run \`${mc} log\`)` : text}\n`
+        : "Kiwi Channels: a day with no messages for you. Nothing to do; just end your turn.\n",
+    );
+    handedOver = true;
+  } catch {
+    return 0;
+  }
   return 2;
 });
 
