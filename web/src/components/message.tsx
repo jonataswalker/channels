@@ -90,7 +90,8 @@ function phrase(m: Message, me: string, nameOf: (n: string) => string, repliedTo
   // Questions and blockers always say who they're for; plain messages only when the text doesn't already.
   const named = (t: string) => m.body.includes(`@${t}`) || repliedTo.has(t)
   const targets = m.kind === "ask" || m.kind === "blocking" ? (m.to ?? []) : (m.to ?? []).filter((t) => !named(t))
-  const to = targets.map((t) => (t === me ? "you" : nameOf(t)))
+  // "*" is how a broadcast to all is addressed; say it in words.
+  const to = targets.map((t) => (t === "*" ? "everyone" : t === me ? "you" : nameOf(t)))
   const list = to.length > 1 ? `${to.slice(0, -1).join(", ")} and ${to[to.length - 1]}` : to[0]
   switch (m.kind) {
     case "ask":
