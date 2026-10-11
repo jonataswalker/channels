@@ -10,8 +10,8 @@ import { Button, Modal } from "./kit"
 function Choice<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   return (
     <div>
-      <p className="mb-2 text-[12.5px] font-medium text-ink">{label}</p>
-      <div role="radiogroup" aria-label={label} className="grid gap-1 rounded-[9px] bg-wash p-0.5" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+      <p className="mb-2 text-ui font-medium text-ink">{label}</p>
+      <div role="radiogroup" aria-label={label} className="grid gap-1 rounded-ctl bg-wash p-0.5" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
         {options.map((o) => (
           <button
             key={o.value}
@@ -19,7 +19,7 @@ function Choice<T extends string>({ label, value, options, onChange }: { label: 
             role="radio"
             aria-checked={value === o.value}
             onClick={() => onChange(o.value)}
-            className={cx("rounded-[7px] px-2 py-1.5 text-[12.5px] font-medium transition-colors", value === o.value ? "bg-canvas text-ink shadow-[0_0_0_1px_var(--line)]" : "text-ink-2 hover:text-ink")}
+            className={cx("rounded-row px-2 py-1.5 text-ui font-medium transition-colors", value === o.value ? "bg-canvas text-ink shadow-[0_0_0_1px_var(--line)]" : "text-ink-2 hover:text-ink")}
           >
             {o.label}
           </button>
@@ -35,8 +35,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   return (
     <Modal open={open} onClose={onClose}>
       <div className="p-5">
-        <Dialog.Title className="text-[15px] font-semibold tracking-[-0.01em]">Settings</Dialog.Title>
-        <Dialog.Description className="mt-1 text-[13px] leading-normal text-ink-2">How Channels looks in this browser. Changes apply at once.</Dialog.Description>
+        <Dialog.Title className="text-title font-semibold tracking-[-0.01em]">Settings</Dialog.Title>
+        <Dialog.Description className="mt-1 text-ui leading-normal text-ink-2">How Channels looks in this browser. Changes apply at once.</Dialog.Description>
         <div className="mt-5 grid gap-5">
           <Choice<Appearance>
             label="Theme"

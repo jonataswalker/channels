@@ -17,10 +17,10 @@
   --canvas: light-dark(#fafaf8, #0b0c0e);
   --rail: light-dark(#ecece9, #111215);
   --raised: light-dark(#ffffff, #141518);
-  --ink: light-dark(#1a1a1a, #ececee);
+  --ink: light-dark(#18181b, #e6e6e8);
   /* Quiet text still clears 4.5:1 on canvas, rail, and raised. ink-3 is that floor; ink-2 stays a step stronger. */
-  --ink-2: light-dark(#4c4c4c, #a6a6a6);
-  --ink-3: light-dark(#646464, #868686);
+  --ink-2: light-dark(#52525a, #a1a1a8);
+  --ink-3: light-dark(#63636b, #86868e);
   --line: light-dark(#e8e8e4, #1e2026);
   --wash: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.04));
   --wash-2: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.075));
@@ -33,6 +33,15 @@
   --live: light-dark(#228b3b, #4ecb71);
   --warn: light-dark(#b7791f, #e9c46a);
   --overlay: light-dark(rgba(20, 20, 22, 0.45), rgba(4, 4, 5, 0.72));
+  /*
+   * The app shell's three surfaces (T1124): the frame behind the app, the inset panel it sits in,
+   * and anything raised on that panel (cards, popovers, the composer). Hairlines, not shadows,
+   * separate them; one shadow is kept for popovers and dialogs.
+   */
+  --frame: light-dark(#efefed, #08090a);
+  --panel: light-dark(#fbfbfa, #0f1012);
+  --edge: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.07));
+  --edge-strong: light-dark(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.14));
   /* The open channel in the list: a white sheet on the grey rail by day, a lighter wash by night. */
   --pick: light-dark(#ffffff, rgba(255, 255, 255, 0.075));
   --pick-edge: light-dark(rgba(0, 0, 0, 0.06), transparent);
@@ -55,6 +64,29 @@
 @theme inline {
   --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /*
+   * Five type steps and nothing between them (scripts/ui-tokens.ts keeps it that way):
+   * meta for times, counts and section heads; ui for rows, menus and buttons; body for what people
+   * read; title for headers and dialogs; display for empty states and welcomes.
+   */
+  --text-meta: 12px;
+  --text-meta--line-height: 16px;
+  --text-ui: 13px;
+  --text-ui--line-height: 20px;
+  --text-body: 14px;
+  --text-body--line-height: 22px;
+  --text-title: 15px;
+  --text-title--line-height: 20px;
+  --text-display: 22px;
+  --text-display--line-height: 28px;
+  /* Radii by level: rows and small controls, controls and inputs, cards and anything floating. */
+  --radius-row: 6px;
+  --radius-ctl: 8px;
+  --radius-card: 12px;
+  --color-frame: var(--frame);
+  --color-panel: var(--panel);
+  --color-edge: var(--edge);
+  --color-edge-strong: var(--edge-strong);
   --color-canvas: var(--canvas);
   --color-rail: var(--rail);
   --color-raised: var(--raised);

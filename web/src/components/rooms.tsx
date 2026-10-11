@@ -110,7 +110,7 @@ export function RoomRail({
   return (
     <nav aria-label="Rooms" className="hidden w-[208px] shrink-0 flex-col overflow-y-auto py-3 shadow-[inset_-0.5px_0_0_var(--line)] md:flex">
       <div className="flex items-center justify-between pr-2 pl-4">
-        <h2 className="text-[12px] font-semibold text-ink-2">Rooms</h2>
+        <h2 className="text-meta font-semibold text-ink-2">Rooms</h2>
         {isOwner && state.rooms.size < MAX_ROOMS && (
           <IconButton label="New room" className="size-7" onClick={onCreate}>
             <Icon icon={Add01Icon} size={16} />
@@ -128,13 +128,13 @@ export function RoomRail({
                 aria-current={on ? "page" : undefined}
                 onClick={() => onOpen(r.id)}
                 className={cx(
-                  "flex w-full items-center gap-1.5 rounded-[7px] py-1.5 pr-2 pl-2.5 text-left text-[13px] transition-colors",
+                  "flex w-full items-center gap-1.5 rounded-row py-1.5 pr-2 pl-2.5 text-left text-ui transition-colors",
                   on ? "bg-wash-2 font-medium text-ink" : n ? "font-medium text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink"
                 )}
               >
                 <span className="text-ink-3">#</span>
                 <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                {n > 0 && !on && <span className="rounded-full bg-ink px-1.5 text-[11px] font-semibold text-canvas tabular-nums">{n}</span>}
+                {n > 0 && !on && <span className="rounded-full bg-ink px-1.5 text-meta font-semibold text-canvas tabular-nums">{n}</span>}
               </button>
               {isOwner && (
                 <span className="absolute top-1/2 right-1 hidden -translate-y-1/2 group-focus-within:block group-hover:block">
@@ -165,10 +165,10 @@ export function RoomMenu({ state, active, unread, onOpen }: { state: ChannelStat
     <span className="md:hidden">
       <Menu
         trigger={
-          <button type="button" className="flex h-7 items-center gap-1 rounded-full px-3 text-[12.5px] font-medium shadow-[inset_0_0_0_1px_var(--line)]">
+          <button type="button" className="flex h-7 items-center gap-1 rounded-full px-3 text-ui font-medium shadow-[inset_0_0_0_1px_var(--line)]">
             <span className="text-ink-3">#</span>
             <span className="max-w-[9rem] truncate">{state.rooms.get(active)?.name}</span>
-            {total > 0 && <span className="rounded-full bg-ink px-1.5 text-[11px] font-semibold text-canvas tabular-nums">{total}</span>}
+            {total > 0 && <span className="rounded-full bg-ink px-1.5 text-meta font-semibold text-canvas tabular-nums">{total}</span>}
             <Icon icon={ArrowDown01Icon} size={13} />
           </button>
         }
@@ -176,7 +176,7 @@ export function RoomMenu({ state, active, unread, onOpen }: { state: ChannelStat
         {[...state.rooms.values()].map((r) => (
           <MenuItem key={r.id} onClick={() => onOpen(r.id)}>
             <span className={cx("flex-1 truncate", r.id === active && "font-medium")}># {r.name}</span>
-            {!!unread.get(r.id) && r.id !== active && <span className="text-[11px] text-ink-3 tabular-nums">{unread.get(r.id)}</span>}
+            {!!unread.get(r.id) && r.id !== active && <span className="text-meta text-ink-3 tabular-nums">{unread.get(r.id)}</span>}
           </MenuItem>
         ))}
       </Menu>
@@ -212,13 +212,13 @@ export function RoomDialog({ state, room, onClose, onSave }: { state: ChannelSta
           if (next && !taken && next !== room?.name) void save()
         }}
       >
-        <Dialog.Title className="text-[15px] font-semibold tracking-[-0.01em]">{room ? "Rename room" : "New room"}</Dialog.Title>
-        <Dialog.Description className="mt-1 text-[13px] leading-normal text-ink-2">
+        <Dialog.Title className="text-title font-semibold tracking-[-0.01em]">{room ? "Rename room" : "New room"}</Dialog.Title>
+        <Dialog.Description className="mt-1 text-ui leading-normal text-ink-2">
           {room ? "Everyone sees the new name; the room and what was said in it stay as they are." : "A room for one conversation. Everyone in the channel can read and write in it."}
         </Dialog.Description>
         <TextField className="mt-4" autoFocus value={name} maxLength={MAX_ROOM_NAME} onChange={(e) => setName(e.target.value)} placeholder="design-review" aria-label="Room name" aria-invalid={taken || !!error} />
         {(taken || error) && (
-          <p role="alert" className="mt-2 text-[12.5px] text-alert">
+          <p role="alert" className="mt-2 text-ui text-alert">
             {taken ? `There's already a room called ${next}.` : error}
           </p>
         )}

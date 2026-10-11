@@ -36,9 +36,9 @@ export function Button({
       type={type}
       className={cx(
         "inline-flex shrink-0 items-center justify-center gap-1.5 font-medium whitespace-nowrap transition-[opacity,background-color,color] duration-150 select-none disabled:pointer-events-none disabled:opacity-40",
-        size === "sm" && "h-7 rounded-[7px] px-2.5 text-[13px]",
-        size === "md" && "h-8 rounded-[8px] px-3.5 text-[13px]",
-        size === "lg" && "h-10 rounded-[10px] px-5 text-[14px]",
+        size === "sm" && "h-7 rounded-row px-2.5 text-ui",
+        size === "md" && "h-8 rounded-ctl px-3.5 text-ui",
+        size === "lg" && "h-10 rounded-ctl px-5 text-body",
         BUTTON[variant],
         className
       )}
@@ -65,7 +65,7 @@ export function IconButton({
         type={type}
         aria-label={label}
         className={cx(
-          "relative inline-flex shrink-0 items-center justify-center rounded-[8px] transition-colors duration-150 disabled:opacity-40",
+          "relative inline-flex shrink-0 items-center justify-center rounded-ctl transition-colors duration-150 disabled:opacity-40",
           !/(^|\s)size-/.test(className ?? "") && "size-8",
           active ? "bg-wash-2 text-ink" : "text-ink-2 hover:bg-wash hover:text-ink data-popup-open:bg-wash-2 data-popup-open:text-ink",
           className
@@ -80,7 +80,7 @@ export function TextField({ className, ...props }: InputHTMLAttributes<HTMLInput
   return (
     <input
       className={cx(
-        "h-9 w-full rounded-[8px] bg-canvas px-3 text-[14px] text-ink shadow-[inset_0_0_0_1px_var(--line)] transition-shadow outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--ring),0_0_0_3px_var(--wash-2)] focus-visible:outline-none",
+        "h-9 w-full rounded-ctl bg-canvas px-3 text-body text-ink shadow-[inset_0_0_0_1px_var(--line)] transition-shadow outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--ring),0_0_0_3px_var(--wash-2)] focus-visible:outline-none",
         className
       )}
       {...props}
@@ -150,7 +150,7 @@ export function Spinner({ className }: { className?: string }) {
 export function Tabs<T extends string>({ value, options, onChange, stretch, label }: { value: T; options: { value: T; label: ReactNode }[]; onChange: (v: T) => void; stretch?: boolean; label?: string }) {
   return (
     <div
-      className={cx("flex items-center gap-0.5", stretch && "rounded-[9px] bg-wash p-0.5")}
+      className={cx("flex items-center gap-0.5", stretch && "rounded-ctl bg-wash p-0.5")}
       role="tablist"
       aria-label={label}
       onKeyDown={(e) => {
@@ -173,7 +173,7 @@ export function Tabs<T extends string>({ value, options, onChange, stretch, labe
           tabIndex={o.value === value ? 0 : -1}
           onClick={() => onChange(o.value)}
           className={cx(
-            "flex h-7 items-center justify-center gap-1.5 rounded-[7px] px-2.5 text-[13px] font-medium transition-colors duration-150",
+            "flex h-7 items-center justify-center gap-1.5 rounded-row px-2.5 text-ui font-medium transition-colors duration-150",
             stretch && "flex-1",
             o.value === value ? "bg-wash-2 text-ink" : "text-ink-2 hover:text-ink"
           )}
@@ -193,7 +193,7 @@ export function Modal({ open, onClose, children, wide }: { open: boolean; onClos
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-overlay transition-opacity duration-150 data-starting-style:opacity-0" />
         <Dialog.Popup
           className={cx(
-            "fixed top-1/2 left-1/2 z-50 max-h-[88svh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[14px] bg-raised shadow-pop outline-none",
+            "fixed top-1/2 left-1/2 z-50 max-h-[88svh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-card bg-raised shadow-pop outline-none",
             "transition-[opacity,scale] duration-150 ease-out data-starting-style:scale-[0.98] data-starting-style:opacity-0",
             wide ? "max-w-[520px]" : "max-w-[340px]"
           )}
@@ -210,9 +210,9 @@ export function Alert({ open, onClose, title, message, children }: { open: boole
   return (
     <Modal open={open} onClose={onClose}>
       <div className="px-5 pt-5 pb-4">
-        <Dialog.Title className="text-[15px] font-semibold tracking-[-0.01em]">{title}</Dialog.Title>
+        <Dialog.Title className="text-title font-semibold tracking-[-0.01em]">{title}</Dialog.Title>
         {message && (
-          <Dialog.Description render={<div />} className="mt-1 text-[13px] leading-normal text-ink-2">
+          <Dialog.Description render={<div />} className="mt-1 text-ui leading-normal text-ink-2">
             {message}
           </Dialog.Description>
         )}
@@ -266,7 +266,7 @@ export function Toaster() {
         <div
           key={t.id}
           role="status"
-          className={cx("animate-rise max-w-md rounded-[10px] bg-ink px-3.5 py-2 text-[13px] font-medium text-canvas shadow-pop", t.tone === "error" && "bg-alert text-white")}
+          className={cx("animate-rise max-w-md rounded-card bg-ink px-3.5 py-2 text-ui font-medium text-canvas shadow-pop", t.tone === "error" && "bg-alert text-white")}
         >
           {t.text}
         </div>
@@ -305,8 +305,8 @@ export class Boundary extends Component<{ children: ReactNode; resetKey?: string
     return (
       <div className="flex h-full flex-1 items-center justify-center p-8">
         <div className="max-w-xs">
-          <p className="text-[14px] font-semibold">{this.props.whole ? "Channels hit a problem" : "This view hit a problem"}</p>
-          <p className="mt-1 text-[13px] leading-normal text-ink-2">{this.props.whole ? "Nothing was lost: your channels and keys are still in this browser. Reload to carry on." : "Nothing was lost. Reload to try again; your other channels still work."}</p>
+          <p className="text-body font-semibold">{this.props.whole ? "Channels hit a problem" : "This view hit a problem"}</p>
+          <p className="mt-1 text-ui leading-normal text-ink-2">{this.props.whole ? "Nothing was lost: your channels and keys are still in this browser. Reload to carry on." : "Nothing was lost. Reload to try again; your other channels still work."}</p>
           <Button className="mt-4" onClick={() => location.reload()}>
             Reload
           </Button>

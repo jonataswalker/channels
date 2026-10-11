@@ -42,7 +42,7 @@ const components: Components = {
   h2: ({ children }) => <p className="mt-3 font-semibold first:mt-0">{children}</p>,
   h3: ({ children }) => <p className="mt-3 font-semibold first:mt-0">{children}</p>,
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-  code: ({ children }) => <code className="rounded-[4px] bg-wash-2 px-1 py-px font-mono text-[0.86em]">{children}</code>,
+  code: ({ children }) => <code className="rounded-row bg-wash-2 px-1 py-px font-mono text-[0.86em]">{children}</code>,
   hr: () => <hr className="my-3 border-line" />,
   table: ({ children }) => <MarkdownTable>{children}</MarkdownTable>,
 }
@@ -54,13 +54,13 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   useEffect(() => () => window.clearTimeout(timer.current), [])
   return (
     <div className="group relative my-2">
-      <pre ref={preRef} className="overflow-x-auto rounded-[8px] bg-wash px-3 py-2.5 font-mono text-[12.5px] leading-relaxed shadow-[inset_0_0_0_0.5px_var(--line)] [&>code]:bg-transparent [&>code]:p-0">
+      <pre ref={preRef} className="overflow-x-auto rounded-ctl bg-wash px-3 py-2.5 font-mono text-ui leading-relaxed shadow-[inset_0_0_0_0.5px_var(--line)] [&>code]:bg-transparent [&>code]:p-0">
         {children}
       </pre>
       <button
         type="button"
         aria-label={copied ? "Copied" : "Copy code"}
-        className="absolute top-1.5 right-1.5 inline-flex size-7 items-center justify-center rounded-[7px] text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-wash-2 hover:text-ink"
+        className="absolute top-1.5 right-1.5 inline-flex size-7 items-center justify-center rounded-row text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-wash-2 hover:text-ink"
         onClick={() => {
           const text = preRef.current?.innerText ?? ""
           if (!text || !navigator.clipboard) return
@@ -89,13 +89,13 @@ function MarkdownTable({ children }: { children?: ReactNode }) {
   if (headers.length === 0) {
     return (
       <div className="my-2 overflow-x-auto">
-        <table className="text-[13px]">{children}</table>
+        <table className="text-ui">{children}</table>
       </div>
     )
   }
   return (
     <div className="my-2 overflow-x-auto">
-      <table className="text-[13px] [&_td]:border-b [&_td]:border-line [&_td]:py-1 [&_td]:pr-4 [&_th]:border-b [&_th]:border-line [&_th]:py-1 [&_th]:pr-4 [&_th]:text-left [&_th]:font-semibold">
+      <table className="text-ui [&_td]:border-b [&_td]:border-line [&_td]:py-1 [&_td]:pr-4 [&_th]:border-b [&_th]:border-line [&_th]:py-1 [&_th]:pr-4 [&_th]:text-left [&_th]:font-semibold">
         <thead>
           <tr>
             {headers.map((header, index) => {
@@ -105,7 +105,7 @@ function MarkdownTable({ children }: { children?: ReactNode }) {
                 <th key={index} scope="col" aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}>
                   <button type="button" className="inline-flex items-center gap-1 text-left font-semibold hover:text-ink focus-visible:[outline-offset:-2px]" aria-label={`Sort by ${label}`} onClick={() => setSort((current) => nextSort(current, index))}>
                     {header}
-                    <span aria-hidden className="text-[10px] text-ink-3">
+                    <span aria-hidden className="text-meta text-ink-3">
                       {direction === "asc" ? "↑" : direction === "desc" ? "↓" : ""}
                     </span>
                   </button>

@@ -19,8 +19,8 @@ export function DevSignIn({ open, onClose, onSignIn }: { open: boolean; onClose:
           if (ok) onSignIn(name)
         }}
       >
-        <Dialog.Title className="text-[15px] font-semibold tracking-[-0.01em]">Dev sign-in</Dialog.Title>
-        <Dialog.Description className="mt-1 text-[13px] leading-normal text-ink-2">
+        <Dialog.Title className="text-title font-semibold tracking-[-0.01em]">Dev sign-in</Dialog.Title>
+        <Dialog.Description className="mt-1 text-ui leading-normal text-ink-2">
           This relay runs with dev sign-in: no password, you're whoever you name. For testing on this machine only.
         </Dialog.Description>
         <TextField autoFocus className="mt-4" placeholder="alice" value={name} onChange={(e) => setName(e.target.value.trim())} aria-label="Name" />

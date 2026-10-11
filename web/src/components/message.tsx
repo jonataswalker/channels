@@ -20,7 +20,7 @@ export type Author = Pick<Member, "name" | "kind" | "display" | "sponsor">
 export function DayMark({ ts }: { ts: number }) {
   return (
     <div className="mt-7 mb-2 flex items-center gap-3 select-none">
-      <span className="text-[12px] font-semibold text-ink-2">{formatDay(ts)}</span>
+      <span className="text-meta font-semibold text-ink-2">{formatDay(ts)}</span>
       <span className="h-px flex-1 bg-line" />
     </div>
   )
@@ -32,9 +32,9 @@ export function EventRow({ m, state, onOpenTask }: { m: Message; state: ChannelS
   const forged = ignored(state.trust.get(m.seq))
   return (
     <div id={`m${m.seq}`} className={cx("my-0.5 flex justify-center px-6", forged && "line-through opacity-50")}>
-      <div className="max-w-[36rem] text-center text-[12.5px] leading-[1.45] text-ink-2">
+      <div className="max-w-[36rem] text-center text-ui leading-[1.45] text-ink-2">
         <span className="text-ink">{memberName(state.members.get(m.from), m.from)}</span> {describeEvent(m, state)}
-        <time className="ml-1.5 text-[11.5px] tabular-nums" title={formatFull(m.ts)}>
+        <time className="ml-1.5 text-meta tabular-nums" title={formatFull(m.ts)}>
           {formatTime(m.ts)}
         </time>
         {taskRef !== null && (
@@ -78,7 +78,7 @@ export function EventGroup({ messages, state, onOpenTask, highlight }: { message
   return (
     <div className="my-1">
       {shown ? messages.map(row) : row(last)}
-      <button type="button" aria-expanded={shown} onClick={() => setOpen(!shown)} className="mx-auto mt-0.5 block rounded-[6px] px-2 text-[12.5px] text-ink-2 hover:text-ink">
+      <button type="button" aria-expanded={shown} onClick={() => setOpen(!shown)} className="mx-auto mt-0.5 block rounded-row px-2 text-ui text-ink-2 hover:text-ink">
         {shown ? "Hide earlier updates" : `${names}: ${n} earlier update${n === 1 ? "" : "s"}`}
       </button>
     </div>
@@ -158,7 +158,7 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
     <div
       id={`${anchor}${m.seq}`}
       className={cx(
-        "group relative -mx-3 grid grid-cols-[28px_minmax(0,1fr)] gap-x-3 rounded-[10px] px-3 transition-colors hover:bg-wash",
+        "group relative -mx-3 grid grid-cols-[28px_minmax(0,1fr)] gap-x-3 rounded-ctl px-3 transition-colors hover:bg-wash",
         head ? "mt-4 pt-1.5 pb-1" : "py-[3px]",
         highlighted && "animate-flash"
       )}
@@ -167,7 +167,7 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
         {head ? (
           <Monogram name={who} agent={isAgent(author)} online={online} color={color} className="mt-0.5" />
         ) : (
-          <time className="invisible block pt-[3px] text-right text-[10.5px] text-ink-3 tabular-nums group-hover:visible" title={formatFull(m.ts)}>
+          <time className="invisible block pt-[3px] text-right text-meta text-ink-3 tabular-nums group-hover:visible" title={formatFull(m.ts)}>
             {formatTime(m.ts).replace(/\s?[AP]M$/i, "")}
           </time>
         )}
@@ -176,23 +176,23 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
       <div className="min-w-0">
         {head && (
           <div className="flex items-baseline gap-2">
-            <span className="truncate text-[13.5px] font-semibold tracking-[-0.01em]" title={sponsor}>
+            <span className="truncate text-ui font-semibold tracking-[-0.01em]" title={sponsor}>
               {who}
             </span>
-            {said && <span className={cx("truncate text-[13px]", said.alert ? "font-medium text-alert" : "text-ink-2")}>{said.text}</span>}
-            {room && <span className="shrink-0 text-[12px] text-ink-3">in #{room}</span>}
-            <time className="ml-auto shrink-0 pl-2 text-[11.5px] text-ink-3 tabular-nums" title={formatFull(m.ts)}>
+            {said && <span className={cx("truncate text-ui", said.alert ? "font-medium text-alert" : "text-ink-2")}>{said.text}</span>}
+            {room && <span className="shrink-0 text-meta text-ink-3">in #{room}</span>}
+            <time className="ml-auto shrink-0 pl-2 text-meta text-ink-3 tabular-nums" title={formatFull(m.ts)}>
               {formatTime(m.ts)}
             </time>
           </div>
         )}
-        {!head && said && <p className={cx("text-[12.5px]", said.alert ? "font-medium text-alert" : "text-ink-2")}>{said.text}</p>}
+        {!head && said && <p className={cx("text-ui", said.alert ? "font-medium text-alert" : "text-ink-2")}>{said.text}</p>}
 
         {!adjacentReply &&
           m.re?.map((seq) => {
             const q = quoted(seq)
             return (
-              <button key={seq} type="button" onClick={() => onJump(seq)} className="mt-0.5 flex max-w-full items-center gap-1.5 text-left text-[12.5px] text-ink-3 transition-colors hover:text-ink-2">
+              <button key={seq} type="button" onClick={() => onJump(seq)} className="mt-0.5 flex max-w-full items-center gap-1.5 text-left text-ui text-ink-3 transition-colors hover:text-ink-2">
                 <Icon icon={ArrowTurnBackwardIcon} size={13} className="shrink-0" />
                 <span className="truncate">
                   <span className="font-medium text-ink-2">{q ? nameOf(q.from) : "Earlier message"}</span> {q ? excerpt(q.body, 110) : ""}
@@ -202,7 +202,7 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
           })}
 
         {!imageOnly && (
-          <div className={cx("text-[14.5px] leading-[1.6] tracking-[-0.006em]", forged ? "text-ink-3 line-through" : "text-ink")}>
+          <div className={cx("text-body leading-[1.6] tracking-[-0.006em]", forged ? "text-ink-3 line-through" : "text-ink")}>
             <Markdown>{m.body}</Markdown>
           </div>
         )}
@@ -213,16 +213,16 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
               const url = `data:${img.mime};base64,${img.data}`
               return (
                 <a key={i} href={url} target="_blank" rel="noreferrer" title={img.name}>
-                  <img src={url} alt={img.name} loading="lazy" className="max-h-72 max-w-full rounded-[8px] object-cover shadow-[0_0_0_0.5px_var(--line)]" />
+                  <img src={url} alt={img.name} loading="lazy" className="max-h-72 max-w-full rounded-ctl object-cover shadow-[0_0_0_0.5px_var(--line)]" />
                 </a>
               )
             })}
           </div>
         ) : null}
 
-        {direct && !forged && <p className="mt-0.5 text-[12px] text-ink-3">Sent directly, not through {nameOf(direct)}.</p>}
+        {direct && !forged && <p className="mt-0.5 text-meta text-ink-3">Sent directly, not through {nameOf(direct)}.</p>}
         {forged && (
-          <p className="mt-0.5 text-[12px] text-alert">
+          <p className="mt-0.5 text-meta text-alert">
             {trust === "refused" ? `Against what the owner allows here, so agents ignore it.` : `Not signed by ${m.from}’s key, so agents ignore it.`}
           </p>
         )}
@@ -231,7 +231,7 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
           <button
             type="button"
             onClick={() => onOpenThread(m.seq)}
-            className="mt-1 -ml-1.5 flex max-w-full items-center gap-2 rounded-[8px] py-1 pr-2.5 pl-1.5 text-left text-[12.5px] transition-colors hover:bg-wash-2"
+            className="mt-1 -ml-1.5 flex max-w-full items-center gap-2 rounded-ctl py-1 pr-2.5 pl-1.5 text-left text-ui transition-colors hover:bg-wash-2"
           >
             <span className="flex shrink-0 -space-x-1" aria-hidden>
               {thread.people.slice(0, 4).map((p) => (
@@ -241,13 +241,13 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
               ))}
             </span>
             <span className={cx("shrink-0 font-medium", thread.forYou ? "text-ink" : "text-ink-2")}>{thread.count === 1 ? "1 reply" : `${thread.count} replies`}</span>
-            {thread.forYou && <span className="shrink-0 rounded-full bg-ink px-1.5 text-[11px] font-semibold text-canvas">for you</span>}
+            {thread.forYou && <span className="shrink-0 rounded-full bg-ink px-1.5 text-meta font-semibold text-canvas">for you</span>}
             <span className="truncate text-ink-2">last {formatTime(thread.last)}</span>
           </button>
         )}
       </div>
 
-      <div className={cx("absolute -top-3 hidden items-center gap-px rounded-[9px] bg-raised p-0.5 shadow-pop group-focus-within:flex group-hover:flex", head ? "right-[84px]" : "right-3")}>
+      <div className={cx("absolute -top-3 hidden items-center gap-px rounded-ctl bg-raised p-0.5 shadow-pop group-focus-within:flex group-hover:flex", head ? "right-[84px]" : "right-3")}>
         <IconButton label="Reply" className="size-7" onClick={() => onReply(m)}>
           <Icon icon={ArrowTurnBackwardIcon} size={15} />
         </IconButton>

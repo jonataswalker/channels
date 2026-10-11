@@ -15,7 +15,7 @@ function QrCode({ text, size = 200 }: { text: string; size?: number }) {
     return p
   }, [qr])
   return (
-    <div className="inline-flex rounded-[12px] bg-white p-3.5 shadow-[0_0_0_0.5px_var(--line)]">
+    <div className="inline-flex rounded-card bg-white p-3.5 shadow-[0_0_0_0.5px_var(--line)]">
       <svg width={size} height={size} viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges" role="img" aria-label="QR code for your other device">
         <path d={d} fill="#000" />
       </svg>
@@ -108,17 +108,17 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
       <div className="p-5">
         {step.kind === "confirm" && (
           <>
-            <h2 className="text-[15px] font-semibold">Add a device</h2>
+            <h2 className="text-title font-semibold">Add a device</h2>
             {what.channels === 0 ? (
-              <p className="mt-1.5 text-[13px] leading-normal text-ink-2">This browser isn’t in any channels yet, so there’s nothing to bring over.</p>
+              <p className="mt-1.5 text-ui leading-normal text-ink-2">This browser isn’t in any channels yet, so there’s nothing to bring over.</p>
             ) : (
               <>
-                <p className="mt-1.5 text-[13px] leading-normal text-ink-2">
+                <p className="mt-1.5 text-ui leading-normal text-ink-2">
                   Bring your channels to your phone or another browser. It gets everything this browser has: {what.channels === 1 ? "1 channel" : `${what.channels} channels`}
                   {owned}.
                 </p>
-                {what.owned > 0 && <p className="mt-2 text-[13px] leading-normal text-ink-2">On channels you own, it can let people in and close the channel, like this browser.</p>}
-                <p className="mt-2 text-[13px] leading-normal text-ink-2">Only scan the code with a device of your own.</p>
+                {what.owned > 0 && <p className="mt-2 text-ui leading-normal text-ink-2">On channels you own, it can let people in and close the channel, like this browser.</p>}
+                <p className="mt-2 text-ui leading-normal text-ink-2">Only scan the code with a device of your own.</p>
               </>
             )}
             <div className="mt-5 flex justify-end gap-2">
@@ -132,14 +132,14 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
         {step.kind === "working" && <Spinner />}
         {step.kind === "showing" && (
           <>
-            <h2 className="text-[15px] font-semibold">Scan with your other device</h2>
-            <p className="mt-1.5 text-[13px] leading-normal text-ink-2">
+            <h2 className="text-title font-semibold">Scan with your other device</h2>
+            <p className="mt-1.5 text-ui leading-normal text-ink-2">
               Point its camera here, then sign in as <span className="font-medium text-ink">{auth.user?.email ?? displayName(auth.user)}</span>.
             </p>
             <div className="mt-5 flex justify-center">
               <QrCode text={offerLink(location.origin, step.offer)} />
             </div>
-            <p className="mt-4 text-center text-[12px] text-ink-3 tabular-nums">Works once · expires in {countdown(step.offer.expires - now)}</p>
+            <p className="mt-4 text-center text-meta text-ink-3 tabular-nums">Works once · expires in {countdown(step.offer.expires - now)}</p>
             <div className="mt-5 flex justify-between gap-2">
               <Button
                 variant="ghost"
@@ -156,8 +156,8 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
         )}
         {step.kind === "taken" && (
           <>
-            <h2 className="text-[15px] font-semibold">Your channels are on your other device</h2>
-            <p className="mt-1.5 text-[13px] leading-normal text-ink-2">Channels you join here later won’t follow on their own. Add the device again to bring them over.</p>
+            <h2 className="text-title font-semibold">Your channels are on your other device</h2>
+            <p className="mt-1.5 text-ui leading-normal text-ink-2">Channels you join here later won’t follow on their own. Add the device again to bring them over.</p>
             <div className="mt-5 flex justify-end">
               <Button onClick={close}>Done</Button>
             </div>
@@ -165,8 +165,8 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
         )}
         {(step.kind === "expired" || step.kind === "error") && (
           <>
-            <h2 className="text-[15px] font-semibold">{step.kind === "expired" ? "That code expired" : "Couldn’t make a code"}</h2>
-            <p className="mt-1.5 text-[13px] leading-normal text-ink-2">{step.kind === "expired" ? "Codes work for ten minutes. Show a new one when your device is ready." : step.message}</p>
+            <h2 className="text-title font-semibold">{step.kind === "expired" ? "That code expired" : "Couldn’t make a code"}</h2>
+            <p className="mt-1.5 text-ui leading-normal text-ink-2">{step.kind === "expired" ? "Codes work for ten minutes. Show a new one when your device is ready." : step.message}</p>
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="secondary" onClick={close}>
                 Cancel
@@ -211,35 +211,35 @@ export function TakeChannelsPage({ offer, onDone }: { offer: { id: string; secre
   return (
     <div className="flex h-svh flex-col">
       <header className="flex h-[56px] shrink-0 items-center px-5">
-        <Wordmark className="text-[15px]" />
+        <Wordmark className="text-title" />
       </header>
       <div className="flex flex-1 items-center justify-center p-8">
         <div className="w-full max-w-[380px]">
           {auth.status === "off" ? (
             <>
-              <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.02em]">This relay can’t do that</h2>
-              <p className="mt-2 text-[14px] leading-normal text-ink-2">Bringing channels between devices needs sign-in, and this relay doesn’t use it.</p>
+              <h2 className="text-display leading-tight font-semibold tracking-[-0.02em]">This relay can’t do that</h2>
+              <p className="mt-2 text-body leading-normal text-ink-2">Bringing channels between devices needs sign-in, and this relay doesn’t use it.</p>
               <Button size="lg" variant="secondary" className="mt-6" onClick={onDone}>
                 Back to channels
               </Button>
             </>
           ) : auth.status === "signed-out" ? (
             <>
-              <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.02em]">Bring your channels here</h2>
-              <p className="mt-2 text-[14px] leading-normal text-ink-2">Sign in with the same account as the device showing the code.</p>
+              <h2 className="text-display leading-tight font-semibold tracking-[-0.02em]">Bring your channels here</h2>
+              <p className="mt-2 text-body leading-normal text-ink-2">Sign in with the same account as the device showing the code.</p>
               <Button size="lg" className="mt-6" onClick={auth.signIn}>
                 Sign in to continue
               </Button>
             </>
           ) : state.kind === "working" ? (
             <>
-              <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.02em]">Bringing your channels here</h2>
+              <h2 className="text-display leading-tight font-semibold tracking-[-0.02em]">Bringing your channels here</h2>
               <Spinner className="mt-6" />
             </>
           ) : state.kind === "done" ? (
             <>
-              <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.02em]">{state.added ? `${added} added to this device` : "This device already had them"}</h2>
-              <p className="mt-2 text-[14px] leading-normal text-ink-2">
+              <h2 className="text-display leading-tight font-semibold tracking-[-0.02em]">{state.added ? `${added} added to this device` : "This device already had them"}</h2>
+              <p className="mt-2 text-body leading-normal text-ink-2">
                 {state.kept > 0 && state.added > 0 ? `${state.kept} more were already here. ` : ""}Still end-to-end encrypted: only your devices hold the keys.
               </p>
               <Button size="lg" className="mt-6" onClick={onDone}>
@@ -248,8 +248,8 @@ export function TakeChannelsPage({ offer, onDone }: { offer: { id: string; secre
             </>
           ) : (
             <>
-              <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.02em]">That code didn’t work</h2>
-              <p className="mt-2 text-[14px] leading-normal text-ink-2">{state.message}</p>
+              <h2 className="text-display leading-tight font-semibold tracking-[-0.02em]">That code didn’t work</h2>
+              <p className="mt-2 text-body leading-normal text-ink-2">{state.message}</p>
               <Button size="lg" variant="secondary" className="mt-6" onClick={onDone}>
                 Back to channels
               </Button>

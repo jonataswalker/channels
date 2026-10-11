@@ -48,18 +48,18 @@ export function LinkComputerPage({ pk, onDone }: { pk: string; onDone: () => voi
   return (
     <div className="flex h-svh flex-col">
       <header className="flex h-[56px] shrink-0 items-center px-5">
-        <Wordmark className="text-[15px]" />
+        <Wordmark className="text-title" />
       </header>
       <div className="flex flex-1 items-center justify-center p-8">
         <div className="w-full max-w-[380px]">
-          <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.02em]">Link this computer to your account?</h2>
-          <p className="mt-2 text-[14px] leading-normal text-ink-2">
+          <h2 className="text-display leading-tight font-semibold tracking-[-0.02em]">Link this computer to your account?</h2>
+          <p className="mt-2 text-body leading-normal text-ink-2">
             Agents you start on <span className="font-medium text-ink">{info?.label ?? "it"}</span> will join channels as yours. Channel owners still approve each one.
           </p>
           {state === "loading" && <Spinner className="mt-6" />}
           {state === "ready" && (
             <>
-              <p className="mt-6 text-[13px] text-ink-2">Check that your terminal shows this code:</p>
+              <p className="mt-6 text-ui text-ink-2">Check that your terminal shows this code:</p>
               <div className="my-5 text-[44px] leading-none font-semibold tracking-[0.04em] tabular-nums">{code}</div>
               {auth.status === "signed-in" ? (
                 <div className="flex gap-2">
@@ -77,19 +77,19 @@ export function LinkComputerPage({ pk, onDone }: { pk: string; onDone: () => voi
                   Sign in to continue
                 </Button>
               )}
-              {auth.status === "signed-in" && <p className="mt-6 text-[12px] text-ink-3">Signed in as {displayName(auth.user)}. Only confirm a code you just saw in your own terminal.</p>}
+              {auth.status === "signed-in" && <p className="mt-6 text-meta text-ink-3">Signed in as {displayName(auth.user)}. Only confirm a code you just saw in your own terminal.</p>}
             </>
           )}
           {state === "working" && <Spinner className="mt-6" />}
           {state === "done" && (
             <>
-              <p className="mt-6 text-[14px]">Linked. Your terminal continues on its own; you can close this tab.</p>
+              <p className="mt-6 text-body">Linked. Your terminal continues on its own; you can close this tab.</p>
               <Button size="lg" variant="secondary" className="mt-4" onClick={onDone}>
                 Go to your channels
               </Button>
             </>
           )}
-          {state === "error" && <p className="mt-6 text-[13px] text-alert">{error}</p>}
+          {state === "error" && <p className="mt-6 text-ui text-alert">{error}</p>}
         </div>
       </div>
     </div>
@@ -148,18 +148,18 @@ export function ComputersModal({ open, onClose }: { open: boolean; onClose: () =
   return (
     <Modal open={open} onClose={onClose}>
       <div className="p-5">
-        <h2 className="text-[15px] font-semibold">Your computers</h2>
-        <p className="mt-1 text-[13px] leading-normal text-ink-2">
+        <h2 className="text-title font-semibold">Your computers</h2>
+        <p className="mt-1 text-ui leading-normal text-ink-2">
           Agents started on these join channels as yours. A computer unused for 30 days is unlinked on its own. Remove one you no longer use or trust.
         </p>
         <div className="mt-4 grid gap-1">
           {list === null && <Spinner />}
-          {list?.length === 0 && <p className="text-[13px] text-ink-3">None yet. Run kiwi setup on a computer to link it.</p>}
+          {list?.length === 0 && <p className="text-ui text-ink-3">None yet. Run kiwi setup on a computer to link it.</p>}
           {list?.map((c) => (
-            <div key={c.pk} className="flex items-center gap-3 rounded-[8px] py-1.5">
+            <div key={c.pk} className="flex items-center gap-3 rounded-ctl py-1.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[13.5px] font-medium">{c.label}</p>
-                <p className="text-[12px] text-ink-3">{usage(c, clockNow())}</p>
+                <p className="truncate text-ui font-medium">{c.label}</p>
+                <p className="text-meta text-ink-3">{usage(c, clockNow())}</p>
               </div>
               <Button size="sm" variant="danger" onClick={() => void remove(c)}>
                 Remove

@@ -8,10 +8,10 @@ import { Icon } from "../icon"
 // Menus on Base UI: keyboard, focus and outside-click come for free. Pass the
 // element that opens it as `trigger`; it keeps its own look.
 
-export const POP = "rounded-[10px] bg-raised p-1 text-ink shadow-pop outline-none"
+export const POP = "rounded-card bg-raised p-1 text-ink shadow-pop outline-none"
 /** Popups grow out of their anchor on open and leave at once on close. */
 export const POP_IN = "origin-(--transform-origin) transition-[opacity,scale] duration-150 ease-out data-starting-style:scale-[0.97] data-starting-style:opacity-0"
-const ITEM = "flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-1.5 text-left text-[13px] outline-none select-none data-disabled:opacity-40 data-highlighted:bg-wash-2"
+const ITEM = "flex w-full cursor-default items-center gap-2 rounded-ctl px-2 py-1.5 text-left text-ui outline-none select-none data-disabled:opacity-40 data-highlighted:bg-wash-2"
 
 export function Menu({
   trigger,
@@ -44,11 +44,11 @@ export function MenuItem({ className, tone, ...props }: Base.Item.Props & { tone
 
 /** Quiet text at the top of a menu, e.g. who you're signed in as. */
 export function MenuNote({ children }: { children: ReactNode }) {
-  return <p className="truncate px-2 pt-1.5 pb-2 text-[12px] text-ink-2">{children}</p>
+  return <p className="truncate px-2 pt-1.5 pb-2 text-meta text-ink-2">{children}</p>
 }
 
 export function MenuLabel({ children }: { children: ReactNode }) {
-  return <Base.GroupLabel className="px-2 pt-1.5 pb-1 text-[11.5px] font-medium text-ink-3">{children}</Base.GroupLabel>
+  return <Base.GroupLabel className="px-2 pt-1.5 pb-1 text-meta font-medium text-ink-3">{children}</Base.GroupLabel>
 }
 
 export function MenuSeparator() {
@@ -77,7 +77,7 @@ export function MenuRadioItem({ value, children, hint, onClick }: { value: strin
       {hint ? (
         <span>
           <span className="block font-medium">{children}</span>
-          <span className="block text-[12px] text-ink-3">{hint}</span>
+          <span className="block text-meta text-ink-3">{hint}</span>
         </span>
       ) : (
         children

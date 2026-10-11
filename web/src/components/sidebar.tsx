@@ -69,9 +69,9 @@ export function Sidebar({
           <Menu
             className="w-60"
             trigger={
-              <button type="button" className="flex min-w-0 items-center gap-2 rounded-[8px] py-1 pr-2 pl-1 transition-colors hover:bg-wash data-popup-open:bg-wash">
+              <button type="button" className="flex min-w-0 items-center gap-2 rounded-ctl py-1 pr-2 pl-1 transition-colors hover:bg-wash data-popup-open:bg-wash">
                 <Monogram name={displayName(auth.user)} size={24} />
-                <span className="truncate text-[13px] font-semibold">{displayName(auth.user)}</span>
+                <span className="truncate text-ui font-semibold">{displayName(auth.user)}</span>
                 <Icon icon={ArrowDown01Icon} size={14} className="shrink-0 text-ink-3" />
               </button>
             }
@@ -86,12 +86,12 @@ export function Sidebar({
             <MenuItem onClick={() => void lockVault().finally(auth.signOut)}>Sign out</MenuItem>
           </Menu>
         ) : (
-          <Wordmark className="pl-1 text-[15px]" />
+          <Wordmark className="pl-1 text-title" />
         )}
       </header>
 
       <div className="flex items-center justify-between pr-2 pl-4">
-        <h2 className="text-[12px] font-semibold text-ink-2">Channels</h2>
+        <h2 className="text-meta font-semibold text-ink-2">Channels</h2>
         <span className="flex-1" />
         <IconButton label={`Go to… (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"}K)`} className="size-7" onClick={onPalette}>
           <Icon icon={Search01Icon} size={15} />
@@ -113,13 +113,13 @@ export function Sidebar({
       {auth.status === "signed-in" && <VaultCard />}
 
       {rows.length > 6 && (
-        <label className="mx-3 mt-1 mb-1 flex h-8 items-center gap-2 rounded-[8px] bg-wash px-2.5 text-ink-3">
+        <label className="mx-3 mt-1 mb-1 flex h-8 items-center gap-2 rounded-ctl bg-wash px-2.5 text-ink-3">
           <Icon icon={Search01Icon} size={14} className="shrink-0" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Find a channel"
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
+            className="min-w-0 flex-1 bg-transparent text-ui text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
           />
         </label>
       )}
@@ -135,42 +135,42 @@ export function Sidebar({
               onClick={() => onSelect(c.code)}
               aria-current={selected ? "page" : undefined}
               className={cx(
-                "mb-0.5 flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-colors",
+                "mb-0.5 flex w-full items-center gap-2.5 rounded-ctl px-2.5 py-2 text-left transition-colors",
                 selected ? "bg-pick shadow-[0_0_0_1px_var(--pick-edge)]" : "hover:bg-wash"
               )}
             >
               <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={28} />
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">
-                  <span className={cx("min-w-0 flex-1 truncate text-[14px] font-medium tracking-[-0.01em]", !reachable && "text-ink-2")}>{c.title}</span>
+                  <span className={cx("min-w-0 flex-1 truncate text-body font-medium tracking-[-0.01em]", !reachable && "text-ink-2")}>{c.title}</span>
                   {reachable ? (
-                    <span className="shrink-0 text-[11.5px] text-ink-3 tabular-nums">{formatShort(c.ts)}</span>
+                    <span className="shrink-0 text-meta text-ink-3 tabular-nums">{formatShort(c.ts)}</span>
                   ) : c.state !== "pending" ? (
                     <Icon icon={LockIcon} size={12} className="shrink-0 self-center text-ink-3" />
                   ) : null}
                 </span>
-                <span className={cx("mt-0.5 block truncate text-[12.5px]", selected ? "text-ink-2" : "text-ink-3")}>{rowNote(c)}</span>
+                <span className={cx("mt-0.5 block truncate text-ui", selected ? "text-ink-2" : "text-ink-3")}>{rowNote(c)}</span>
               </span>
             </button>
           )
         })}
-        {rows.length > 0 && shown.length === 0 && <p className="px-3 py-6 text-[12.5px] text-ink-3">No channel matches “{query}”.</p>}
+        {rows.length > 0 && shown.length === 0 && <p className="px-3 py-6 text-ui text-ink-3">No channel matches “{query}”.</p>}
         {rows.length === 0 && (
-          <p className="px-3 py-4 text-[12.5px] leading-normal text-ink-3">
+          <p className="px-3 py-4 text-ui leading-normal text-ink-3">
             {auth.status === "signed-out" ? "Sign in to see your channels from any device." : "Channels you create or join show up here."}
           </p>
         )}
       </nav>
 
       {usage && usageLine(usage) && (
-        <button type="button" onClick={onUsage} className="mx-2 mb-2 shrink-0 rounded-[8px] px-2.5 py-2 text-left text-[12px] text-ink-3 transition-colors hover:bg-wash">
+        <button type="button" onClick={onUsage} className="mx-2 mb-2 shrink-0 rounded-ctl px-2.5 py-2 text-left text-meta text-ink-3 transition-colors hover:bg-wash">
           <span className={cx("tabular-nums", atChannelLimit(usage) && "font-medium text-ink-2")}>{usageLine(usage)}</span>
           {atChannelLimit(usage) && <span> · close one to create another</span>}
         </button>
       )}
       {auth.status === "signed-out" && (
         <div className="shrink-0 p-3">
-          {auth.expired && <p className="mb-2 px-1 text-[12.5px] leading-normal text-ink-2">Your sign-in expired. Sign in again to sync your channels and approve requests.</p>}
+          {auth.expired && <p className="mb-2 px-1 text-ui leading-normal text-ink-2">Your sign-in expired. Sign in again to sync your channels and approve requests.</p>}
           <Button className="w-full" onClick={auth.signIn}>
             Sign in
           </Button>
