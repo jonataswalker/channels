@@ -85,6 +85,7 @@ interface Api {
   ask: (c: Confirm) => void
   openRequests: () => void
   openInvite: () => void
+  openMode: () => void
   editRole: (m: RosterMember) => void
   editScopes: (m: RosterMember) => void
   lastSeenOf: (name: string) => number | null
@@ -122,7 +123,7 @@ const inviteLink = (code: string) => `${location.origin}/#${code}`
 
 export function ChannelControls({ children, ...p }: ControlsProps & { children: ReactNode }) {
   const [confirm, setConfirm] = useState<Confirm>(null)
-  const [sheet, setSheet] = useState<"requests" | "invite" | null>(null)
+  const [sheet, setSheet] = useState<"requests" | "invite" | "mode" | null>(null)
   const [busy, setBusy] = useState(false)
   const [sure, setSure] = useState(false)
   const [roleDraft, setRoleDraft] = useState({ role: "", about: "" })
@@ -158,6 +159,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
     },
     openRequests: () => setSheet("requests"),
     openInvite: () => setSheet("invite"),
+    openMode: () => setSheet("mode"),
     editRole: (m) => {
       const live = p.state.members.get(m.name)
       setRoleDraft({ role: live?.role ?? "", about: live?.about ?? "" })
@@ -181,6 +183,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
       <Modal open={sheet === "invite"} onClose={() => setSheet(null)} wide>
         <Invite onDone={() => setSheet(null)} />
       </Modal>
+      {p.onMode && sheet === "mode" && <ModeDialog state={p.state} onClose={() => setSheet(null)} onSave={p.onMode} />}
 
       <Alert
         open={confirm?.kind === "role"}
@@ -350,8 +353,11 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
 
 /** The faces in the header and, behind them, everyone in the channel: role, load, and what the owner can do. */
 export function People({ here, subtitle, live }: { here: Member[]; subtitle: string; live: boolean }) {
-  const { p, busy, run, ask, editRole, editScopes } = useControls()
+  const { p, busy, run, ask, editRole, editScopes, openMode } = useControls()
   const [open, setOpen] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const mode = p.state.mode
+  const coordinator = p.state.coordinator
   const active = p.roster.filter((m) => m.active).sort((a, b) => Number(b.owner) - Number(a.owner) || Number(p.online.has(b.name)) - Number(p.online.has(a.name)))
   const former = p.roster.filter((m) => !m.active)
   const act = (fn: () => void) => () => (setOpen(false), fn())
@@ -362,7 +368,7 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
       onOpenChange={setOpen}
       className="w-[340px] p-1.5"
       trigger={
-        <button type="button" aria-label={`People, ${subtitle}`} className="flex max-w-full items-center gap-1.5 rounded-row text-left transition-colors hover:text-ink data-popup-open:text-ink">
+        <button type="button" aria-label={`People, ${subtitle}`} className="flex h-7 max-w-full items-center gap-1.5 rounded-full px-2 text-left transition-colors hover:bg-wash data-popup-open:bg-wash">
           {live && here.length > 0 && (
             <span className="flex shrink-0 -space-x-1" aria-hidden>
               {here.slice(0, 5).map((m) => (
@@ -378,6 +384,26 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
     >
       <div className="max-h-[min(520px,70svh)] overflow-y-auto">
         <h2 className="sr-only">People</h2>
+        {/* Coordinator-only, where people are: who relays, and (owner) the switch. */}
+        {(p.isOwner || mode.coordinatorOnly) && (
+          <div className="mb-1 flex items-center gap-3 rounded-ctl bg-wash px-3 py-2.5">
+            <span className="min-w-0 flex-1">
+              <span className="block text-ui font-medium">Coordinator-only {mode.coordinatorOnly ? "is on" : "is off"}</span>
+              <span className="block text-meta text-ink-2">
+                {coordinator
+                  ? mode.coordinatorOnly
+                    ? `People talk with ${memberName(p.state.members.get(coordinator))}, who passes things on.`
+                    : `${memberName(p.state.members.get(coordinator))} is the coordinator.`
+                  : "Make an agent the coordinator to route people through it."}
+              </span>
+            </span>
+            {p.isOwner && p.onMode && (
+              <Button size="sm" variant="secondary" onClick={act(openMode)}>
+                {mode.coordinatorOnly ? "Change…" : "Turn on…"}
+              </Button>
+            )}
+          </div>
+        )}
         {active.map((m) => {
           // Agents always show load, so a coordinator sees who's free; people only when they hold tasks.
           const load = memberLoad(p.state, m.name, p.now)
@@ -417,6 +443,9 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
                     }
                   >
                     <MenuItem onClick={act(() => editRole(m))}>Set role…</MenuItem>
+                    {m.kind !== "human" && p.state.coordinator !== m.name && (
+                      <MenuItem onClick={act(() => void run(() => p.onRole({ op: "role.set", member: m.name, role: "coordinator" }), `${m.name} is the coordinator`))}>Make coordinator</MenuItem>
+                    )}
                     {p.onScopes && <MenuItem onClick={act(() => editScopes(m))}>What they can do…</MenuItem>}
                     <MenuSeparator />
                     <MenuItem tone="danger" onClick={act(() => ask({ kind: "remove", member: m }))}>
@@ -451,7 +480,18 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
                   )}
                 </div>
               )}
-              {m.pk === p.myKey && (m.kind === "human" || m.owner) && p.onColor && <ColorPicker state={p.state} me={m.name} />}
+              {m.pk === p.myKey && (m.kind === "human" || m.owner) && p.onColor && (
+                <div className="mt-1 ml-[36px]">
+                  {picking ? (
+                    <ColorPicker state={p.state} me={m.name} />
+                  ) : (
+                    <button type="button" onClick={() => setPicking(true)} className="flex h-6 items-center gap-1.5 rounded-row px-1.5 text-meta text-ink-2 hover:bg-wash hover:text-ink">
+                      <span className="size-3 rounded-full" style={{ background: colorOf(p.state, m.name) ? PALETTE[colorOf(p.state, m.name)!].fill : "var(--wash-2)" }} />
+                      Your colour
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )
         })}
@@ -470,7 +510,7 @@ function ColorPicker({ state, me }: { state: ChannelState; me: string }) {
   for (const x of state.members.values()) if (x.active && x.name !== me && x.color && (x.kind === "human" || x.owner)) holders.set(x.color, x)
   const pick = (c: Color | null) => void run(() => p.onColor!(c), c ? `You're ${c} now` : "Colour cleared")
   return (
-    <div className="mt-1.5 ml-[36px] flex flex-wrap items-center gap-1" role="radiogroup" aria-label="Your colour">
+    <div className="flex flex-wrap items-center gap-1 py-0.5" role="radiogroup" aria-label="Your colour">
       {COLORS.map((c) => {
         const holder = holders.get(c)
         const on = mine === c
@@ -712,11 +752,10 @@ function Requests({ onDone }: { onDone: () => void }) {
 
 /** Things you do to the channel itself, the dangerous ones last and in red. */
 export function ChannelMenu() {
-  const { p, ask, openInvite, openRequests } = useControls()
+  const { p, ask, openInvite, openRequests, openMode } = useControls()
   const auth = useAuth()
   const [iconOpen, setIconOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
-  const [moding, setModing] = useState(false)
   return (
     <>
       <Menu
@@ -738,7 +777,7 @@ export function ChannelMenu() {
         )}
         {p.isOwner && p.onRename && <MenuItem onClick={() => setRenaming(true)}>Rename channel…</MenuItem>}
         {p.isOwner && p.onSetIcon && <MenuItem onClick={() => setIconOpen(true)}>Channel icon…</MenuItem>}
-        {p.isOwner && p.onMode && <MenuItem onClick={() => setModing(true)}>{p.state.mode.coordinatorOnly ? "Coordinator-only: on…" : "Coordinator-only…"}</MenuItem>}
+        {p.isOwner && p.onMode && <MenuItem onClick={openMode}>{p.state.mode.coordinatorOnly ? "Coordinator-only: on…" : "Coordinator-only…"}</MenuItem>}
         {p.isOwner && <MenuSeparator />}
         {p.isOwner ? (
           <MenuItem tone="danger" onClick={() => ask({ kind: "close" })}>
@@ -752,7 +791,6 @@ export function ChannelMenu() {
       </Menu>
       {p.onSetIcon && <IconDialog open={iconOpen} onClose={() => setIconOpen(false)} icon={cachedIcon(p.roomId ?? "")} onSave={p.onSetIcon} />}
       {p.onRename && renaming && <RenameDialog title={p.title ?? ""} onClose={() => setRenaming(false)} onSave={p.onRename} />}
-      {p.onMode && moding && <ModeDialog state={p.state} onClose={() => setModing(false)} onSave={p.onMode} />}
     </>
   )
 }

@@ -31,23 +31,23 @@ export function ThreadPanel({ count, children, composer, onClose }: { count: num
     <ResizablePanel>
       <aside
         aria-label="Thread"
-        className="animate-slide-in flex h-full w-full flex-col bg-canvas shadow-[inset_0.5px_0_0_var(--line)]"
+        className="animate-slide-in flex h-full w-full flex-col bg-canvas shadow-[inset_1px_0_0_var(--line)]"
         onKeyDown={(e) => {
           if (e.key !== "Escape") return
           e.preventDefault()
           onClose()
         }}
       >
-        <header className="flex h-[56px] shrink-0 items-center justify-between pr-3 pl-5 shadow-[inset_0_-0.5px_0_var(--line)]">
+        <header className="flex h-12 shrink-0 items-center justify-between pr-3 pl-4 shadow-[inset_0_-1px_0_var(--line)]">
           <span className="text-ui font-semibold">
             Thread <span className="font-normal text-ink-2">{count === 1 ? "1 reply" : `${count} replies`}</span>
           </span>
-          <IconButton label="Close thread" onClick={onClose}>
+          <IconButton label="Close thread" round onClick={onClose}>
             <Icon icon={Cancel01Icon} size={17} />
           </IconButton>
         </header>
         <div ref={scroller} className="flex-1 overflow-y-auto">
-          <div className="px-4 pb-4 md:px-5">{children}</div>
+          <div className="px-4 pb-4">{children}</div>
         </div>
         {composer}
       </aside>
