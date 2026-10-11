@@ -140,10 +140,16 @@ try {
   await page.getByRole("button", { name: "Use passkey" }).click()
   await page.getByRole("button", { name: "Use passkey" }).waitFor({ state: "hidden" })
   console.log(`ok  ${at}`)
-  at = "Appearance → Dark"
+  // Settings: dark, and the largest text, so every menu and dialog below opens zoomed in too.
+  at = "Settings → Dark, Larger"
   await account.click()
-  await page.getByRole("menuitemradio", { name: "Dark" }).click()
-  await page.getByRole("menu").waitFor({ state: "hidden" })
+  await page.getByRole("menuitem", { name: "Settings…" }).click()
+  const settings = page.getByRole("dialog").filter({ hasText: "Text size" })
+  await settings.getByRole("radio", { name: "Dark" }).click()
+  await settings.getByRole("radio", { name: "Larger" }).click()
+  await settings.getByRole("button", { name: "Done" }).click()
+  await settings.waitFor({ state: "hidden" })
+  if ((await page.evaluate(() => document.documentElement.style.zoom)) !== "1.22") throw new Error("the text size didn't apply")
   console.log(`ok  ${at}`)
   await opens("Go to… palette", () => page.getByRole("button", { name: /^Go to…/ }).click())
   const plus = page.getByRole("button", { name: "New channel or join" })

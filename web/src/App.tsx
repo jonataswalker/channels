@@ -8,6 +8,7 @@ import { ChannelIconTile } from "@/components/channel-icon"
 import { Sidebar } from "@/components/sidebar"
 import { useIcons } from "@/lib/icons"
 import { Palette, usePaletteShortcut, type Command } from "@/components/ui/palette"
+import { SettingsModal } from "@/components/settings"
 import { UsageModal } from "@/components/usage"
 import { PasskeysSheet } from "@/components/vault"
 import { displayName, useAuth } from "@/lib/auth"
@@ -36,7 +37,7 @@ export default function App() {
   const [link, setLink] = useState(() => parseLinkHash(location.hash))
   const [offer, setOffer] = useState(readOfferHash)
   const [{ code, identity }, setHash] = useState(readHash)
-  const [sheet, setSheet] = useState<"new" | "join" | "computers" | "usage" | "device" | "passkeys" | null>(null)
+  const [sheet, setSheet] = useState<"new" | "join" | "computers" | "usage" | "device" | "passkeys" | "settings" | null>(null)
   const rows = useChannelList(auth.status === "signed-in", auth.token)
   const icons = useIcons()
   const usage = useUsage(auth.status === "signed-in", auth.token)
@@ -62,6 +63,7 @@ export default function App() {
     }
     if (usage) act("usage", "Usage", () => setSheet("usage"))
     if (auth.status === "signed-out") act("signin", "Sign in", auth.signIn)
+    act("settings", "Settings", () => setSheet("settings"))
     list.push(
       { id: "light", group: "Appearance", label: "Light", run: () => setAppearance("light") },
       { id: "dark", group: "Appearance", label: "Dark", run: () => setAppearance("dark") },
@@ -120,6 +122,7 @@ export default function App() {
             onComputers={() => setSheet("computers")}
             onAddDevice={() => setSheet("device")}
             onPasskeys={() => setSheet("passkeys")}
+            onSettings={() => setSheet("settings")}
             usage={usage}
             onUsage={() => setSheet("usage")}
             onPalette={() => setPalette(true)}
@@ -157,6 +160,7 @@ export default function App() {
       {sheet === "device" && <AddDeviceModal onClose={() => setSheet(null)} />}
       <PasskeysSheet open={sheet === "passkeys"} onClose={() => setSheet(null)} />
       <UsageModal open={sheet === "usage"} onClose={() => setSheet(null)} usage={usage} rows={rows} />
+      <SettingsModal open={sheet === "settings"} onClose={() => setSheet(null)} />
       <Palette open={palette} onClose={() => setPalette(false)} commands={commands} />
       <Toaster />
     </>

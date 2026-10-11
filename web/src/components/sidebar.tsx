@@ -6,13 +6,12 @@ import type { ChannelRow } from "@/lib/channel"
 import { useIcons, useMemberIcons } from "@/lib/icons"
 import { atChannelLimit, type MyUsage } from "@/lib/usage"
 import { formatShort } from "@/lib/format"
-import { setAppearance, useAppearance, type Appearance } from "@/lib/theme"
 import { lockVault, useVault } from "@/lib/vault"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { Icon } from "./icon"
 import { Button, IconButton, Monogram, Wordmark } from "./kit"
-import { Menu, MenuGroup, MenuItem, MenuLabel, MenuNote, MenuRadioGroup, MenuRadioItem, MenuSeparator } from "./ui/menu"
+import { Menu, MenuItem, MenuNote, MenuSeparator } from "./ui/menu"
 import { usageLine } from "./usage"
 import { VaultCard } from "./vault"
 
@@ -35,6 +34,7 @@ export function Sidebar({
   onComputers,
   onAddDevice,
   onPasskeys,
+  onSettings,
   usage,
   onUsage,
   onPalette,
@@ -48,6 +48,7 @@ export function Sidebar({
   onComputers: () => void
   onAddDevice: () => void
   onPasskeys: () => void
+  onSettings: () => void
   usage: MyUsage | null
   onUsage: () => void
   onPalette: () => void
@@ -55,7 +56,6 @@ export function Sidebar({
 }) {
   const auth = useAuth()
   const [query, setQuery] = useState("")
-  const appearance = useAppearance()
   const vault = useVault()
   const q = query.trim().toLowerCase()
   const shown = q ? rows.filter((c) => c.title.toLowerCase().includes(q) || c.recent?.text.toLowerCase().includes(q)) : rows
@@ -81,15 +81,7 @@ export function Sidebar({
             {vault.kind === "open" && <MenuItem onClick={onPasskeys}>Passkeys</MenuItem>}
             <MenuItem onClick={onAddDevice}>Add a device</MenuItem>
             {usage && <MenuItem onClick={onUsage}>Usage</MenuItem>}
-            <MenuSeparator />
-            <MenuGroup>
-              <MenuLabel>Appearance</MenuLabel>
-              <MenuRadioGroup<Appearance> value={appearance} onChange={setAppearance}>
-                <MenuRadioItem value="system">Match system</MenuRadioItem>
-                <MenuRadioItem value="light">Light</MenuRadioItem>
-                <MenuRadioItem value="dark">Dark</MenuRadioItem>
-              </MenuRadioGroup>
-            </MenuGroup>
+            <MenuItem onClick={onSettings}>Settings…</MenuItem>
             <MenuSeparator />
             <MenuItem onClick={() => void lockVault().finally(auth.signOut)}>Sign out</MenuItem>
           </Menu>
