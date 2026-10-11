@@ -107,7 +107,7 @@ export function PrLink({ pr }: { pr: PrRef }) {
 }
 
 /** The small mark beside an event row: a task's new state as its state mark, otherwise an icon for what happened. */
-function Mark({ mark }: { mark: EventMark }) {
+export function Mark({ mark }: { mark: EventMark }) {
   if (mark === "add") return <Icon icon={Add01Icon} size={16} />
   if (mark === "assign") return <Icon icon={UserIcon} size={16} />
   if (mark === "note") return <Icon icon={Note01Icon} size={16} />

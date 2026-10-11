@@ -263,13 +263,28 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     )
   }
 
-  // The transcript: day marks, and runs of messages from one sender under one name.
+  // The transcript: day marks, events as muted timeline rows, and each run of messages from one
+  // sender as one card (the Linear activity feed, T1126).
   const rows: ReactNode[] = []
+  let run: ReactNode[] = []
+  let runKey = 0
+  const flushRun = () => {
+    if (!run.length) return
+    rows.push(
+      <div key={`r${runKey}`} className="my-2 rounded-card border border-edge bg-raised px-4 py-1.5">
+        {run}
+      </div>
+    )
+    run = []
+  }
   for (let i = 0; i < visible.length; i++) {
     const m = visible[i]!
     const prev = visible[i - 1]
     const newDay = !prev || !sameDay(prev.ts, m.ts)
-    if (newDay) rows.push(<DayMark key={`d${m.seq}`} ts={m.ts} />)
+    if (newDay) {
+      flushRun()
+      rows.push(<DayMark key={`d${m.seq}`} ts={m.ts} />)
+    }
     if (m.kind === "event") {
       const batch: Message[] = [m]
       let j = i + 1
@@ -278,26 +293,34 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         j++
       }
       i = j - 1
+      flushRun()
       let fold: Message[] = []
       const flush = () => {
         if (!fold.length) return
-        rows.push(<EventGroup key={`e${fold[0]!.seq}`} messages={fold} state={state} onOpenTask={setOpenTask} highlight={highlight} />)
+        rows.push(<EventGroup key={`e${fold[0]!.seq}`} messages={fold} state={state} now={now} onOpenTask={setOpenTask} highlight={highlight} />)
         fold = []
       }
       for (const ev of batch) {
         if (standsAlone(ev, state, me)) {
           flush()
-          rows.push(<EventRow key={ev.seq} m={ev} state={state} onOpenTask={setOpenTask} />)
+          rows.push(<EventRow key={ev.seq} m={ev} state={state} now={now} onOpenTask={setOpenTask} />)
         } else fold.push(ev)
       }
       flush()
       continue
     }
     const adjacentReply = m.re?.length === 1 && prev?.seq === m.re[0]
-    const head = newDay || !prev || prev.kind === "event" || prev.from !== m.from || m.ts - prev.ts > RUN_GAP || (!!m.re?.length && !adjacentReply)
-    rows.push(
+    // A question, a blocker or an update says so in its own meta line, so it starts a row of its own.
+    const head = newDay || !prev || prev.kind === "event" || prev.from !== m.from || m.ts - prev.ts > RUN_GAP || (!!m.re?.length && !adjacentReply) || m.kind !== "msg"
+    // A new sender, a new day, or a gap starts a new card; a question from the same sender stays in its card.
+    if (newDay || !prev || prev.kind === "event" || prev.from !== m.from || m.ts - prev.ts > RUN_GAP) {
+      flushRun()
+      runKey = m.seq
+    }
+    run.push(
       <MessageRow
         key={m.seq}
+        now={now}
         m={m}
         me={me}
         author={(m.pk && byKey.get(m.pk)) || state.members.get(m.from)}
@@ -319,6 +342,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     )
   }
 
+  flushRun()
+
   // The open thread: its first message, then every reply, grouped the same way.
   const root = threadRoot === null ? undefined : bySeqAll.get(threadRoot)
   const replies = threadRoot === null ? [] : (threads.get(threadRoot) ?? [])
@@ -331,6 +356,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       threadRows.push(
         <MessageRow
           key={m.seq}
+          now={now}
           anchor="t"
           m={m}
           me={me}
@@ -543,17 +569,19 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             />
           ) : (
             <>
-              <div className="mx-auto flex w-full max-w-[760px] shrink-0 flex-wrap items-center gap-1.5 px-4 pt-3 pb-1 md:px-8">
-                {search !== null && (
+              {search !== null && (
+                <div className="mx-auto w-full max-w-[760px] shrink-0 px-4 pt-3 md:px-8">
                   <TextField
                     autoFocus
                     value={search}
                     placeholder="Search messages"
-                    className="mb-1.5 basis-full"
                     onChange={(e) => setSearch(e.target.value)}
                     onKeyDown={(e) => e.key === "Escape" && setSearch(null)}
                   />
-                )}
+                </div>
+              )}
+              {/* One row of quiet tabs, like the header's; on a phone it scrolls sideways instead of wrapping. */}
+              <div className="mx-auto flex w-full max-w-[760px] shrink-0 flex-nowrap items-center gap-1 overflow-x-auto px-4 pt-3 pb-1 [scrollbar-width:none] md:px-8">
                 {manyRooms && <RoomMenu state={state} active={rooms.active} unread={rooms.unread} onOpen={(id) => (rooms.open(id), setFilter(undefined), setThreadRoot(null))} />}
                 {chips.map((c) => {
                   const on = c.f === null ? filter === null : filter?.kind === c.f.kind
@@ -564,8 +592,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                       aria-pressed={on}
                       onClick={() => setFilter(c.f)}
                       className={cx(
-                        "flex h-7 items-center gap-1.5 rounded-full px-3 text-ui font-medium transition-colors",
-                        on ? "bg-ink text-canvas" : "text-ink-2 shadow-[inset_0_0_0_1px_var(--line)] hover:text-ink"
+                        "flex h-7 shrink-0 items-center gap-1.5 rounded-ctl px-2.5 text-ui font-medium transition-colors",
+                        on ? "bg-wash-2 text-ink" : "text-ink-3 hover:text-ink"
                       )}
                     >
                       {c.label}
@@ -577,7 +605,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   <button
                     type="button"
                     onClick={() => setFilter(null)}
-                    className="flex h-7 items-center gap-1 rounded-full bg-ink pr-2 pl-3 text-ui font-medium text-canvas"
+                    className="flex h-7 shrink-0 items-center gap-1 rounded-ctl bg-wash-2 pr-2 pl-2.5 text-ui font-medium text-ink"
                     title="Show everything"
                   >
                     {filterLabel}

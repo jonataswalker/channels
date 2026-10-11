@@ -255,6 +255,17 @@ function onTask(m: Message, state: ChannelState): { text: string; mark: EventMar
   }
 }
 
+/** The mark an event's row shows in any feed: a task's new state, or what kind of change it was. */
+export function markOf(m: Message): EventMark {
+  const ev = m.ev;
+  if (!ev) return "other";
+  if (ev.op === "task.add") return "add";
+  if (ev.op === "task.claim") return "assign";
+  if (ev.op === "task.update") return ev.state ?? (ev.owner !== undefined ? "assign" : ev.note ? "note" : "other");
+  if (ev.op === "claim" || ev.op === "release") return "claim";
+  return "other";
+}
+
 /** The pull requests a task's feed links, for the task page's side panel. */
 export function taskPrs(items: FeedItem[]): PrRef[] {
   return items.flatMap((i) => (i.type === "pr" ? [i.pr] : []));

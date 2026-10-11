@@ -4,8 +4,10 @@ import { memo, useState } from "react"
 import { describeEvent } from "@mc/format.ts"
 import { ignored, type Color, type Message, type Trust } from "@mc/protocol.ts"
 import type { ChannelState, Member } from "@mc/state.ts"
-import { excerpt, formatDay, formatFull, formatTime, memberName } from "@/lib/format"
+import { markOf } from "@mc/work.ts"
+import { excerpt, formatAgo, formatDay, formatFull, formatTime, memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
+import { Mark } from "./feed"
 import { Icon } from "./icon"
 import { IconButton, Monogram, toast } from "./kit"
 import { Markdown } from "./markdown"
@@ -26,23 +28,27 @@ export function DayMark({ ts }: { ts: number }) {
   )
 }
 
-/** Coordination (tasks, claims, facts): one centred, muted line. */
-export function EventRow({ m, state, onOpenTask }: { m: Message; state: ChannelState; onOpenTask: (id: number) => void }) {
+/** Coordination (tasks, claims, facts): one muted timeline row on the column's left edge, with a small mark. */
+export function EventRow({ m, state, now, onOpenTask }: { m: Message; state: ChannelState; now: number; onOpenTask: (id: number) => void }) {
   const taskRef = m.ev && "task" in m.ev ? m.ev.task : m.ev?.op === "task.add" ? m.seq : null
   const forged = ignored(state.trust.get(m.seq))
   return (
-    <div id={`m${m.seq}`} className={cx("my-0.5 flex justify-center px-6", forged && "line-through opacity-50")}>
-      <div className="max-w-[36rem] text-center text-ui leading-[1.45] text-ink-2">
-        <span className="text-ink">{memberName(state.members.get(m.from), m.from)}</span> {describeEvent(m, state)}
-        <time className="ml-1.5 text-meta tabular-nums" title={formatFull(m.ts)}>
-          {formatTime(m.ts)}
-        </time>
+    <div id={`m${m.seq}`} className={cx("flex items-start gap-2.5 py-1 pl-1 text-ui text-ink-3", forged && "line-through opacity-50")}>
+      <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+        <Mark mark={markOf(m)} />
+      </span>
+      <p className="min-w-0">
+        <span className="font-medium text-ink-2">{memberName(state.members.get(m.from), m.from)}</span> {describeEvent(m, state)}
+        <span className="text-meta">
+          {" · "}
+          <time title={formatFull(m.ts)}>{formatAgo(m.rts ?? m.ts, now)}</time>
+        </span>
         {taskRef !== null && (
-          <button type="button" onClick={() => onOpenTask(taskRef)} className="ml-1.5 font-medium text-ink hover:underline">
+          <button type="button" onClick={() => onOpenTask(taskRef)} className="ml-2 text-meta font-medium text-ink-2 hover:text-ink hover:underline">
             Open task
           </button>
         )}
-      </div>
+      </p>
     </div>
   )
 }
@@ -65,9 +71,9 @@ function englishList(names: string[]): string {
 }
 
 /** A same-day run. Three or more collapse; the latest line stays visible. */
-export function EventGroup({ messages, state, onOpenTask, highlight }: { messages: Message[]; state: ChannelState; onOpenTask: (id: number) => void; highlight: number | null }) {
+export function EventGroup({ messages, state, now, onOpenTask, highlight }: { messages: Message[]; state: ChannelState; now: number; onOpenTask: (id: number) => void; highlight: number | null }) {
   const [open, setOpen] = useState(false)
-  const row = (m: Message) => <EventRow key={m.seq} m={m} state={state} onOpenTask={onOpenTask} />
+  const row = (m: Message) => <EventRow key={m.seq} m={m} state={state} now={now} onOpenTask={onOpenTask} />
   if (messages.length < 3) return <>{messages.map(row)}</>
   const forced = highlight !== null && messages.some((m) => m.seq === highlight)
   const shown = open || forced
@@ -78,7 +84,7 @@ export function EventGroup({ messages, state, onOpenTask, highlight }: { message
   return (
     <div className="my-1">
       {shown ? messages.map(row) : row(last)}
-      <button type="button" aria-expanded={shown} onClick={() => setOpen(!shown)} className="mx-auto mt-0.5 block rounded-row px-2 text-ui text-ink-2 hover:text-ink">
+      <button type="button" aria-expanded={shown} onClick={() => setOpen(!shown)} className="mt-0.5 ml-7 block rounded-row text-meta text-ink-3 hover:text-ink-2">
         {shown ? "Hide earlier updates" : `${names}: ${n} earlier update${n === 1 ? "" : "s"}`}
       </button>
     </div>
@@ -136,6 +142,8 @@ interface RowProps {
   anchor?: string
   /** The author's colour: a person's own pick, or their person's for an agent (colorOf). */
   color?: Color | null
+  /** The clock, for "2m ago"; without it, times are clock times. */
+  now?: number
 }
 
 export interface ThreadSummary {
@@ -146,7 +154,7 @@ export interface ThreadSummary {
   forYou: boolean
 }
 
-export const MessageRow = memo(function MessageRow({ m, me, author, trust, online, head, adjacentReply, highlighted, quoted, nameOf, onReply, onJump, thread, onOpenThread, anchor = "m", color, direct, room }: RowProps) {
+export const MessageRow = memo(function MessageRow({ m, me, author, trust, online, head, adjacentReply, highlighted, quoted, nameOf, onReply, onJump, thread, onOpenThread, anchor = "m", color, direct, room, now }: RowProps) {
   const forged = ignored(trust)
   const repliedTo = new Set((m.re ?? []).map((seq) => quoted(seq)?.from).filter((f): f is string => !!f))
   const said = phrase(m, me, nameOf, repliedTo)
@@ -160,7 +168,7 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
       id={`${anchor}${m.seq}`}
       className={cx(
         "group relative -mx-3 grid grid-cols-[28px_minmax(0,1fr)] gap-x-3 rounded-ctl px-3 transition-colors hover:bg-wash",
-        head ? "mt-4 pt-1.5 pb-1" : "py-[3px]",
+        head ? "mt-2 pt-1.5 pb-1 first:mt-0" : "py-[3px]",
         highlighted && "animate-flash"
       )}
     >
@@ -176,14 +184,15 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
 
       <div className="min-w-0">
         {head && (
-          <div className="flex items-baseline gap-2">
-            <span className="truncate text-ui font-semibold tracking-[-0.01em]" title={sponsor}>
+          <div className="flex min-w-0 items-baseline gap-1.5 text-meta text-ink-3">
+            <span className="truncate text-ui font-medium text-ink" title={sponsor}>
               {who}
             </span>
             {said && <span className={cx("truncate text-ui", said.alert ? "font-medium text-alert" : "text-ink-2")}>{said.text}</span>}
-            {room && <span className="shrink-0 text-meta text-ink-3">in #{room}</span>}
-            <time className="ml-auto shrink-0 pl-2 text-meta text-ink-3 tabular-nums" title={formatFull(m.ts)}>
-              {formatTime(m.ts)}
+            {room && <span className="shrink-0">in #{room}</span>}
+            <span aria-hidden>·</span>
+            <time className="shrink-0 tabular-nums" title={formatFull(m.ts)}>
+              {now ? formatAgo(m.rts ?? m.ts, now) : formatTime(m.ts)}
             </time>
           </div>
         )}
@@ -243,12 +252,12 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
             </span>
             <span className={cx("shrink-0 font-medium", thread.forYou ? "text-ink" : "text-ink-2")}>{thread.count === 1 ? "1 reply" : `${thread.count} replies`}</span>
             {thread.forYou && <span className="shrink-0 rounded-full bg-ink px-1.5 text-meta font-semibold text-canvas">for you</span>}
-            <span className="truncate text-ink-2">last {formatTime(thread.last)}</span>
+            <span className="truncate text-meta text-ink-3">· {now ? formatAgo(thread.last, now) : formatTime(thread.last)}</span>
           </button>
         )}
       </div>
 
-      <div className={cx("absolute -top-3 hidden items-center gap-px rounded-ctl bg-raised p-0.5 shadow-pop group-focus-within:flex group-hover:flex", head ? "right-[84px]" : "right-3")}>
+      <div className="absolute -top-3 right-3 hidden items-center gap-px rounded-ctl bg-raised p-0.5 shadow-pop group-focus-within:flex group-hover:flex">
         <IconButton label="Reply" className="size-7" onClick={() => onReply(m)}>
           <Icon icon={ArrowTurnBackwardIcon} size={15} />
         </IconButton>

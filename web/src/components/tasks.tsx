@@ -51,7 +51,7 @@ function TaskRow({ task, state, now, onOpen }: { task: Task; state: ChannelState
           <span className="truncate">{task.owner ?? "Unassigned"}</span>
           {waits.length > 0 && <span className="shrink-0">Waits on {waits.map(taskId).join(", ")}</span>}
           {task.notes.length > 0 && <span className="shrink-0">{task.notes.length === 1 ? "1 note" : `${task.notes.length} notes`}</span>}
-          <span className="ml-auto shrink-0">{formatAgo(task.updatedAt, now)}</span>
+          <span className="shrink-0">{formatAgo(task.updatedAt, now)}</span>
         </span>
       </span>
     </button>
@@ -92,10 +92,10 @@ function Board({ state, now, onForgetFact }: { state: ChannelState; now: number;
         {state.claims.map((c) => (
           <div key={`${c.owner}:${c.path}`} className="py-1.5">
             <div className="flex items-baseline justify-between gap-3">
-              <code className="truncate font-mono text-meta">{c.path}</code>
+              <code className="truncate font-mono text-ui">{c.path}</code>
               <span className="shrink-0 text-meta text-ink-3">{minutesLeft(c.expires, now)}</span>
             </div>
-            <p className="truncate text-meta text-ink-2">{c.note ? `${c.owner}: ${c.note}` : c.owner}</p>
+            <p className="truncate text-meta text-ink-3">{c.note ? `${c.owner}: ${c.note}` : c.owner}</p>
           </div>
         ))}
       </section>
@@ -108,8 +108,12 @@ function Board({ state, now, onForgetFact }: { state: ChannelState; now: number;
         {facts.map((f) => (
           <div key={f.key} className="group -mx-2 flex items-start gap-1 rounded-ctl px-2 py-1.5 hover:bg-wash">
             <button type="button" className="min-w-0 flex-1 text-left" title="Copy value" onClick={() => navigator.clipboard.writeText(f.value).then(() => toast(`Copied ${f.key}`))}>
-              <p className="text-ui font-medium">{f.key}</p>
-              <p className="font-mono text-meta break-all text-ink-2">{f.value}</p>
+              <p className="flex min-w-0 items-baseline gap-2 text-ui">
+                <span className="shrink-0 font-medium">{f.key}</span>
+                <span className="truncate font-mono text-ink-2" title={f.value}>
+                  {f.value}
+                </span>
+              </p>
               <p className="text-meta text-ink-3">
                 {f.by} · {formatAgo(f.ts, now)}
               </p>

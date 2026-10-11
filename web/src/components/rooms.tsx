@@ -177,10 +177,10 @@ export function RoomRail({
 export function RoomMenu({ state, active, unread, onOpen }: { state: ChannelState; active: string; unread: Map<string, number>; onOpen: (id: string) => void }) {
   const total = [...unread.entries()].filter(([id]) => id !== active).reduce((a, [, n]) => a + n, 0)
   return (
-    <span className="md:hidden">
+    <span className="shrink-0 md:hidden">
       <Menu
         trigger={
-          <button type="button" className="flex h-7 items-center gap-1 rounded-full px-3 text-ui font-medium shadow-[inset_0_0_0_1px_var(--line)]">
+          <button type="button" className="flex h-7 shrink-0 items-center gap-1 rounded-ctl bg-wash-2 px-2.5 text-ui font-medium">
             <span className="text-ink-3">#</span>
             <span className="max-w-[9rem] truncate">{state.rooms.get(active)?.name}</span>
             {total > 0 && <span className="rounded-full bg-ink px-1.5 text-meta font-semibold text-canvas tabular-nums">{total}</span>}
