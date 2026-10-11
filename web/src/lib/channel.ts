@@ -643,6 +643,10 @@ export function useChannel(member: StoredMember, human?: HumanSession): ChannelH
         signal: ac.signal,
         onOpen: ({ presence }) => {
           setConnection("live")
+          // Anything that happened while the stream was closed (its first open included) sent its frame
+          // to nobody: a join request in that gap would sit unseen. Read both again now that it's open.
+          void refreshRequests()
+          void refreshRoster()
           // Ask every listening agent to announce itself right away.
           void presence({ client: "probe", query: true })
         },
