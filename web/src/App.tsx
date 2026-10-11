@@ -8,6 +8,8 @@ import { ChannelIconTile } from "@/components/channel-icon"
 import { Sidebar } from "@/components/sidebar"
 import { useIcons } from "@/lib/icons"
 import { Palette, usePaletteShortcut, type Command } from "@/components/ui/palette"
+import { Add01Icon, ChartColumnIcon, ComputerIcon, Login01Icon, Moon02Icon, Settings01Icon, SmartPhone01Icon, Sun03Icon } from "@hugeicons/core-free-icons"
+import { Icon, type IconSvgElement } from "@/components/icon"
 import { SettingsModal } from "@/components/settings"
 import { UsageModal } from "@/components/usage"
 import { PasskeysSheet } from "@/components/vault"
@@ -54,20 +56,22 @@ export default function App() {
       leading: <ChannelIconTile icon={icons.get(r.room) ?? null} title={r.title} size={20} />,
       run: () => open(r.code),
     }))
-    const act = (id: string, label: string, run: () => void) => list.push({ id, group: "Actions", label, run })
-    act("new", "New channel", () => setSheet("new"))
-    act("join", "Join with a code", () => setSheet("join"))
+    // Every action wears the icon it has in the menus, so the palette and the menus read alike.
+    const lead = (icon: IconSvgElement) => <Icon icon={icon} size={16} strokeWidth={1.5} className="text-ink-3" />
+    const act = (id: string, label: string, icon: IconSvgElement, run: () => void) => list.push({ id, group: "Actions", label, run, leading: lead(icon) })
+    act("new", "New channel", Add01Icon, () => setSheet("new"))
+    act("join", "Join with a code", Login01Icon, () => setSheet("join"))
     if (signedIn) {
-      act("computers", "Your computers", () => setSheet("computers"))
-      act("device", "Add a device", () => setSheet("device"))
+      act("computers", "Your computers", ComputerIcon, () => setSheet("computers"))
+      act("device", "Add a device", SmartPhone01Icon, () => setSheet("device"))
     }
-    if (usage) act("usage", "Usage", () => setSheet("usage"))
-    if (auth.status === "signed-out") act("signin", "Sign in", auth.signIn)
-    act("settings", "Settings", () => setSheet("settings"))
+    if (usage) act("usage", "Usage", ChartColumnIcon, () => setSheet("usage"))
+    if (auth.status === "signed-out") act("signin", "Sign in", Login01Icon, auth.signIn)
+    act("settings", "Settings", Settings01Icon, () => setSheet("settings"))
     list.push(
-      { id: "light", group: "Appearance", label: "Light", run: () => setAppearance("light") },
-      { id: "dark", group: "Appearance", label: "Dark", run: () => setAppearance("dark") },
-      { id: "system", group: "Appearance", label: "Match system", run: () => setAppearance("system") }
+      { id: "light", group: "Appearance", label: "Light", run: () => setAppearance("light"), leading: lead(Sun03Icon) },
+      { id: "dark", group: "Appearance", label: "Dark", run: () => setAppearance("dark"), leading: lead(Moon02Icon) },
+      { id: "system", group: "Appearance", label: "System", run: () => setAppearance("system"), leading: lead(ComputerIcon) }
     )
     return list
   }, [rows, icons, signedIn, usage, auth.status, auth.signIn])

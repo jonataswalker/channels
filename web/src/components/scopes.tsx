@@ -2,6 +2,7 @@ import { useState } from "react"
 
 import { PRESETS, presetOf, SCOPE_LABELS, SCOPES, type Preset, type Scope } from "@mc/scopes.ts"
 import { cx } from "@/lib/utils"
+import { SEGMENTED, SEGMENT_OFF, SEGMENT_ON } from "./kit"
 
 // What a member may do besides read: three presets, and each scope on its own
 // when none of them fits. The owner signs the choice; every client enforces it.
@@ -28,7 +29,7 @@ export function ScopePicker({ value, onChange, disabled }: { value: Scope[]; onC
   const toggle = (s: Scope) => onChange(SCOPES.filter((x) => (x === s ? !value.includes(s) : value.includes(x))))
   return (
     <div className="grid gap-2">
-      <div role="radiogroup" aria-label="What they can do" className="grid grid-cols-3 gap-1 rounded-ctl bg-wash p-0.5">
+      <div role="radiogroup" aria-label="What they can do" className={cx("grid grid-cols-3 gap-0.5", SEGMENTED)}>
         {(Object.keys(PRESETS) as Preset[]).reverse().map((p) => (
           <button
             key={p}
@@ -37,7 +38,7 @@ export function ScopePicker({ value, onChange, disabled }: { value: Scope[]; onC
             aria-checked={preset === p}
             disabled={disabled}
             onClick={() => (onChange([...PRESETS[p]]), setCustom(false))}
-            className={cx("rounded-row px-2 py-1.5 text-ui font-medium transition-colors", preset === p ? "bg-canvas text-ink shadow-[0_0_0_1px_var(--line)]" : "text-ink-2 hover:text-ink")}
+            className={cx("h-7 rounded-row px-2 text-ui font-medium transition-colors", preset === p ? SEGMENT_ON : SEGMENT_OFF)}
           >
             {PRESET_LABEL[p]}
           </button>

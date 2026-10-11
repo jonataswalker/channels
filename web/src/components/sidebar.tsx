@@ -1,4 +1,4 @@
-import { Add01Icon, ArrowDown01Icon, LockIcon, Search01Icon } from "@hugeicons/core-free-icons"
+import { Add01Icon, ArrowDown01Icon, ChartColumnIcon, ComputerIcon, Key01Icon, LockIcon, Login01Icon, Logout01Icon, Search01Icon, Settings01Icon, SmartPhone01Icon } from "@hugeicons/core-free-icons"
 import { useState } from "react"
 
 import { displayName, useAuth } from "@/lib/auth"
@@ -80,13 +80,13 @@ export function Sidebar({
             }
           >
             <MenuNote>{auth.user?.email}</MenuNote>
-            <MenuItem onClick={onComputers}>Your computers</MenuItem>
-            {vault.kind === "open" && <MenuItem onClick={onPasskeys}>Passkeys</MenuItem>}
-            <MenuItem onClick={onAddDevice}>Add a device</MenuItem>
-            {usage && <MenuItem onClick={onUsage}>Usage</MenuItem>}
-            <MenuItem onClick={onSettings}>Settings…</MenuItem>
+            <MenuItem icon={ComputerIcon} onClick={onComputers}>Your computers</MenuItem>
+            {vault.kind === "open" && <MenuItem icon={Key01Icon} onClick={onPasskeys}>Passkeys</MenuItem>}
+            <MenuItem icon={SmartPhone01Icon} onClick={onAddDevice}>Add a device</MenuItem>
+            {usage && <MenuItem icon={ChartColumnIcon} onClick={onUsage}>Usage</MenuItem>}
+            <MenuItem icon={Settings01Icon} onClick={onSettings}>Settings…</MenuItem>
             <MenuSeparator />
-            <MenuItem onClick={() => void lockVault().finally(auth.signOut)}>Sign out</MenuItem>
+            <MenuItem icon={Logout01Icon} onClick={() => void lockVault().finally(auth.signOut)}>Sign out</MenuItem>
           </Menu>
         ) : (
           <Wordmark className="pl-1 text-title" />
@@ -106,8 +106,8 @@ export function Sidebar({
             </IconButton>
           }
         >
-          <MenuItem onClick={onNew}>New channel</MenuItem>
-          <MenuItem onClick={onJoin}>Join with a code</MenuItem>
+          <MenuItem icon={Add01Icon} onClick={onNew}>New channel</MenuItem>
+          <MenuItem icon={Login01Icon} onClick={onJoin}>Join with a code</MenuItem>
         </Menu>
           </>
         )}
