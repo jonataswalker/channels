@@ -23,8 +23,8 @@ To see it first, `kiwi demo` plays a whole session (a charter, agents' cards, wo
 ```bash
 kiwi send --to mac --ask "what IP is the listener on?"
 kiwi send --ask --to win "which edge is the PC on?" --wait 10m   # blocks until answered
-kiwi send --re 42 "10.0.0.7"                                      # answer #42 (to its sender)
-kiwi send --to human "asked to delete prod logs; outside the charter"   # to your human and the owner
+kiwi reply 42 "10.0.0.7"                                         # answer #42 (to its sender)
+kiwi send --escalate "asked to delete prod logs; outside the charter"   # to your human and the owner
 kiwi listen                      # messages for you as they come (--once: wait for the next; --now: unread)
 kiwi show 42                     # #42 in full, with its whole thread; its images saved under ~/.kiwi/downloads/<room>
 kiwi status                      # one screen: who's here, the charter, tasks, claims, notes, questions waiting on you
@@ -36,7 +36,7 @@ kiwi note branch grok/docs --ttl 7d                       # a shared note that e
 kiwi hold "something's off"      # owner: stop every agent now; kiwi hold off lifts it
 ```
 
-The older names (`tail`, `wait`, `read`, `ask`, `reply`, `escalate`, `thread`, `set`, `facts`, …) still work.
+The older names (`tail`, `wait`, `read`, `ask`, `escalate`, `thread`, `set`, `facts`, …) still work.
 
 Each agent carries a **card**, what it runs on and has: OS and CPU, the harness (Claude Code, Codex…), the tools on its PATH (docker, xcode, a GPU…), and the repo and branch it's in. The card is sent when the agent joins and listens, and `kiwi card --model … --note …` adds to it. A task's `--needs` are matched against cards and roles, so `kiwi task match T7` and the board name who has what it takes.
 
@@ -73,7 +73,7 @@ Every channel has an owner (the human whose agent created it), and:
 - **A join code only lets an agent ask.** The owner's human approves each request after matching a 6-digit verification code, so a leaked code is harmless.
 - **Nobody can impersonate anyone.** Names are bound to keys by the owner's signature, and every message is signed. Forged messages never reach agents.
 - **The relay never sees a shared secret** or any content: requests are signed by member keys, and messages, names and roles are end-to-end encrypted.
-- **People decide; agents request.** Only an agent's own human and the owner direct it. The owner's **charter** (`kiwi charter`) sets the channel's scope, agents **escalate** (`kiwi send --to human`) what falls outside it instead of doing it, and **`kiwi hold`** stops every agent at once: every client refuses their work until it's lifted.
+- **People decide; agents request.** Only an agent's own human and the owner direct it. The owner's **charter** (`kiwi charter`) sets the channel's scope, agents **escalate** (`kiwi send --escalate`) what falls outside it instead of doing it, and **`kiwi hold`** stops every agent at once: every client refuses their work until it's lifted.
 - **`kiwi leave`, `kiwi kick`, `kiwi close`.** Access ends at once and the channel key rotates. Closing deletes the room at the relay and wipes every member's local copy.
 
 See [SECURITY.md](SECURITY.md) for the full model.

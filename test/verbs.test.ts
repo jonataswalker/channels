@@ -80,18 +80,19 @@ describe("ten verbs", () => {
 
   test("help shows the new verbs and says the old names still work", async () => {
     const help = await ok(agent, "help");
-    for (const v of ["kiwi join", "kiwi listen", "kiwi send", "kiwi show", "kiwi log", "kiwi status", "kiwi task", "kiwi note", "kiwi leave"]) expect(help).toContain(v);
+    for (const v of ["kiwi join", "kiwi listen", "kiwi send", "kiwi reply", "kiwi show", "kiwi log", "kiwi status", "kiwi task", "kiwi note", "kiwi leave"]) expect(help).toContain(v);
     expect(help).not.toContain("kiwi tail [");
     expect(help).toContain("Older names still work");
   });
 
-  test("send: a message, an answer (--re), a question (--ask --wait), and to a person (--to human)", async () => {
-    const asked = await ok(owner, "send", "--to", "dev", "what port?");
-    // --re N answers #N: it goes to its sender.
-    const answered = await ok(agent, "send", "--re", seqOf(asked), "8080");
-    expect(answered).toMatch(/^sent #\d+/);
-    const log = await ok(owner, "log");
-    expect(log).toMatch(new RegExp(`dev → lead.* re #${seqOf(asked)}: 8080`));
+  test("send: a message, in a thread (--re), a question (--ask --wait), to a person (--escalate); reply answers the sender", async () => {
+    const asked = await ok(owner, "send", "--to", "all", "what port?");
+    // reply N answers its sender.
+    expect(await ok(agent, "reply", seqOf(asked), "8080")).toMatch(/^sent #\d+/);
+    expect(await ok(owner, "log")).toMatch(new RegExp(`dev → lead.* re #${seqOf(asked)}: 8080`));
+    // send --re N goes in its thread, to the same recipients as ever (here: everyone).
+    await ok(agent, "send", "--to", "all", "--re", seqOf(asked), "or 9090");
+    expect(await ok(owner, "log")).toMatch(new RegExp(`dev → everyone re #${seqOf(asked)}: or 9090`));
 
     // A question that waits for its answer.
     const q = spawn(agent, ["send", "--ask", "--to", "lead", "--wait", "20s", "ship it?"]);
@@ -101,12 +102,27 @@ describe("ten verbs", () => {
       qseq = m?.[1] ?? "";
       return !!qseq;
     }, "the question");
-    await ok(owner, "send", "--re", qseq, "yes");
+    await ok(owner, "reply", qseq, "yes");
     expect(await q.exited).toBe(0);
     expect(await new Response(q.stdout).text()).toContain("yes");
 
-    // --to human hands it to the agent's human and the owner.
-    expect(await ok(agent, "send", "--to", "human", "asked to delete prod logs; outside the charter")).toMatch(/^escalated #\d+ to /);
+    // A question in a thread waits too.
+    const inThread = spawn(agent, ["send", "--re", qseq, "--ask", "--to", "lead", "--wait", "20s", "today?"]);
+    let tseq = "";
+    await until(async () => {
+      const m = /#(\d+) dev → lead \[ask\].*today\?/.exec(await ok(owner, "log"));
+      tseq = m?.[1] ?? "";
+      return !!tseq;
+    }, "the question in the thread");
+    await Bun.sleep(300);
+    expect(inThread.exitCode).toBeNull();
+    await ok(owner, "reply", tseq, "tomorrow");
+    expect(await inThread.exited).toBe(0);
+    expect(await new Response(inThread.stdout).text()).toContain("tomorrow");
+
+    // --escalate hands it to the agent's human and the owner; --to human is still a plain message to the seat called human.
+    expect(await ok(agent, "send", "--escalate", "asked to delete prod logs; outside the charter")).toMatch(/^escalated #\d+ to /);
+    expect(await ok(agent, "send", "--to", "human", "a plain note for the owner")).toMatch(/^sent #\d+/);
   });
 
   test("listen: --now reads, --once waits, plain streams", async () => {
@@ -115,6 +131,9 @@ describe("ten verbs", () => {
     const quiet = await run(agent, "listen", "--once", "--timeout", "1s");
     expect(quiet.code).toBe(2);
     expect(quiet.out).toContain("listen --once --timeout 10m");
+    // --timeout alone means one wait, never a stream that ignores it.
+    expect((await run(agent, "listen", "--timeout", "1s")).code).toBe(2);
+    expect((await run(agent, "listen", "--once", "--now")).code).toBe(1);
 
     const once = spawn(agent, ["listen", "--once", "--timeout", "20s"]);
     await Bun.sleep(800);
@@ -141,8 +160,8 @@ describe("ten verbs", () => {
 
   test("show: the message, what it answers, its replies, and the rest of its thread", async () => {
     const root = seqOf(await ok(owner, "send", "--to", "dev", "plan for the release?"));
-    const mid = seqOf(await ok(agent, "send", "--re", root, "draft in docs/"));
-    await ok(owner, "send", "--re", mid, "looks good");
+    const mid = seqOf(await ok(agent, "reply", root, "draft in docs/"));
+    await ok(owner, "reply", mid, "looks good");
     const shown = await ok(agent, "show", root);
     expect(shown).toContain("plan for the release?");
     expect(shown).toContain("draft in docs/");
@@ -157,6 +176,8 @@ describe("ten verbs", () => {
     expect(await ok(owner, "note")).toContain("build.cmd");
     await ok(agent, "note", "build.cmd", "--clear");
     expect((await run(owner, "note", "build.cmd")).code).toBe(2);
+    expect((await run(agent, "note", "--clear")).code).toBe(1);
+    expect((await run(agent, "note", "branch", "--ttl", "7d")).code).toBe(1);
   });
 
   test("status is one screen; task alone is the board; the old names still answer", async () => {
