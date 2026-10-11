@@ -504,7 +504,7 @@ export class RoomStore {
     this.set("title", JSON.stringify({ iv: t.iv, ct: t.ct }));
   }
 
-  /** The channel's sealed settings (its mode), signed by the owner. The relay can't read them. */
+  /** The channel's sealed settings (its mode and rooms), signed by the owner. The relay can't read them. */
   settings(): { iv: string; ct: string } | null {
     const t = this.get("settings");
     return t ? (JSON.parse(t) as { iv: string; ct: string }) : null;
@@ -513,7 +513,7 @@ export class RoomStore {
   /** Replace the sealed settings. The caller has already checked that this is the owner. */
   setSettings(settings: unknown): void {
     const t = settings as { iv?: unknown; ct?: unknown };
-    if (typeof t?.iv !== "string" || typeof t.ct !== "string" || t.ct.length === 0 || t.ct.length >= 2048) throw new HttpError(400, "bad settings");
+    if (typeof t?.iv !== "string" || typeof t.ct !== "string" || t.ct.length === 0 || t.ct.length >= 16_384) throw new HttpError(400, "bad settings");
     this.set("settings", JSON.stringify({ iv: t.iv, ct: t.ct }));
   }
 

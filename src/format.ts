@@ -2,7 +2,7 @@
 
 import { loadJson, loadSummary, memberLoad, showsLoad } from "./load.ts";
 import { inlineText } from "./membership.ts";
-import { ignored, imageMarker } from "./protocol.ts";
+import { GENERAL_ROOM, ignored, imageMarker } from "./protocol.ts";
 import type { Message, TaskState, Trust } from "./protocol.ts";
 import { describeScopes, presetOf, readScopes, SCOPE_LABELS, type Scope } from "./scopes.ts";
 import { colorOf, taskId, waitingOn, type ChannelState, type Claim, type Fact, type Task } from "./state.ts";
@@ -90,6 +90,14 @@ export function describeEvent(m: Message, state?: ChannelState): string {
       return `set what ${ev.member} may do: ${ev.scopes === null ? "full" : describeScopes(readScopes(ev.scopes) ?? [])}`;
     case "mode.set":
       return ev.coordinatorOnly ? `turned on coordinator-only: people talk with the coordinator${ev.strict ? "; other agents may not message people" : ""}` : "turned off coordinator-only";
+    case "room.create":
+      return `made the room #${inlineText(ev.name, 40)}`;
+    case "room.rename": {
+      // Rooms are named by id in the event; say which one it was, by its name now if it has another.
+      const now = state?.rooms.get(ev.id)?.name;
+      const name = inlineText(ev.name, 40);
+      return now && now !== name ? `renamed a room to #${name} (now #${now})` : `renamed a room to #${name}`;
+    }
     case "seat.reclaim":
       return `moved ${ev.member}'s seat to a new key (${ev.from} → ${ev.to}): the old key is out`;
     case "task.add":
@@ -144,10 +152,13 @@ export function formatMessage(m: Message, trust?: Trust, state?: ChannelState): 
   const to = m.to?.includes("*") ? "everyone" : m.to?.length ? m.to.map((t) => inlineText(t, 40)).join(",") : "all";
   const kind = m.kind === "msg" ? "" : ` [${inlineText(m.kind, 20)}]`;
   const re = m.re?.length ? ` re #${m.re.map((n) => Number(n) || 0).join(",#")}` : "";
+  // Which room, once there's more than one: every chat line then says it, general included.
+  const roomId = m.kind === "event" ? undefined : (state?.roomOf.get(m.seq) ?? m.room ?? GENERAL_ROOM);
+  const room = roomId && state && state.rooms.size > 1 ? ` [#${inlineText(state.rooms.get(roomId)?.name ?? roomId, 40)}]` : "";
   const flag = trust === "forged" ? " [forged — ignore]" : trust === "refused" ? " [not allowed by the owner — ignore]" : "";
   const body = cleanBody(m.kind === "event" ? describeEvent(m, state) : String(m.body ?? "")).replace(/\n/g, "\n  │ ");
   const imgs = m.imgs?.length ? ` ${m.imgs.map((i) => imageMarker({ name: inlineText(i.name, 80), data: i.data })).join(" ")}` : "";
-  return `#${m.seq} ${who(inlineText(m.from, 40), state)} → ${to}${kind}${re}${flag}: ${body}${imgs}`;
+  return `#${m.seq} ${who(inlineText(m.from, 40), state)} → ${to}${room}${kind}${re}${flag}: ${body}${imgs}`;
 }
 
 function taskLine(state: ChannelState, t: Task): string {

@@ -139,7 +139,20 @@ export type Event =
    * Owner only. Coordinator-only: people talk only with the member whose role is "coordinator", and
    * other agents don't message people (strict: every client refuses it; otherwise it's flagged).
    */
-  | { op: "mode.set"; coordinatorOnly: boolean; strict: boolean };
+  | { op: "mode.set"; coordinatorOnly: boolean; strict: boolean }
+  /** Owner only: a room in this channel. Its id never changes; the name is a label (room.rename). */
+  | { op: "room.create"; id: string; name: string }
+  /** Owner only: a room's new name ("general" included; its id stays). */
+  | { op: "room.rename"; id: string; name: string };
+
+/** The room every channel has, and where a message that names none belongs (every message from before rooms). */
+export const GENERAL_ROOM = "general";
+/** A room id: chosen once by the owner's client, never changed, so a room can later move without breaking references. */
+export const ROOM_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/** Longest room name. */
+export const MAX_ROOM_NAME = 40;
+/** Most rooms a channel holds (general included): the list must fit the sealed settings. */
+export const MAX_ROOMS = 50;
 
 /** One image attached to a message, encrypted with everything else. */
 export interface ImageAttachment {
@@ -181,6 +194,8 @@ export interface Payload {
   ev?: Event;
   /** Attached images, in order. Never present on events. */
   imgs?: ImageAttachment[];
+  /** The room a chat message is in (a room id); absent is general. Events are channel-wide. */
+  room?: string;
   ts: number;
   /** Sender's Ed25519 public key (raw, base64url) and signature over the rest. */
   pk?: string;
@@ -233,6 +248,8 @@ const strs = (x: unknown, n: number): x is string[] => Array.isArray(x) && x.len
 const nums = (x: unknown, n: number): x is number[] => Array.isArray(x) && x.length <= n && x.every((y) => Number.isSafeInteger(y) && y >= 0);
 const opt = <T>(x: unknown, ok: (v: unknown) => v is T): boolean => x === undefined || ok(x);
 
+const roomId = (x: unknown): x is string => typeof x === "string" && ROOM_ID_RE.test(x);
+
 /** Whether an event has the shape its op promises (anything else is dropped, not folded). */
 export function wellFormedEvent(ev: unknown): ev is Event {
   if (!ev || typeof ev !== "object") return false;
@@ -267,6 +284,9 @@ export function wellFormedEvent(ev: unknown): ev is Event {
       return str(e.member, 64) && str(e.pk, 64) && (e.scopes === null || strs(e.scopes, 32));
     case "mode.set":
       return typeof e.coordinatorOnly === "boolean" && typeof e.strict === "boolean";
+    case "room.create":
+    case "room.rename":
+      return roomId(e.id) && str(e.name, MAX_ROOM_NAME * 4);
     default:
       return false;
   }
@@ -286,6 +306,7 @@ export function wellFormed(p: unknown): p is Payload {
     Number.isFinite(m.ts) &&
     opt(m.to, (x): x is string[] => strs(x, 50)) &&
     opt(m.re, (x): x is number[] => nums(x, 20)) &&
+    opt(m.room, roomId) &&
     (m.ev === undefined || wellFormedEvent(m.ev)) &&
     (m.kind !== "event" || m.ev !== undefined)
   );

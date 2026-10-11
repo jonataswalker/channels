@@ -24,7 +24,10 @@ import { handleFor, inlineText, makeRecord, NAME_RE, nameKey, openRecord, RESERV
 import {
   CLOSE_CLOSED,
   CLOSE_REMOVED,
+  GENERAL_ROOM,
   MAX_ICON_BYTES,
+  MAX_ROOM_NAME,
+  ROOM_ID_RE,
   MAX_IMAGES,
   isRasterMime,
   rasterAttachment,
@@ -50,6 +53,8 @@ export interface SendOptions {
   re?: number[];
   ev?: Event;
   imgs?: ImageAttachment[];
+  /** The room (an id) a chat message goes to; absent or "general" is general. */
+  room?: string;
 }
 
 export class RelayError extends Error {
@@ -150,6 +155,18 @@ export interface Info {
 }
 
 /** The channel's mode as the owner last signed it, and the log position it took effect at. */
+/** A room as the settings list it: its id and its name. */
+export interface RoomEntry {
+  id: string;
+  name: string;
+}
+
+/** The room list as it stood after log position `since` (general included only if renamed). */
+export interface RoomsSetting {
+  list: RoomEntry[];
+  since: number;
+}
+
 export interface ModeSetting {
   coordinatorOnly: boolean;
   strict: boolean;
@@ -445,21 +462,50 @@ export class Channel {
    * the tail of the log, where the mode.set itself may have scrolled out. Null if never set.
    */
   async mode(): Promise<ModeSetting | null> {
-    const s = (await this.info()).settings;
-    const key = this.access.keys["0"];
-    if (!s || !key) return null;
-    const o = (await open(key, this.roomId, s.iv, s.ct).catch(() => null)) as (Partial<ModeSetting> & { what?: unknown; room?: unknown; pk?: string; sig?: string }) | null;
-    if (!o || o.what !== "channel-settings" || o.room !== this.roomId || o.pk !== this.access.ownerPk || !(await verify(o as never))) return null;
-    if (typeof o.coordinatorOnly !== "boolean" || typeof o.strict !== "boolean" || !Number.isInteger(o.since)) return null;
-    return { coordinatorOnly: o.coordinatorOnly, strict: o.coordinatorOnly && o.strict, since: o.since! };
+    const o = await this.settings();
+    if (!o || typeof o.coordinatorOnly !== "boolean" || typeof o.strict !== "boolean" || !Number.isInteger(o.since)) return null;
+    return { coordinatorOnly: o.coordinatorOnly, strict: o.coordinatorOnly && o.strict, since: o.since as number };
+  }
+
+  /**
+   * The rooms the owner last signed into the channel's settings, as they stood after log position
+   * `since`: the floor for a client holding only the tail, where a room.create may have scrolled out.
+   */
+  async rooms(): Promise<RoomsSetting | null> {
+    const r = (await this.settings())?.rooms as Partial<RoomsSetting> | undefined;
+    if (!r || !Array.isArray(r.list) || !Number.isInteger(r.since)) return null;
+    const list = r.list.filter((x): x is RoomEntry => !!x && typeof x === "object" && ROOM_ID_RE.test((x as RoomEntry).id) && typeof (x as RoomEntry).name === "string");
+    return { list: list.map((x) => ({ id: x.id, name: x.name.slice(0, MAX_ROOM_NAME) })), since: r.since! };
   }
 
   /** Owner: sign the mode into the channel's settings, after the mode.set at log position `since`. */
   async setMode(mode: ModeSetting): Promise<void> {
+    const { coordinatorOnly, strict, since } = mode;
+    await this.putSettings({ coordinatorOnly, strict, since });
+  }
+
+  /** Owner: sign the room list into the channel's settings, as it stands after the room event at `since`. */
+  async setRooms(rooms: RoomsSetting): Promise<void> {
+    await this.putSettings({ rooms });
+  }
+
+  /** The channel's settings, opened and checked: sealed with the epoch-0 key and signed by the owner. */
+  private async settings(): Promise<Record<string, unknown> | null> {
+    const s = (await this.info()).settings;
+    const key = this.access.keys["0"];
+    if (!s || !key) return null;
+    const o = (await open(key, this.roomId, s.iv, s.ct).catch(() => null)) as ({ what?: unknown; room?: unknown; pk?: string; sig?: string } & Record<string, unknown>) | null;
+    if (!o || o.what !== "channel-settings" || o.room !== this.roomId || o.pk !== this.access.ownerPk || !(await verify(o as never))) return null;
+    return o;
+  }
+
+  /** Owner: change some settings and keep the rest (the mode and the rooms share one signed record). */
+  private async putSettings(change: Record<string, unknown>): Promise<void> {
     this.ownerOnly();
     const key = this.access.keys["0"];
     if (!key) throw new Error("missing the channel key");
-    const sealed = await seal(key, this.roomId, await sign(this.identity, { what: "channel-settings", room: this.roomId, ...mode }));
+    const { what: _w, room: _r, pk: _p, sig: _s, ...kept } = (await this.settings()) ?? {};
+    const sealed = await seal(key, this.roomId, await sign(this.identity, { ...kept, ...change, what: "channel-settings", room: this.roomId }));
     await this.request("/settings", { method: "PUT", body: JSON.stringify({ settings: sealed }) });
   }
 
@@ -822,6 +868,7 @@ export class Channel {
       ...(opts.re?.length ? { re: opts.re } : {}),
       ...(opts.ev ? { ev: opts.ev } : {}),
       ...(imgs?.length ? { imgs } : {}),
+      ...(opts.room && opts.room !== GENERAL_ROOM && !opts.ev ? { room: opts.room } : {}),
       ts: Date.now(),
     };
     const signed = await sign(this.identity, payload);

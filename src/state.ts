@@ -5,7 +5,8 @@
 // and what the facts are, without the relay ever reading any of it.
 // Conflicts resolve deterministically: the earlier sequence number wins.
 
-import { ignored, type Color, type Message, type TaskState, type Trust } from "./protocol.ts";
+import { inlineText } from "./membership.ts";
+import { GENERAL_ROOM, ignored, MAX_ROOM_NAME, MAX_ROOMS, ROOM_ID_RE, type Color, type Message, type TaskState, type Trust } from "./protocol.ts";
 import { readScopes, refusal, SCOPES, scopesOf, type Scope } from "./scopes.ts";
 
 export interface Member {
@@ -118,7 +119,26 @@ export interface ChannelState {
   coordinator: string | null;
   /** Agents' messages to people in coordinator-only mode, sent directly instead of through the coordinator. */
   direct: Set<number>;
+  /** The channel's rooms by id, general first (every channel has it). */
+  rooms: Map<string, Room>;
+  /** Each counted chat message's room (an id). A reply is in its parent's room. */
+  roomOf: Map<number, string>;
   head: number;
+}
+
+export interface Room {
+  /** Never changes (see ROOM_ID_RE). */
+  id: string;
+  name: string;
+  /** Who made it, when that event is in the folded log (null for general, or a room known only from the owner's signed list). */
+  createdBy: string | null;
+  at: number;
+}
+
+/** The room list the owner signed into the channel's settings, as it stood after log position `since`. */
+export interface RoomsFloor {
+  list: { id: string; name: string }[];
+  since: number;
 }
 
 /**
@@ -130,6 +150,17 @@ export function keptFromPeople(state: ChannelState, m: Message): boolean {
   if (!state.mode.coordinatorOnly || !state.mode.strict || !state.coordinator || m.kind === "event") return false;
   const from = state.members.get(m.from);
   return !!from && !isPerson(from) && m.from !== state.coordinator;
+}
+
+/** A room's name as it's shown: one line, bounded. Empty means no name. */
+export function roomName(name: unknown): string {
+  return inlineText(name, MAX_ROOM_NAME);
+}
+
+/** The room a name or id points to: the id first, then the name (names are unique, case aside). */
+export function findRoom(state: ChannelState, nameOrId: string): Room | null {
+  const t = nameOrId.trim().replace(/^#/, "");
+  return state.rooms.get(t) ?? [...state.rooms.values()].find((r) => r.name.toLowerCase() === t.toLowerCase()) ?? null;
 }
 
 /** The role that makes a member the channel's coordinator. */
@@ -181,7 +212,13 @@ export function claimConflict(c: Claim): string {
  * key the owner admitted under the name it claims; anything else is forged and
  * ignored, whoever sent it.
  */
-export function fold(messages: Message[], roster: Roster, now = Date.now(), modeFloor?: { coordinatorOnly: boolean; strict: boolean; since: number } | null): ChannelState {
+export function fold(
+  messages: Message[],
+  roster: Roster,
+  now = Date.now(),
+  modeFloor?: { coordinatorOnly: boolean; strict: boolean; since: number } | null,
+  roomsFloor?: RoomsFloor | null,
+): ChannelState {
   const members = new Map<string, Member>();
   // A name can be re-admitted under a new key after its old one left; the active key wins.
   for (const r of [...roster].sort((a, b) => Number(a.active) - Number(b.active))) {
@@ -262,6 +299,18 @@ export function fold(messages: Message[], roster: Roster, now = Date.now(), mode
   const threadPeople = new Map<number, Set<string>>();
   let head = 0;
 
+  // Rooms: general always; then the ones the owner signed into the settings, which a client holding only
+  // the log's tail may never see created. Room events up to the list's `since` are already in it.
+  const rooms = new Map<string, Room>([[GENERAL_ROOM, { id: GENERAL_ROOM, name: GENERAL_ROOM, createdBy: null, at: 0 }]]);
+  const roomsSince = roomsFloor?.since ?? -1;
+  for (const r of roomsFloor?.list ?? []) {
+    const name = roomName(r.name);
+    if (!ROOM_ID_RE.test(r.id) || !name || (rooms.size >= MAX_ROOMS && !rooms.has(r.id))) continue;
+    rooms.set(r.id, { ...(rooms.get(r.id) ?? { id: r.id, createdBy: null, at: 0 }), name });
+  }
+  const nameTaken = (name: string, except?: string) => [...rooms.values()].some((r) => r.id !== except && r.name.toLowerCase() === name.toLowerCase());
+  const roomOf = new Map<number, string>();
+
   for (const m of messages) {
     passFloors(m.seq);
     passFloor(m.seq);
@@ -297,6 +346,18 @@ export function fold(messages: Message[], roster: Roster, now = Date.now(), mode
           }
           direct.add(m.seq);
         }
+      }
+      // Rooms: a thread lives in one room, so a reply is in its parent's; anything else is in the room it
+      // names, or general. A room that doesn't exist (yet) can't be written in: nobody fills invisible rooms.
+      if (m.kind !== "event") {
+        const parent = m.re?.[0];
+        const room = (parent !== undefined ? roomOf.get(parent) : undefined) ?? m.room ?? GENERAL_ROOM;
+        if (!rooms.has(room)) {
+          trust.set(m.seq, "refused");
+          rejected.set(m.seq, `no room ${room}`);
+          continue;
+        }
+        roomOf.set(m.seq, room);
       }
       member.lastSeen = Math.max(member.lastSeen, at);
       member.messages++;
@@ -334,6 +395,42 @@ export function fold(messages: Message[], roster: Roster, now = Date.now(), mode
           const about = ev.about === undefined ? member.about : ev.about || undefined;
           if (role === member.role && about === member.about) member.roleRequest = undefined;
           else member.roleRequest = { ...(role !== undefined ? { role } : {}), ...(about !== undefined ? { about } : {}), seq: m.seq, at };
+          break;
+        }
+
+        case "room.create": {
+          if (!member.owner) {
+            reject("only the owner makes rooms");
+            break;
+          }
+          const known = rooms.get(ev.id);
+          // Already in the owner's signed list: this is where it began.
+          if (known && m.seq <= roomsSince) {
+            if (!known.createdBy) Object.assign(known, { createdBy: m.from, at });
+            break;
+          }
+          const name = roomName(ev.name);
+          if (ev.id === GENERAL_ROOM || known) reject(`there's already a room ${ev.id}`);
+          else if (!name) reject("a room needs a name");
+          else if (nameTaken(name)) reject(`a room is already called ${name}`);
+          else if (rooms.size >= MAX_ROOMS) reject(`a channel holds at most ${MAX_ROOMS} rooms`);
+          else rooms.set(ev.id, { id: ev.id, name, createdBy: m.from, at });
+          break;
+        }
+
+        case "room.rename": {
+          if (!member.owner) {
+            reject("only the owner names rooms");
+            break;
+          }
+          const room = rooms.get(ev.id);
+          const name = roomName(ev.name);
+          if (!room) reject(`no room ${ev.id}`);
+          // The signed list already has every rename up to its `since`.
+          else if (m.seq <= roomsSince) break;
+          else if (!name) reject("a room needs a name");
+          else if (nameTaken(name, room.id)) reject(`a room is already called ${name}`);
+          else room.name = name;
           break;
         }
 
@@ -530,6 +627,8 @@ export function fold(messages: Message[], roster: Roster, now = Date.now(), mode
     mode,
     coordinator: coordinator && members.get(coordinator)?.active ? coordinator : null,
     direct,
+    rooms,
+    roomOf,
     head,
   };
 }
