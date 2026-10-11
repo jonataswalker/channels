@@ -781,28 +781,52 @@ export class Channel {
   }
 
   /**
+   * Owner: after a role.set at log position `since`, re-sign the member's record with that role (and
+   * rules), so a client holding only the tail of the log still knows it. Everything else the record
+   * says, scopes included, stays as it was.
+   */
+  async updateRole(m: Member, role: string | null, about: string | null | undefined, since: number): Promise<void> {
+    this.ownerOnly();
+    if (m.owner) throw new Error("the owner's record isn't changed this way");
+    const e = this.access.epoch;
+    const key = this.access.keys[String(e)]!;
+    const { active: _a, readOnly: _r, unverified: _u, at: _at, ...info } = m;
+    const laterRole = { role, ...(about !== undefined ? { about } : {}), since };
+    const rec = await makeRecord(this.identity, this.roomId, { ...info, laterRole });
+    const scopes = m.later?.scopes ?? scopesOf(m);
+    await this.request(`/members/${m.pk}/record`, { method: "PUT", body: JSON.stringify({ rec: await sealRecord(key, rec), e, post: canPost(scopes) }) });
+  }
+
+  /**
    * Owner: make each member's record and the relay's "can post" bit match the log. A scope.set lands
    * first and the record (with the bit) follows in a second call; if that one failed, or the bit was
    * changed some other way, this puts it right. Returns the keys it changed.
    */
-  async reconcilePosting(state: Pick<ChannelState, "members" | "scopeSets">, members?: Member[]): Promise<string[]> {
+  async reconcilePosting(state: Pick<ChannelState, "members" | "scopeSets" | "roleSets">, members?: Member[]): Promise<string[]> {
     this.ownerOnly();
     const changed: string[] = [];
-    for (const m of members ?? (await this.members())) {
+    for (let m of members ?? (await this.members())) {
       if (!m.active || m.owner || m.unverified) continue;
       const folded = state.members.get(m.name);
       // Only the key the log knows as this name's: a key the fold hasn't seen yet keeps its record's word.
       if (!folded || folded.pk !== m.pk) continue;
+      // A role.set the record doesn't say yet (its second call failed, or it predates role floors).
+      const roleSet = state.roleSets.get(m.name);
+      if (roleSet && (m.laterRole?.since ?? -1) < roleSet.seq) {
+        await this.updateRole(m, roleSet.role, roleSet.about, roleSet.seq);
+        changed.push(m.pk);
+        m = { ...m, laterRole: { role: roleSet.role, ...(roleSet.about !== undefined ? { about: roleSet.about } : {}), since: roleSet.seq } };
+      }
       const set = state.scopeSets.get(m.pk);
       if (set && (m.later?.since ?? -1) < set.seq) {
         await this.updateScopes(m, set.scopes, set.seq);
-        changed.push(m.pk);
+        if (!changed.includes(m.pk)) changed.push(m.pk);
         continue;
       }
       const want = canPost(folded.scopes);
       if (want === !m.readOnly) continue;
       await this.setCanPost(m.pk, want);
-      changed.push(m.pk);
+      if (!changed.includes(m.pk)) changed.push(m.pk);
     }
     return changed;
   }

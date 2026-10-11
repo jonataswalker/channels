@@ -24,6 +24,7 @@ function blank(): ChannelState {
     direct: new Set(),
     rooms: new Map([["general", { id: "general", name: "general", createdBy: null, at: 0 }]]),
     roomOf: new Map(),
+    roleSets: new Map(),
     head: 1,
   };
 }

@@ -50,6 +50,8 @@ export type Roster = {
   scopes?: Scope[];
   /** What the owner re-signed this key's record to after a change: from log position `since` on. */
   later?: { scopes: Scope[]; since: number };
+  /** The role (and rules) the owner re-signed this key's record to after a role.set at `since`. */
+  laterRole?: { role: string | null; about?: string | null; since: number };
 }[];
 
 export interface TaskNote {
@@ -107,6 +109,8 @@ export interface ChannelState {
   rejected: Map<number, string>;
   /** Per key, the latest scope.set in the log (its seq and what it set). */
   scopeSets: Map<string, { seq: number; scopes: Scope[] }>;
+  /** Per member name, the latest role.set in the log: the owner's client checks the record says it too. */
+  roleSets: Map<string, { seq: number; role: string | null; about?: string | null }>;
   /** Asks and blockers nobody else has replied to. */
   openAsks: Message[];
   /** Each verified chat message's thread: the seq at the top of its reply chain (itself if it starts one). */
@@ -295,6 +299,30 @@ export function fold(
   };
   /** The latest scope.set the log holds for each key: the owner's client checks the record matches. */
   const scopeSets = new Map<string, { seq: number; scopes: Scope[] }>();
+  const roleSets = new Map<string, { seq: number; role: string | null; about?: string | null }>();
+  /** A role (and rules) from the owner. The coordinator role has one holder: giving it to someone moves it. */
+  const setRole = (target: Member, role: string | null, about: string | null | undefined) => {
+    if (isCoordinatorRole(role ?? undefined)) {
+      const was = coordinator && members.get(coordinator);
+      if (was && was !== target) was.role = undefined;
+      coordinator = target.name;
+    } else if (coordinator === target.name) coordinator = null;
+    target.role = role || undefined;
+    if (about !== undefined) target.about = about || undefined;
+  };
+  // The record's later role, the same way: a client holding only the log's tail never sees an old
+  // role.set, so the owner re-signs the record with it; it applies once the log passes `since`.
+  const roleFloors = roster
+    .filter((r) => r.laterRole && !r.owner && r.active)
+    .map((r) => ({ name: r.name, pk: r.pk, ...r.laterRole! }))
+    .sort((a, b) => a.since - b.since);
+  const passRoleFloors = (seq: number) => {
+    while (roleFloors.length && roleFloors[0]!.since < seq) {
+      const f = roleFloors.shift()!;
+      const target = members.get(f.name);
+      if (target?.pk === f.pk) setRole(target, f.role, f.about);
+    }
+  };
   const tasks = new Map<number, Task>();
   let claims: Claim[] = [];
   const facts = new Map<string, Fact>();
@@ -319,6 +347,7 @@ export function fold(
 
   for (const m of messages) {
     passFloors(m.seq);
+    passRoleFloors(m.seq);
     passFloor(m.seq);
     // One bad message must never take the whole channel down for everyone: skip it.
     try {
@@ -461,14 +490,8 @@ export function fold(
             break;
           }
           if (ev.op === "role.set") {
-            // The coordinator role has one holder: giving it to someone moves it.
-            if (isCoordinatorRole(ev.role ?? undefined)) {
-              const was = coordinator && members.get(coordinator);
-              if (was && was !== target) was.role = undefined;
-              coordinator = target.name;
-            } else if (coordinator === target.name) coordinator = null;
-            target.role = ev.role || undefined;
-            if (ev.about !== undefined) target.about = ev.about || undefined;
+            setRole(target, ev.role, ev.about);
+            roleSets.set(target.name, { seq: m.seq, role: ev.role, ...(ev.about !== undefined ? { about: ev.about } : {}) });
           }
           target.roleRequest = undefined;
           break;
@@ -614,6 +637,7 @@ export function fold(
 
   // Floors the loaded log hasn't passed yet: the record is newer than anything here says.
   passFloors(Infinity);
+  passRoleFloors(Infinity);
   for (const member of members.values()) member.scopes = scopesByKey.get(member.pk) ?? [];
   for (const [key, fact] of facts) if (fact.expires !== undefined && fact.expires <= now) facts.delete(key);
 
@@ -626,6 +650,7 @@ export function fold(
     facts,
     trust,
     scopeSets,
+    roleSets,
     rejected,
     openAsks,
     threadOf,
