@@ -5,7 +5,11 @@
 
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import type { AgentSession } from "../agent.ts";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import { AgentLive, runAgent, type Agent, type AgentSession } from "../agent.ts";
 import { Rejected } from "../agent.ts";
 import { saveImages } from "../attach.ts";
 import { ChannelGone } from "../client.ts";
@@ -93,6 +97,25 @@ export interface TuiOptions {
   label?: string;
 }
 
+/**
+ * The session's operations as Promises, each run with this computer's relay and files: the TUI is
+ * plain async code at the edge of the Effect world, the way the web's components are.
+ */
+type Promised<T> = { [K in keyof T]: T[K] extends (...a: infer P) => Effect.Effect<infer A, infer _E, infer _R> ? (...a: P) => Promise<A> : T[K] };
+
+function promised(s: AgentSession): Promised<AgentSession> {
+  return new Proxy(s, {
+    get(target, key, receiver) {
+      const v = Reflect.get(target, key, receiver) as unknown;
+      if (typeof v !== "function") return v;
+      return (...args: unknown[]) => {
+        const out = (v as (...a: unknown[]) => unknown).apply(target, args);
+        return Effect.isEffect(out) ? runAgent(out as Effect.Effect<unknown, unknown, Agent>) : out;
+      };
+    },
+  }) as unknown as Promised<AgentSession>;
+}
+
 export async function runTui(s: AgentSession, opts: TuiOptions = {}): Promise<void> {
   const app = new App(s, opts.terminal ?? processTerminal(), opts.label ?? s.me);
   await app.run();
@@ -131,11 +154,14 @@ class App {
   private readonly timers: ReturnType<typeof setInterval>[] = [];
   private readonly commands: Command[];
 
+  private readonly s: Promised<AgentSession>;
+
   constructor(
-    private readonly s: AgentSession,
+    private readonly session: AgentSession,
     private readonly term: Terminal,
     private readonly label: string,
   ) {
+    this.s = promised(session);
     this.history = new ed.History(loadHistory());
     this.commands = this.makeCommands();
   }
@@ -187,19 +213,27 @@ class App {
     void this.refreshOnline();
     void this.refreshRequests();
 
-    void this.s
-      .listen((m, st) => this.arrived(m, st), {
-        client: "tui",
-        all: true,
-        signal: this.ac.signal,
-        onStatus: (msg) => {
-          this.relayDown = /^reached the relay/.test(msg) ? null : msg;
-          this.out(msg, this.relayDown ? warn : muted);
-        },
-        onNotice: () => void this.refreshRequests(),
-      })
-      .then(() => this.quit())
-      .catch((err) => this.fail(err));
+    // Listening runs as a fiber of its own; quitting (the abort) interrupts it, which closes the socket.
+    const listening = Effect.runFork(
+      Effect.provide(
+        this.session.listen((m, st) => Effect.promise(async () => this.arrived(m, st)), {
+          client: "tui",
+          all: true,
+          onStatus: (msg) =>
+            Effect.sync(() => {
+              this.relayDown = /^reached the relay/.test(msg) ? null : msg;
+              this.out(msg, this.relayDown ? warn : muted);
+            }),
+          onNotice: () => Effect.sync(() => void this.refreshRequests()),
+        }),
+        AgentLive,
+      ),
+    );
+    this.ac.signal.addEventListener("abort", () => void Effect.runFork(Fiber.interrupt(listening)), { once: true });
+    void Effect.runPromise(Fiber.await(listening)).then((exit) => {
+      if (Exit.isSuccess(exit)) this.quit();
+      else if (!Cause.hasInterruptsOnly(exit.cause)) this.fail(Cause.squash(exit.cause));
+    });
 
     try {
       await finished;

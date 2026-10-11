@@ -24,6 +24,8 @@ function blank(): ChannelState {
     direct: new Set(),
     rooms: new Map([["general", { id: "general", name: "general", createdBy: null, at: 0 }]]),
     roomOf: new Map(),
+    charter: null,
+    hold: null,
     roleSets: new Map(),
     head: 1,
   };
@@ -51,6 +53,9 @@ test("a newline, CR, line separator and RTL override cannot start a new row", ()
     updatedAt: 0,
     after: [],
     notes: [{ seq: 4, by: "mac", ts: 0, text: PWN }],
+    needs: [PWN],
+    review: PWN,
+    workedBy: [],
   };
   state.tasks.set(3, task);
   const claim: Claim = { path: PWN, owner: "mac", seq: 1, since: 0, expires: 10_000, note: PWN, machine: PWN, checkout: PWN };

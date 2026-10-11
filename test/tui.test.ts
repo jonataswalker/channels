@@ -237,7 +237,7 @@ describe("kiwi tui, end to end", () => {
       await until(() => shown().includes("Waiting for lead"), "the spinner");
       // The coordinator got it, addressed to them.
       const read = await cli("-c", "tuitest", "--as", "lead", "read");
-      expect(read).toMatch(/human → lead: is the build green\?/);
+      expect(read).toMatch(/human \(human, owner\) → lead: is the build green\?/);
 
       await cli("-c", "tuitest", "--as", "lead", "send", "--to", "human", "yes, all green");
       await until(() => shown().includes("yes, all green"), "the answer");
