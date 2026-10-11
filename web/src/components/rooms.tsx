@@ -89,7 +89,23 @@ export function useRooms(roomId: string, state: ChannelState, messages: Message[
   return { active: current, open, unread }
 }
 
-/** The channel's rooms, beside the conversation (wide screens). */
+// Where the rail is drawn: a slot under the open channel's row in the sidebar. The sidebar hands
+// the element over here, and the conversation (which knows the rooms) draws into it.
+let slot: HTMLElement | null = null
+const slotListeners = new Set<() => void>()
+export function setRoomsSlot(el: HTMLElement | null) {
+  if (slot === el) return
+  slot = el
+  for (const l of slotListeners) l()
+}
+export function useRoomsSlot(): HTMLElement | null {
+  return useSyncExternalStore(
+    (l) => (slotListeners.add(l), () => void slotListeners.delete(l)),
+    () => slot
+  )
+}
+
+/** The channel's rooms, nested under its row in the sidebar (wide screens). */
 export function RoomRail({
   state,
   active,
@@ -108,53 +124,52 @@ export function RoomRail({
   onRename: (room: Room) => void
 }) {
   return (
-    <nav aria-label="Rooms" className="hidden w-[208px] shrink-0 flex-col overflow-y-auto py-3 shadow-[inset_-0.5px_0_0_var(--line)] md:flex">
-      <div className="flex items-center justify-between pr-2 pl-4">
-        <h2 className="text-meta font-semibold text-ink-2">Rooms</h2>
-        {isOwner && state.rooms.size < MAX_ROOMS && (
-          <IconButton label="New room" className="size-7" onClick={onCreate}>
-            <Icon icon={Add01Icon} size={16} />
-          </IconButton>
-        )}
-      </div>
-      <ul className="mt-1 grid gap-px px-2">
-        {[...state.rooms.values()].map((r) => {
-          const on = r.id === active
-          const n = unread.get(r.id) ?? 0
-          return (
-            <li key={r.id} className="group relative">
-              <button
-                type="button"
-                aria-current={on ? "page" : undefined}
-                onClick={() => onOpen(r.id)}
-                className={cx(
-                  "flex w-full items-center gap-1.5 rounded-row py-1.5 pr-2 pl-2.5 text-left text-ui transition-colors",
-                  on ? "bg-wash-2 font-medium text-ink" : n ? "font-medium text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink"
-                )}
-              >
-                <span className="text-ink-3">#</span>
-                <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                {n > 0 && !on && <span className="rounded-full bg-ink px-1.5 text-meta font-semibold text-canvas tabular-nums">{n}</span>}
-              </button>
-              {isOwner && (
-                <span className="absolute top-1/2 right-1 hidden -translate-y-1/2 group-focus-within:block group-hover:block">
-                  <Menu
-                    align="end"
-                    trigger={
-                      <IconButton label={`More for #${r.name}`} className="size-6">
-                        <Icon icon={MoreHorizontalIcon} size={14} />
-                      </IconButton>
-                    }
-                  >
-                    <MenuItem onClick={() => onRename(r)}>Rename room…</MenuItem>
-                  </Menu>
-                </span>
+    <ul aria-label="Rooms" className="mt-0.5 mb-1 hidden gap-px md:grid">
+      {/* A lone #general says nothing the channel row doesn't: list rooms once there are two. */}
+      {state.rooms.size > 1 && [...state.rooms.values()].map((r) => {
+        const on = r.id === active
+        const n = unread.get(r.id) ?? 0
+        return (
+          <li key={r.id} data-room={r.id} className="group relative">
+            <button
+              type="button"
+              aria-current={on ? "page" : undefined}
+              onClick={() => onOpen(r.id)}
+              className={cx(
+                "flex h-7 w-full items-center gap-1.5 rounded-row pr-2 pl-8 text-left text-ui transition-colors",
+                on ? "bg-wash-2 font-medium text-ink" : n ? "font-medium text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink"
               )}
-            </li>
-          )
-        })}
-      </ul>
-    </nav>
+            >
+              <span className="text-ink-3">#</span>
+              <span className="min-w-0 flex-1 truncate">{r.name}</span>
+              {n > 0 && !on && <span className="text-meta font-medium text-ink-2 tabular-nums group-hover:opacity-0">{n}</span>}
+            </button>
+            {isOwner && (
+              <span className="absolute top-1/2 right-1 hidden -translate-y-1/2 group-focus-within:block group-hover:block">
+                <Menu
+                  align="end"
+                  trigger={
+                    <IconButton label={`More for #${r.name}`} className="size-6">
+                      <Icon icon={MoreHorizontalIcon} size={14} />
+                    </IconButton>
+                  }
+                >
+                  <MenuItem onClick={() => onRename(r)}>Rename room…</MenuItem>
+                </Menu>
+              </span>
+            )}
+          </li>
+        )
+      })}
+      {isOwner && state.rooms.size < MAX_ROOMS && (
+        <li>
+          <button type="button" onClick={onCreate} className="flex h-7 w-full items-center gap-1.5 rounded-row pr-2 pl-8 text-left text-ui text-ink-3 transition-colors hover:bg-wash hover:text-ink-2">
+            <Icon icon={Add01Icon} size={13} />
+            New room
+          </button>
+        </li>
+      )}
+    </ul>
   )
 }
 

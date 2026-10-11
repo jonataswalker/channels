@@ -52,11 +52,14 @@ export function IconButton({
   className,
   label,
   active,
+  round,
   type = "button",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   label: string
   active?: boolean
+  /** A round button with a hairline: the header bar's actions. */
+  round?: boolean
   ref?: Ref<HTMLButtonElement>
 }) {
   return (
@@ -65,7 +68,8 @@ export function IconButton({
         type={type}
         aria-label={label}
         className={cx(
-          "relative inline-flex shrink-0 items-center justify-center rounded-ctl transition-colors duration-150 disabled:opacity-40",
+          "relative inline-flex shrink-0 items-center justify-center transition-colors duration-150 disabled:opacity-40",
+          round ? "rounded-full shadow-[inset_0_0_0_1px_var(--line)]" : "rounded-ctl",
           !/(^|\s)size-/.test(className ?? "") && "size-8",
           active ? "bg-wash-2 text-ink" : "text-ink-2 hover:bg-wash hover:text-ink data-popup-open:bg-wash-2 data-popup-open:text-ink",
           className

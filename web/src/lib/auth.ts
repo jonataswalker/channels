@@ -118,8 +118,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStatus("signed-out")
     }
     const onGone = () => {
-      // Dev sign-in has no session to check. With WorkOS, a token that comes back means it was a blip.
-      if (dev) return expire()
+      // A dev name never expires: a refusal while one is set came from a call made before the
+      // token was attached. With WorkOS, a token that comes back means it was a blip.
+      if (dev) {
+        if (!dev.name) expire()
+        return
+      }
       client?.getAccessToken().then(
         () => {},
         (e: unknown) => ended(e) && expire()

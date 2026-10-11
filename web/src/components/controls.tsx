@@ -362,7 +362,7 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
       onOpenChange={setOpen}
       className="w-[340px] p-1.5"
       trigger={
-        <button type="button" aria-label={`People, ${subtitle}`} className="mt-0.5 flex max-w-full items-center gap-1.5 rounded-row text-left transition-colors hover:text-ink data-popup-open:text-ink">
+        <button type="button" aria-label={`People, ${subtitle}`} className="flex max-w-full items-center gap-1.5 rounded-row text-left transition-colors hover:text-ink data-popup-open:text-ink">
           {live && here.length > 0 && (
             <span className="flex shrink-0 -space-x-1" aria-hidden>
               {here.slice(0, 5).map((m) => (
@@ -516,9 +516,10 @@ export function InviteButton() {
   const { p, openInvite } = useControls()
   if (!p.isOwner) return null
   return (
-    <Button size="sm" variant="secondary" className="h-8 gap-1 pr-3 pl-2.5" aria-label="Invite" onClick={openInvite}>
+    // On a phone it lives in the channel menu (Invite…), so the header keeps room for the title.
+    <Button size="sm" variant="secondary" className="h-8 gap-1 pr-3 pl-2.5 max-md:hidden" aria-label="Invite" onClick={openInvite}>
       <Icon icon={Add01Icon} size={15} />
-      <span className="hidden sm:inline">Invite</span>
+      <span>Invite</span>
     </Button>
   )
 }
@@ -722,7 +723,7 @@ export function ChannelMenu() {
         align="end"
         className="w-56"
         trigger={
-          <IconButton label="Channel menu">
+          <IconButton label="Channel menu" round>
             <Icon icon={MoreHorizontalIcon} size={18} />
           </IconButton>
         }
