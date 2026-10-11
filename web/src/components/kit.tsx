@@ -35,7 +35,7 @@ export function Button({
     <button
       type={type}
       className={cx(
-        "inline-flex shrink-0 items-center justify-center gap-1.5 font-medium whitespace-nowrap transition-[opacity,background-color,color] duration-150 select-none disabled:pointer-events-none disabled:opacity-40",
+        "inline-flex shrink-0 items-center justify-center gap-1.5 font-medium whitespace-nowrap transition-[opacity,background-color,color] duration-120 select-none disabled:pointer-events-none disabled:opacity-40",
         size === "sm" && "h-7 rounded-row px-2.5 text-ui",
         size === "md" && "h-8 rounded-ctl px-3.5 text-ui",
         size === "lg" && "h-10 rounded-ctl px-5 text-body",
@@ -68,7 +68,7 @@ export function IconButton({
         type={type}
         aria-label={label}
         className={cx(
-          "relative inline-flex shrink-0 items-center justify-center transition-colors duration-150 disabled:opacity-40",
+          "relative inline-flex shrink-0 items-center justify-center transition-colors duration-120 disabled:opacity-40",
           round ? "rounded-full shadow-[inset_0_0_0_1px_var(--line)]" : "rounded-ctl",
           !/(^|\s)size-/.test(className ?? "") && "size-8",
           active ? "bg-wash-2 text-ink" : "text-ink-2 hover:bg-wash hover:text-ink data-popup-open:bg-wash-2 data-popup-open:text-ink",
@@ -151,10 +151,15 @@ export function Spinner({ className }: { className?: string }) {
 }
 
 /** Text tabs: the current one in ink, the rest quiet. Arrow keys move between them. */
+/** One segmented control, everywhere: a wash track, and the chosen option raised on it. */
+export const SEGMENTED = "rounded-ctl bg-wash p-0.5"
+export const SEGMENT_ON = "bg-raised text-ink shadow-[0_0_0_1px_var(--line)]"
+export const SEGMENT_OFF = "text-ink-2 hover:text-ink"
+
 export function Tabs<T extends string>({ value, options, onChange, stretch, label }: { value: T; options: { value: T; label: ReactNode }[]; onChange: (v: T) => void; stretch?: boolean; label?: string }) {
   return (
     <div
-      className={cx("flex items-center gap-0.5", stretch && "rounded-ctl bg-wash p-0.5")}
+      className={cx("flex items-center gap-0.5", stretch && SEGMENTED)}
       role="tablist"
       aria-label={label}
       onKeyDown={(e) => {
@@ -177,9 +182,9 @@ export function Tabs<T extends string>({ value, options, onChange, stretch, labe
           tabIndex={o.value === value ? 0 : -1}
           onClick={() => onChange(o.value)}
           className={cx(
-            "flex h-7 items-center justify-center gap-1.5 rounded-row px-2.5 text-ui font-medium transition-colors duration-150",
+            "flex h-7 items-center justify-center gap-1.5 rounded-row px-2.5 text-ui font-medium transition-colors duration-120",
             stretch && "flex-1",
-            o.value === value ? "bg-wash-2 text-ink" : "text-ink-2 hover:text-ink"
+            o.value === value ? (stretch ? SEGMENT_ON : "bg-wash-2 text-ink") : SEGMENT_OFF
           )}
         >
           {o.label}
@@ -194,11 +199,11 @@ export function Modal({ open, onClose, children, wide }: { open: boolean; onClos
   return (
     <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-overlay transition-opacity duration-150 data-starting-style:opacity-0" />
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-overlay transition-opacity duration-120 data-starting-style:opacity-0" />
         <Dialog.Popup
           className={cx(
             "fixed top-1/2 left-1/2 z-50 max-h-[88svh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-card bg-raised shadow-pop outline-none",
-            "transition-[opacity,scale] duration-150 ease-out data-starting-style:scale-[0.98] data-starting-style:opacity-0",
+            "transition-[opacity,scale] duration-120 ease-out data-starting-style:scale-[0.98] data-starting-style:opacity-0",
             wide ? "max-w-[520px]" : "max-w-[340px]"
           )}
         >

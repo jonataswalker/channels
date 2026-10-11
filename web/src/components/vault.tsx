@@ -1,4 +1,4 @@
-import { Copy01Icon, Delete02Icon, FingerPrintIcon } from "@hugeicons/core-free-icons"
+import { Cancel01Icon, Copy01Icon, Delete02Icon, FingerPrintIcon } from "@hugeicons/core-free-icons"
 import { useEffect, useState, type ReactNode } from "react"
 
 import { formatFull, formatShort } from "@/lib/format"
@@ -178,6 +178,21 @@ export function VaultPrompt({
       : stuck
         ? "This vault doesn’t open with that passkey. If you didn’t set it up, or you’ve lost every passkey and the recovery code, reset it."
         : "They’re saved to a passkey. Touch it to bring every channel to this browser."
+  // Setting one up is an offer, not an alarm: one quiet row. Unlocking and resets keep the card.
+  if (state === "none" && !resetAt)
+    return (
+      <div className="mx-2 mb-2 flex items-center gap-2 rounded-ctl px-2 text-ui text-ink-2 transition-colors hover:bg-wash">
+        <button type="button" onClick={onSetUp} disabled={busy} title={text} className="flex h-8 min-w-0 flex-1 items-center gap-2 text-left hover:text-ink">
+          {busy ? <Spinner className="size-3.5" /> : <Icon icon={FingerPrintIcon} size={15} className="shrink-0 text-ink-3" />}
+          <span className="truncate">Save channels to a passkey</span>
+        </button>
+        {onLater && (
+          <IconButton label="Not now" className="size-6" onClick={onLater} disabled={busy}>
+            <Icon icon={Cancel01Icon} size={13} />
+          </IconButton>
+        )}
+      </div>
+    )
   return (
     <div className="mx-3 mt-1 mb-2 rounded-card bg-wash p-3">
       <p className="flex items-center gap-1.5 text-ui font-semibold">

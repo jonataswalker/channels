@@ -1,5 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog"
-import { Add01Icon, Copy01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons"
+import { Add01Icon, Copy01Icon, Delete02Icon, Image01Icon, Link01Icon, Logout01Icon, MoreHorizontalIcon, PencilEdit01Icon, UserAdd01Icon, UserMultipleIcon, UserStar01Icon } from "@hugeicons/core-free-icons"
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 
 import { loadLine, memberLoad, showsLoad, type Load } from "@mc/load.ts"
@@ -111,7 +111,14 @@ function loadDetail(l: Load): string {
 function CopyBox({ text, label, done }: { text: string; label: string; done: string }) {
   return (
     <div className="flex items-start gap-1 rounded-ctl bg-wash p-2.5">
-      <code className="min-w-0 flex-1 font-mono text-meta leading-relaxed break-all text-ink-2">{text}</code>
+      {/* A flag never parts from its value (it wraps as one); a long token breaks only when it has to. */}
+      <code className="min-w-0 flex-1 font-mono text-meta leading-relaxed [overflow-wrap:anywhere] text-ink-2">
+        {text.split(/(?=\s--[a-z])/).map((part, i) => (
+          <span key={i} className={i > 0 ? "whitespace-nowrap" : undefined}>
+            {part}
+          </span>
+        ))}
+      </code>
       <IconButton label={label} className="size-7" onClick={() => navigator.clipboard.writeText(text).then(() => toast(done))}>
         <Icon icon={Copy01Icon} size={15} />
       </IconButton>
@@ -619,15 +626,16 @@ function Invite({ onDone }: { onDone: () => void }) {
             </p>
           )}
           <CopyBox text={command} label="Copy command" done={n && !badName ? "Join command copied" : "Copied. Replace <name> with the agent’s name."} />
-          <p className="text-meta leading-snug text-ink-2">
-            Run it on a computer you set up with <span className="font-mono text-meta">kiwi setup</span>. The agent is told its role and rules when it joins.
+          <p className="text-meta text-ink-3">
+            Run it on a computer set up with <span className="font-mono">kiwi setup</span>.
           </p>
         </div>
       )}
       <div className="mt-5 border-t border-line pt-4">
-        <p className="mb-2 text-ui font-medium text-ink">New members can</p>
+        <p className="mb-2 text-ui font-medium text-ink">
+          New members can <span className="font-normal text-ink-3">· you confirm it when you approve each one</span>
+        </p>
         <ScopePicker value={newScopes} onChange={(s) => (setNewScopes(s), p.roomId && saveDefaultScopes(p.roomId, s))} />
-        <p className="mt-2 text-meta leading-snug text-ink-3">You confirm it for each one when you approve them, and can change it later from People.</p>
       </div>
       <datalist id="kiwi-roles">
         {ROLES.map((r) => (
@@ -768,23 +776,23 @@ export function ChannelMenu() {
         }
       >
         {/* Inviting is the owner's, as it was in the old panel: they approve everyone who asks. */}
-        {p.isOwner && <MenuItem onClick={() => navigator.clipboard.writeText(inviteLink(p.code)).then(() => toast("Invite link copied"))}>Copy invite link</MenuItem>}
-        {p.isOwner && <MenuItem onClick={openInvite}>Invite…</MenuItem>}
+        {p.isOwner && <MenuItem icon={Link01Icon} onClick={() => navigator.clipboard.writeText(inviteLink(p.code)).then(() => toast("Invite link copied"))}>Copy invite link</MenuItem>}
+        {p.isOwner && <MenuItem icon={UserAdd01Icon} onClick={openInvite}>Invite…</MenuItem>}
         {p.isOwner && p.requests.length > 0 && (
-          <MenuItem onClick={auth.status === "signed-out" ? auth.signIn : openRequests}>
+          <MenuItem icon={UserMultipleIcon} onClick={auth.status === "signed-out" ? auth.signIn : openRequests}>
             {auth.status === "signed-out" ? "Sign in to review join requests" : `Join requests (${p.requests.length})`}
           </MenuItem>
         )}
-        {p.isOwner && p.onRename && <MenuItem onClick={() => setRenaming(true)}>Rename channel…</MenuItem>}
-        {p.isOwner && p.onSetIcon && <MenuItem onClick={() => setIconOpen(true)}>Channel icon…</MenuItem>}
-        {p.isOwner && p.onMode && <MenuItem onClick={openMode}>{p.state.mode.coordinatorOnly ? "Coordinator-only: on…" : "Coordinator-only…"}</MenuItem>}
+        {p.isOwner && p.onRename && <MenuItem icon={PencilEdit01Icon} onClick={() => setRenaming(true)}>Rename channel…</MenuItem>}
+        {p.isOwner && p.onSetIcon && <MenuItem icon={Image01Icon} onClick={() => setIconOpen(true)}>Channel icon…</MenuItem>}
+        {p.isOwner && p.onMode && <MenuItem icon={UserStar01Icon} onClick={openMode}>{p.state.mode.coordinatorOnly ? "Coordinator-only: on…" : "Coordinator-only…"}</MenuItem>}
         {p.isOwner && <MenuSeparator />}
         {p.isOwner ? (
-          <MenuItem tone="danger" onClick={() => ask({ kind: "close" })}>
+          <MenuItem tone="danger" icon={Delete02Icon} onClick={() => ask({ kind: "close" })}>
             Close channel…
           </MenuItem>
         ) : (
-          <MenuItem tone="danger" onClick={() => ask({ kind: "leave" })}>
+          <MenuItem tone="danger" icon={Logout01Icon} onClick={() => ask({ kind: "leave" })}>
             Leave channel…
           </MenuItem>
         )}

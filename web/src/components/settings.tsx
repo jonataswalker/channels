@@ -2,7 +2,7 @@ import { Dialog } from "@base-ui/react/dialog"
 
 import { setAppearance, setTextSize, useAppearance, useTextSize, type Appearance, type TextSize } from "@/lib/theme"
 import { cx } from "@/lib/utils"
-import { Button, Modal } from "./kit"
+import { Button, Modal, SEGMENTED, SEGMENT_OFF, SEGMENT_ON } from "./kit"
 
 // How Channels looks in this browser: the theme and how large everything reads.
 // Both apply at once and stay in this browser; nothing here leaves it.
@@ -11,7 +11,7 @@ function Choice<T extends string>({ label, value, options, onChange }: { label: 
   return (
     <div>
       <p className="mb-2 text-ui font-medium text-ink">{label}</p>
-      <div role="radiogroup" aria-label={label} className="grid gap-1 rounded-ctl bg-wash p-0.5" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+      <div role="radiogroup" aria-label={label} className={cx("grid gap-0.5", SEGMENTED)} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
         {options.map((o) => (
           <button
             key={o.value}
@@ -19,7 +19,7 @@ function Choice<T extends string>({ label, value, options, onChange }: { label: 
             role="radio"
             aria-checked={value === o.value}
             onClick={() => onChange(o.value)}
-            className={cx("rounded-row px-2 py-1.5 text-ui font-medium transition-colors", value === o.value ? "bg-canvas text-ink shadow-[0_0_0_1px_var(--line)]" : "text-ink-2 hover:text-ink")}
+            className={cx("h-7 rounded-row px-2 text-ui font-medium transition-colors", value === o.value ? SEGMENT_ON : SEGMENT_OFF)}
           >
             {o.label}
           </button>

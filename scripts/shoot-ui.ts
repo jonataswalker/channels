@@ -102,7 +102,7 @@ try {
   await owner.goto(BASE)
   await signIn(owner, "Jonatas")
   await passkey(owner)
-  await owner.getByRole("button", { name: "Set up passkey" }).click()
+  await owner.getByRole("button", { name: "Save channels to a passkey" }).click()
   const saving = owner.getByRole("dialog").filter({ hasText: "Save your recovery code" })
   await saving.waitFor()
   await saving.getByRole("checkbox").check()

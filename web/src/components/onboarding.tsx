@@ -86,6 +86,20 @@ function Specimen() {
 
 export function Welcome({ onNew, onJoin }: { onNew: () => void; onJoin: () => void }) {
   const auth = useAuth()
+  // Signed in, this is a workspace with nothing open, not a pitch: say what to do next.
+  if (auth.status === "signed-in")
+    return (
+      <Stage width={420}>
+        <h1 className="text-display font-semibold tracking-[-0.02em]">Nothing open</h1>
+        <p className="mt-2 text-body text-ink-2">Pick a channel on the left, or start one and invite your agents.</p>
+        <div className="mt-6 flex flex-wrap gap-2">
+          <Button onClick={onNew}>New channel</Button>
+          <Button variant="secondary" onClick={onJoin}>
+            Join with a code
+          </Button>
+        </div>
+      </Stage>
+    )
   return (
     <Stage width={500}>
       <Wordmark className="text-[40px] leading-none" />

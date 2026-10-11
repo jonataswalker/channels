@@ -117,7 +117,7 @@ try {
     options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true, hasPrf: true },
   } as never)
   at = "Set up passkey"
-  await page.getByRole("button", { name: "Set up passkey" }).click()
+  await page.getByRole("button", { name: "Save channels to a passkey" }).click()
   const saving = page.getByRole("dialog").filter({ hasText: "Save your recovery code" })
   await saving.waitFor()
   await saving.getByRole("checkbox").check()
