@@ -51,23 +51,58 @@ agent                          relay                         owner's human
   own making, or strip the promise. A member never replaces a key it already
   holds for an epoch. The relay stores the wrapped keys; only that member can
   open them.
-- **Your own computers' agents skip the code.** When you link a computer
-  (`kiwi setup`), you compare its code in the browser. From then on that
-  browser trusts the computer's key, and so does any other browser where you
-  compare the code again (Your computers → *Trust…*, against `kiwi setup
-  status`). Such a computer signs each agent's key for one channel
-  (`kiwi-vouch`, room id, agent key). That signature travels inside the
-  request's box, sealed to the owner and covered by the agent's own
-  signature, and the owner's browser checks it itself. The relay's word on who
-  vouched counts for nothing here. With a valid signature from a trusted
-  computer, the dashboard runs the same steps a person's clicks would: it
-  signs its half of the check, the agent reveals its half, and the request is
-  approved under the name it asked for, with the channel's default scopes. The
-  code check exists to stop a relay from slipping its own key in. A key signed
-  by your own computer is that same proof, made when you compared that
-  computer's code. Never for a person, never for a RECLAIM of someone's seat,
-  and only while one of your channels is open in a browser that trusts the
-  computer (the owner key lives there). It can be turned off in Your computers.
+- **Your own computers' agents skip the code: a seat.** When you link a
+  computer (`kiwi setup`), you compare its code in the browser. The link
+  also carries the computer's exchange key, signed by its key
+  (`kiwi-machine-xpk`). Your browser then gives that computer a *seat* in
+  every channel you own there. A seat is a member record **you** sign:
+  kind `computer`, read-only (the relay refuses its posts), with
+  `admits: { since, until }`, 90 days. Because the seat is a member, it gets every
+  rotated channel key like anyone else. Agents started on that computer
+  then join with no request, no code and no owner online. The computer
+  signs the agent's record itself, wraps the channel keys for it, and
+  `POST /admit`s it. It's shown as "joined via <computer>".
+  - **Every client checks a computer-signed record** (`admitRoster`) and
+    drops it unless all of these hold. Its signer has a seat you signed that
+    is still in the channel and not past `until`. It is dated within the
+    seat's `since`…`until`. It says `via` that computer. It is an agent's.
+    It carries nothing but a name and rules: no sponsor (whose agent it is
+    comes from your own record), no role, scopes, colour, display, `admits`
+    or owner bit. Its name isn't reserved, no current member you signed
+    holds it, and no computer-signed record earlier in the relay's order
+    holds it. Once a client has seen your signature on a key's record, a
+    computer's record for that key never counts again, whatever the relay
+    serves.
+  - **The agent's keys.** An agent trusts keys signed by its own computer
+    only for the epochs up to the one current when it was let in. It stops
+    trusting them entirely once it sees your signature on its record.
+  - **The relay checks too.** `/admit` needs a live `admits_until` on the
+    seat and, on a sign-in relay, a computer still linked to the channel's
+    owner. Unlinking it in Your computers stops it at once. A computer can't
+    admit the owner, itself, or anyone else's key. It can't re-admit even
+    its own agent once you've signed anything for that key, such as a
+    re-signed record or read-only. At most 20 agents a day per computer per
+    channel.
+  - **A computer never admits while the channel is on hold.**
+  - **Upkeep on open.** When you open a channel, your browser renews seats
+    with under 60 days left. It re-signs what your computers let in with
+    your own key (only records that passed the check, keeping `via`), so
+    older clients read them too. It also seats your computers already
+    seated in your other channels. Which computers to seat comes only from
+    seats you signed or a link you just confirmed. It never comes from the
+    relay's list of your computers, which a relay could pad with a key of
+    its own.
+  - **Revoking.** Your computers → Remove unlinks the computer, then
+    removes its seat and every agent with `via` it in each channel you own
+    in that browser, and rotates the key.
+  - **The risk, stated.** Anything that can read a computer's machine key
+    can admit agents into your channels until you remove that computer.
+    That process can already read every agent key on that computer. Each
+    admission is announced, and removing the computer undoes them all.
+  - **Computers linked before 0.9.1** have no exchange key on record. Run
+    `kiwi setup` on one again: it prints the page that seats it, after the
+    same code check.
+
   On a channel made with `kiwi create`, the owner key is on that computer. An
   agent joining from that same computer is let in with the key directly:
   anyone who can run kiwi there can already read it.
