@@ -166,7 +166,7 @@ try {
   await owner.getByPlaceholder(/^Write in #design/).waitFor()
   await owner.getByPlaceholder(/^Write in #design/).fill("Moodboard: Linear's activity feed, one reading column.")
   await owner.keyboard.press("Enter")
-  await owner.getByRole("navigation", { name: "Rooms" }).getByRole("button", { name: /general/ }).click()
+  await owner.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /general/ }).click()
 
   // An agent asking to join, left pending (its CLI waits in the background).
   void kiwi(["join", code, "kiwi-2", "--relay", BASE, "--as", "scout", "--role", "frontend"], (o) => void (pendingOut = o)).catch(() => {})
@@ -207,8 +207,8 @@ try {
       await shoot(owner, tag, "11-palette", () => owner.getByRole("button", { name: /^Go to…/ }).click())
       await shoot(owner, tag, "12-composer-kind", () => owner.getByRole("button", { name: /^Message/ }).click())
       await shoot(owner, tag, "13-join-request", () => review.click())
-      await shoot(owner, tag, "14-room", () => owner.getByRole("navigation", { name: "Rooms" }).getByRole("button", { name: /design/ }).click(), () =>
-        owner.getByRole("navigation", { name: "Rooms" }).getByRole("button", { name: /general/ }).click(),
+      await shoot(owner, tag, "14-room", () => owner.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /design/ }).click(), () =>
+        owner.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /general/ }).click(),
       )
       await shoot(owner, tag, "15-new-channel-menu", () => owner.getByRole("button", { name: "New channel or join" }).click())
 
