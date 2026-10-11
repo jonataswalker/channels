@@ -2,7 +2,7 @@ import { Add01Icon, ArrowDown01Icon, ArrowUp02Icon, Cancel01Icon } from "@hugeic
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type { SendOptions } from "@mc/client.ts"
-import { MAX_IMAGE_BYTES, RASTER_MIMES, type Color, type Kind, type Message } from "@mc/protocol.ts"
+import { GENERAL_ROOM, MAX_IMAGE_BYTES, RASTER_MIMES, type Color, type Kind, type Message } from "@mc/protocol.ts"
 import { excerpt } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { Icon } from "./icon"
@@ -49,6 +49,10 @@ interface Props {
    * (an @agent stays in the text for them to pass on); in Everything it goes as written, copied to them.
    */
   route?: { coordinator: string; label: string; view: "coordinator" | "everything" }
+  /** The room this goes to (an id); general when left out. A thread's composer passes its root's. */
+  room?: string
+  /** Its name, said in the placeholder once a channel has more than one room. */
+  roomLabel?: string
 }
 
 /** Who a message is for: the people @mentioned at its start. */
@@ -57,7 +61,7 @@ function recipients(body: string, names: Set<string>): string[] {
   return [...lead.matchAll(/@([\p{L}\p{N}_.-]+)/gu)].map((m) => m[1]!).filter((n) => names.has(n))
 }
 
-export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route }: Props) {
+export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route, room, roomLabel }: Props) {
   const [body, setBody] = useState("")
   const [kind, setKind] = useState<Kind>("msg")
   const [files, setFiles] = useState<{ name: string; mime: string; data: string }[]>([])
@@ -176,6 +180,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
         to,
         kind,
         re: replyTo ? [replyTo.seq] : undefined,
+        ...(room && room !== GENERAL_ROOM ? { room } : {}),
         imgs: files.length ? files : undefined,
       })
       setBody("")
@@ -271,7 +276,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
           rows={1}
           value={body}
           disabled={disabled}
-          placeholder={disabled ? "Connecting…" : thread ? "Reply in this thread" : replyTo ? `Reply to ${nameOf(replyTo.from)}` : route?.view === "coordinator" ? `Write to ${route.label}. They pass it on.` : "Write to the channel. Type @ to address someone."}
+          placeholder={disabled ? "Connecting…" : thread ? "Reply in this thread" : replyTo ? `Reply to ${nameOf(replyTo.from)}` : route?.view === "coordinator" ? `Write to ${route.label}. They pass it on.` : roomLabel ? `Write in #${roomLabel}. Type @ to address someone.` : "Write to the channel. Type @ to address someone."}
           onChange={(e) => {
             setBody(e.target.value)
             trackMention(e.target.value, e.target.selectionStart)

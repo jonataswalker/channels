@@ -1,9 +1,9 @@
 import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, Search01Icon } from "@hugeicons/core-free-icons"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
-import { ignored, type Color, type Message } from "@mc/protocol.ts"
+import { GENERAL_ROOM, ignored, type Color, type Message } from "@mc/protocol.ts"
 import { describeScopes, wireScopes } from "@mc/scopes.ts"
-import { colorOf, keptFromPeople } from "@mc/state.ts"
+import { newRoomId, colorOf, keptFromPeople , type Room } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
 import { channelTitle, forgetChannel, loadMember, loadRecent, saveMember, saveRecent, useChannel, useClock, useKnownChannels, type StoredMember } from "@/lib/channel"
 import { refreshIcon, useIcons, useLiveIcon } from "@/lib/icons"
@@ -11,6 +11,7 @@ import { excerpt, memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { Composer } from "./composer"
+import { RoomDialog, RoomMenu, RoomRail, roomOfMessage, useRooms } from "./rooms"
 import { ChannelControls, ChannelMenu, InviteButton, People, RequestsBanner, type Filter } from "./controls"
 import { Icon } from "./icon"
 import { Button, IconButton, Spinner, Tabs, TextField } from "./kit"
@@ -84,6 +85,12 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   const iAmPerson = !isAgent(state.members.get(me))
   const reaches = useCallback((m: Message) => !(iAmPerson && keptFromPeople(state, m)), [iAmPerson, state])
   const forMe = useMemo(() => messages.filter((m) => m.from !== me && m.to?.includes(me) && reaches(m)), [messages, me, reaches])
+
+  // Rooms: the conversation shows one at a time; the inboxes (To you, Unanswered, the coordinator's
+  // view) and search reach across them, and say which room each message is in.
+  const rooms = useRooms(member.access.roomId, state, messages, me)
+  const manyRooms = state.rooms.size > 1
+  const [roomDialog, setRoomDialog] = useState<{ room: Room | null } | null>(null)
   const openAsks = useMemo(() => state.openAsks.filter(reaches), [state.openAsks, reaches])
 
   // Coordinator-only: a person talks with the coordinator, and sees that exchange by default.
@@ -155,13 +162,14 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             : filter?.kind === "from"
               ? messages.filter((m) => m.from === filter.name)
               : messages
+    if (!filter) list = list.filter((m) => roomOfMessage(state, m) === rooms.active)
     if (!flat) list = list.filter((m) => m.kind === "event" || rootOf(m.seq) === null)
     // Joins are noise; the member list already shows who's here.
     list = list.filter((m) => m.ev?.op !== "hello")
     const q = search?.trim().toLowerCase()
     if (q) list = list.filter((m) => m.body.toLowerCase().includes(q) || nameOf(m.from).toLowerCase().includes(q))
     return list
-  }, [filter, openAsks, forMe, withCoordinator, messages, search, nameOf, rootOf])
+  }, [filter, openAsks, forMe, withCoordinator, messages, search, nameOf, rootOf, state, rooms.active])
 
   const bySeq = useMemo(() => new Map(messages.map((m) => [m.seq, m])), [messages])
   const quoted = useCallback((seq: number) => bySeq.get(seq), [bySeq])
@@ -284,6 +292,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         online={online.has(m.from)}
         color={colorOf(state, m.from)}
         direct={state.direct.has(m.seq) ? (state.coordinator ?? undefined) : undefined}
+        room={manyRooms && filter ? state.rooms.get(roomOfMessage(state, m))?.name : undefined}
         head={head}
         adjacentReply={adjacentReply}
         highlighted={highlight === m.seq}
@@ -438,6 +447,17 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       }}
     >
       <div className="flex h-full min-w-0 flex-1">
+        {(manyRooms || isOwner) && tab === "chat" && (
+          <RoomRail
+            state={state}
+            active={rooms.active}
+            unread={rooms.unread}
+            onOpen={(id) => (rooms.open(id), setFilter(undefined), setThreadRoot(null))}
+            isOwner={isOwner}
+            onCreate={() => setRoomDialog({ room: null })}
+            onRename={(room) => setRoomDialog({ room })}
+          />
+        )}
         <div className={cx("relative flex min-w-0 flex-1 flex-col", root && "hidden md:flex")}>
           <header className="flex h-[56px] shrink-0 items-center gap-2 px-3 shadow-[inset_0_-0.5px_0_var(--line)] md:px-5">
             <IconButton label="Channels" className="md:hidden" onClick={onBack}>
@@ -445,7 +465,10 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             </IconButton>
             <ChannelIconTile icon={icon} title={title} size={20} />
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-[15px] leading-tight font-semibold tracking-[-0.015em]">{title}</h1>
+              <h1 className="truncate text-[15px] leading-tight font-semibold tracking-[-0.015em]">
+                {title}
+                {manyRooms && !filter && <span className="font-normal text-ink-3"> / #{state.rooms.get(rooms.active)?.name}</span>}
+              </h1>
               <People here={here} subtitle={subtitle} live={connection === "live"} />
             </div>
             <Tabs
@@ -486,6 +509,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                     onKeyDown={(e) => e.key === "Escape" && setSearch(null)}
                   />
                 )}
+                {manyRooms && <RoomMenu state={state} active={rooms.active} unread={rooms.unread} onOpen={(id) => (rooms.open(id), setFilter(undefined), setThreadRoot(null))} />}
                 {chips.map((c) => {
                   const on = c.f === null ? filter === null : filter?.kind === c.f.kind
                   return (
@@ -565,6 +589,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 onClearReply={() => setReplyTo(null)}
                 disabled={connection === "connecting"}
                 route={coordinator ? { coordinator, label: nameOf(coordinator), view: filter?.kind === "coordinator" ? "coordinator" : "everything" } : undefined}
+                room={rooms.active}
+                roomLabel={manyRooms ? state.rooms.get(rooms.active)?.name : undefined}
                 send={async (body, opts) => {
                   atBottom.current = true
                   return send(body, opts)
@@ -590,6 +616,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 disabled={connection === "connecting"}
                 send={send}
                 route={coordinator ? { coordinator, label: nameOf(coordinator), view: "everything" } : undefined}
+                room={roomOfMessage(state, root)}
               />
             }
           >
@@ -598,6 +625,28 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         )}
 
         <TaskDetail id={openTask} state={state} messages={messages} now={now} onClose={() => setOpenTask(null)} onOpen={setOpenTask} />
+        {roomDialog && (
+          <RoomDialog
+            state={state}
+            room={roomDialog.room}
+            onClose={() => setRoomDialog(null)}
+            onSave={async (name) => {
+              const edit = roomDialog.room
+              const id = edit?.id ?? newRoomId()
+              const ev = edit ? ({ op: "room.rename", id, name } as const) : ({ op: "room.create", id, name } as const)
+              const since = await send(edit ? `renamed #${edit.name} to #${name}` : `made the room #${name}`, { kind: "event", ev })
+              // Then the channel's settings carry the list too, for views holding only the log's tail:
+              // every room but general, and general only once it has a name of its own.
+              const list = [...state.rooms.values()].map((r) => (r.id === id ? { id, name } : { id: r.id, name: r.name }))
+              if (!edit) list.push({ id, name })
+              await ch.setRooms({ list: list.filter((r) => r.id !== GENERAL_ROOM || r.name !== GENERAL_ROOM), since })
+              if (!edit) {
+                rooms.open(id)
+                setFilter(undefined)
+              }
+            }}
+          />
+        )}
       </div>
     </ChannelControls>
   )

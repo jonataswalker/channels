@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from "react"
 
-import { Channel, ChannelGone, RelayError, keepRecordsIn, myChannels, ownerStatement, type HumanSession, type ModeSetting, type MyChannel, type SendOptions } from "@mc/client.ts"
+import { Channel, ChannelGone, RelayError, keepRecordsIn, myChannels, ownerStatement, type HumanSession, type ModeSetting, type MyChannel, type RoomsSetting, type SendOptions } from "@mc/client.ts"
 import { decodeJoinCode, fromB64url, newRoomId, ownerFingerprint, type ChannelAccess } from "@mc/crypto.ts"
 import { generateIdentity, withExchangeKey, type Identity } from "@mc/identity.ts"
 import { handleFor, type JoinRequest, type Member } from "@mc/membership.ts"
@@ -577,6 +577,11 @@ export function useChannel(member: StoredMember, human?: HumanSession): ChannelH
   useEffect(() => {
     void ch.mode().then(setModeFloor, () => {})
   }, [ch, infoAt])
+  // The rooms the same way: a room.create older than this view's tail is still a room here.
+  const [roomsFloor, setRoomsFloor] = useState<RoomsSetting | null>(null)
+  useEffect(() => {
+    void ch.rooms().then(setRoomsFloor, () => {})
+  }, [ch, infoAt])
 
   const onGone = useCallback(
     (err: unknown) => {
@@ -681,7 +686,7 @@ export function useChannel(member: StoredMember, human?: HumanSession): ChannelH
       })),
     [roster]
   )
-  const state = useMemo(() => fold(messages, rosterForFold, now, modeFloor), [messages, rosterForFold, now, modeFloor])
+  const state = useMemo(() => fold(messages, rosterForFold, now, modeFloor, roomsFloor), [messages, rosterForFold, now, modeFloor, roomsFloor])
 
   // Owner: the relay's "can post" bit follows the scopes in the log, put right whenever either side
   // changes (a scope.set whose second step failed, here or on another device). Only with the whole

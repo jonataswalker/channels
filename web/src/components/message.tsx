@@ -113,6 +113,8 @@ interface RowProps {
   me: string
   /** Coordinator-only: an agent sent this to a person directly, not through this coordinator. */
   direct?: string
+  /** Which room it's in, when the list mixes rooms (the inboxes, search). */
+  room?: string
   /** Found by the key that signed the message, so two members sharing a name still read right. */
   author?: Author
   trust?: Trust
@@ -143,7 +145,7 @@ export interface ThreadSummary {
   forYou: boolean
 }
 
-export const MessageRow = memo(function MessageRow({ m, me, author, trust, online, head, adjacentReply, highlighted, quoted, nameOf, onReply, onJump, thread, onOpenThread, anchor = "m", color, direct }: RowProps) {
+export const MessageRow = memo(function MessageRow({ m, me, author, trust, online, head, adjacentReply, highlighted, quoted, nameOf, onReply, onJump, thread, onOpenThread, anchor = "m", color, direct, room }: RowProps) {
   const forged = ignored(trust)
   const repliedTo = new Set((m.re ?? []).map((seq) => quoted(seq)?.from).filter((f): f is string => !!f))
   const said = phrase(m, me, nameOf, repliedTo)
@@ -178,6 +180,7 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
               {who}
             </span>
             {said && <span className={cx("truncate text-[13px]", said.alert ? "font-medium text-alert" : "text-ink-2")}>{said.text}</span>}
+            {room && <span className="shrink-0 text-[12px] text-ink-3">in #{room}</span>}
             <time className="ml-auto shrink-0 pl-2 text-[11.5px] text-ink-3 tabular-nums" title={formatFull(m.ts)}>
               {formatTime(m.ts)}
             </time>

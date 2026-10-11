@@ -187,8 +187,23 @@ try {
   await eachItem("Channel menu", page.getByRole("button", { name: "Channel menu" }), (l) => l.endsWith("…"))
   await opens("Composer kind", () => page.getByRole("button", { name: /^Message/ }).click())
 
+  // Rooms: the owner makes one (it opens), its menu offers a rename, then back to general.
+  await opens("New room", () => page.getByRole("button", { name: "New room" }).click())
+  at = "create a room"
+  await page.getByRole("button", { name: "New room" }).click()
+  await page.getByRole("textbox", { name: "Room name" }).fill("smoke-room")
+  await page.getByRole("button", { name: "Create room" }).click()
+  await page.getByPlaceholder(/^Write in #smoke-room/).waitFor()
+  console.log(`ok  ${at}`)
+  await opens("Room → Rename room…", async () => {
+    await page.getByRole("navigation", { name: "Rooms" }).getByText("smoke-room").hover()
+    await page.getByRole("button", { name: "More for #smoke-room" }).click()
+    await page.getByRole("menuitem", { name: "Rename room…" }).click()
+  })
+  await page.getByRole("navigation", { name: "Rooms" }).getByRole("button", { name: /general/ }).click()
+
   at = "send and reply"
-  await page.getByPlaceholder(/^Write to the channel/).fill("smoke test")
+  await page.getByPlaceholder(/^Write (to the channel|in #general)/).fill("smoke test")
   await page.keyboard.press("Enter")
   const row = page.getByText("smoke test", { exact: true }).first()
   await row.waitFor()
