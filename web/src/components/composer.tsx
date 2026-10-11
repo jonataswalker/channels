@@ -1,4 +1,4 @@
-import { Add01Icon, ArrowDown01Icon, ArrowUp02Icon, Cancel01Icon } from "@hugeicons/core-free-icons"
+import { ArrowDown01Icon, ArrowUp02Icon, Attachment01Icon, Cancel01Icon } from "@hugeicons/core-free-icons"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type { SendOptions } from "@mc/client.ts"
@@ -196,7 +196,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
   }
 
   return (
-    <div className="relative mx-auto w-full max-w-[760px] shrink-0 px-4 pt-2 pb-4 md:px-8">
+    <div className={cx("relative mx-auto w-full shrink-0", thread ? "px-4 pt-2 pb-4" : "max-w-[760px] px-4 pt-2 pb-4 md:px-8")}>
       <input ref={picker} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden" onChange={(e) => (pick(e.target.files), (e.target.value = ""))} />
 
       {matches.length > 0 && (
@@ -218,7 +218,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
 
       <div
         className={cx(
-          "relative rounded-card bg-raised shadow-[0_0_0_1px_var(--line),0_2px_8px_-4px_rgba(0,0,0,0.08)] transition-shadow focus-within:shadow-[0_0_0_1px_color-mix(in_srgb,var(--ink)_24%,transparent),0_2px_8px_-4px_rgba(0,0,0,0.08)]",
+          "relative rounded-card bg-raised shadow-[0_0_0_1px_var(--line)] transition-shadow focus-within:shadow-[0_0_0_1px_var(--edge-strong)]",
           dropping && "shadow-[0_0_0_1.5px_var(--ink)]"
         )}
         onDragEnter={(e) => {
@@ -325,47 +325,50 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
           className="block max-h-[220px] min-h-[48px] w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-body leading-[1.5] outline-none placeholder:text-ink-3 focus-visible:outline-none"
         />
 
+        {/* Two quiet things: what kind of message it is (left), attach and send (right). */}
         <div className="flex items-center gap-1 px-2 pb-2">
-          <IconButton label="Attach images" className="size-8 rounded-full" onClick={() => picker.current?.click()} disabled={disabled || files.length >= 8}>
-            <Icon icon={Add01Icon} size={18} />
+          {!thread && (
+            <Menu
+              side="top"
+              className="w-44"
+              trigger={
+                <button
+                  type="button"
+                  disabled={disabled}
+                  title={current.hint}
+                  className={cx(
+                    "flex h-7 items-center gap-1 rounded-row px-2 text-ui transition-colors",
+                    kind === "msg" ? "text-ink-3 hover:bg-wash hover:text-ink-2 data-popup-open:bg-wash" : "bg-wash-2 font-medium text-ink"
+                  )}
+                >
+                  {current.label}
+                  <Icon icon={ArrowDown01Icon} size={12} />
+                </button>
+              }
+            >
+              <MenuRadioGroup<Kind> value={kind} onChange={(k) => (setKind(k), requestAnimationFrame(() => area.current?.focus()))}>
+                {KINDS.map((k) => (
+                  <MenuRadioItem key={k.kind} value={k.kind}>
+                    <span title={k.hint}>{k.label}</span>
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </Menu>
+          )}
+          {routeNote && <span className="ml-1 hidden min-w-0 truncate text-meta text-ink-3 sm:block">{routeNote}</span>}
+          <span className="flex-1" />
+          <IconButton label="Attach images" className="size-7" onClick={() => picker.current?.click()} disabled={disabled || files.length >= 8}>
+            <Icon icon={Attachment01Icon} size={16} />
           </IconButton>
-          <Menu
-            side="top"
-            className="w-60"
-            trigger={
-              <button
-                type="button"
-                disabled={disabled}
-                className={cx(
-                  "flex h-8 items-center gap-1 rounded-full px-3 text-ui font-medium transition-colors",
-                  kind === "msg" ? "text-ink-2 hover:bg-wash hover:text-ink data-popup-open:bg-wash" : "bg-wash-2 text-ink"
-                )}
-              >
-                {current.label}
-                <Icon icon={ArrowDown01Icon} size={13} />
-              </button>
-            }
-          >
-            <MenuRadioGroup<Kind> value={kind} onChange={(k) => (setKind(k), requestAnimationFrame(() => area.current?.focus()))}>
-              {KINDS.map((k) => (
-                <MenuRadioItem key={k.kind} value={k.kind} hint={k.hint}>
-                  {k.label}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </Menu>
-          <span className="ml-auto hidden truncate pr-1 text-meta text-ink-3 sm:block">{routeNote ?? "Return to send"}</span>
           <button
             type="button"
-            aria-label="Send"
+            aria-label="Send (Return)"
+            title="Send (Return)"
             disabled={!canSend}
             onClick={() => void submit()}
-            className={cx(
-              "ml-auto flex size-8 shrink-0 items-center justify-center rounded-full transition-[background-color,color,opacity] sm:ml-1",
-              canSend ? "bg-accent text-accent-ink hover:opacity-90" : "bg-wash-2 text-ink-3"
-            )}
+            className={cx("flex size-7 shrink-0 items-center justify-center rounded-full transition-[background-color,color,opacity]", canSend ? "bg-accent text-accent-ink hover:opacity-90" : "bg-wash-2 text-ink-3")}
           >
-            <Icon icon={ArrowUp02Icon} size={16} strokeWidth={2.2} />
+            <Icon icon={ArrowUp02Icon} size={15} strokeWidth={2.2} />
           </button>
         </div>
       </div>
