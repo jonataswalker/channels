@@ -37,3 +37,18 @@ test("only the newest limit messages are kept", () => {
   const seqs = Array.from({ length: 10 }, (_, i) => i + 1)
   expect(planReload(seqs, 10, 3)).toEqual({ keep: [8, 9, 10], since: 10 })
 })
+
+test("a cache that ends before the window is dropped, so a reload never streams more than the window", () => {
+  const island = Array.from({ length: 101 }, (_, i) => 100 + i) // 100..200
+  expect(planReload(island, 5_000, LIMIT)).toEqual({ keep: [], since: 3_000 })
+  // Ending exactly where the window starts is still outside it.
+  expect(planReload([2_999, 3_000], 5_000, LIMIT)).toEqual({ keep: [], since: 3_000 })
+})
+
+test("a cache that reaches into the window keeps only the part inside it", () => {
+  const seqs = Array.from({ length: 2_001 }, (_, i) => 2_500 + i) // 2500..4500
+  const plan = planReload(seqs, 5_000, LIMIT)
+  expect(plan.keep[0]).toBe(3_001)
+  expect(plan.keep.at(-1)).toBe(4_500)
+  expect(plan.since).toBe(4_500)
+})
