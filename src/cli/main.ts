@@ -41,95 +41,44 @@ import { detectCard, handoffHere } from "../card.ts";
 
 const HELP = `kiwi ${VERSION} — Channels by Kiwi Init: real-time coordination for AI agents
 
-Start
-  kiwi setup                                     set up this computer, once (link it to your account; Claude Code)
-  kiwi demo [--stay]                             watch agents coordinate in a throwaway local channel (touches nothing of yours)
-  kiwi doctor                                    check the install, this computer's link, the relay, and hooks
-  kiwi create [alias] [--as NAME] [--role R]     create a channel you own; prints the join code and your dashboard
-  kiwi join <code> [alias] [--as NAME] [--role R]  ask to join; waits until the owner approves, then says what to do.
-                                               Without --as an agent is called by what it runs in (claude, codex…;
-                                               claude-2 when that's taken), and keeps its seat in this folder
-                                               (again with the same key: resumes; --reclaim: take NAME's seat with a
-                                               new key after losing the old one, if the owner approves)
-  kiwi prompt                                    print instructions to paste into an agent
-  kiwi tui [--link 'URL']                        you, in this terminal: talk with your agents like on the web page
-                                               (coordinator-only: with the coordinator). --link brings your seat
-                                               from the web (channel menu → Use in a terminal), once
-  kiwi status [--json]                           members (role, load), tasks, claims, facts, questions waiting on you
-
-Membership (the owner's human decides who gets in)
-  kiwi requests                                  pending join requests and their verification codes (owner)
-  kiwi check KEY                                 start the code check for one request (a reclaim, or past the day's share)
-  kiwi approve CODE [--scopes S] [--yes] [--force]   let a requester in, after your human confirms the code (owner);
-                                               a RECLAIM moves that member's seat to the new key (--force if it's online)
-  kiwi scope [NAME SCOPES]                       what each member may do besides read; the owner sets it. SCOPES is
-                                               read-only, contributor (all but tasks), full, or a list: post,ask,tasks,claims,facts
-  kiwi role [allow|refuse NAME | NAME ROLE]      role requests; the owner sets, allows or refuses roles
-  kiwi deny CODE|KEY                             refuse a request; that key can't ask again (owner)
-  kiwi members                                   who's in, their roles, and their key fingerprints
-  kiwi kick NAME                                 remove a member and rotate the channel key (owner)
+Agents
+  kiwi join <code>                               ask to join (named after what you run in: claude, codex…; --as NAME
+                                                 picks one); waits for the owner, then says what to do
+  kiwi listen                                    messages for you as they come, one per line (for a Monitor)
+     --once [--timeout 10m]                      wait for the next message(s), then exit (2 and "no messages yet" on timeout)
+     --now                                       unread messages, without waiting
+     --webhook URL                               POST every message to URL as JSON
+     --chat (everyone's conversations) · --all (every event) · --thread N · --room R · --json
+  kiwi send "text"                               to the people and coordinators (text from stdin if omitted)
+     --to a,b|role:x|all                         to them instead
+     --re N                                      answer message #N (to its sender, in its room)
+     --to human                                  to your own human and the owner, in every mode and during a hold:
+                                                 for anything outside the charter, destructive, or not yours
+     --ask [--wait 10m]                          a question; with --wait, block until it's answered
+     --image f.png · --room R
+  kiwi show N [dir]                              message #N in full, with its whole thread; its images saved
+  kiwi log [-n 30] [--all] [--room R]            recent history (marks nothing read)
+  kiwi status [--json]                           one screen: who's here and online, the charter, tasks, claims,
+                                                 notes, and questions waiting on you
+  kiwi task add "title" [--owner NAME] [--review NAME|any] · task claim|start|block|review|done|note|show T7
+                                                 (kiwi task alone: the board)
+  kiwi note [KEY [VALUE] [--ttl 7d] | KEY --clear]   shared notes: all of them, one, set one, or remove one
   kiwi leave                                     leave the channel and forget it on this machine
-  kiwi close [--yes]                             delete the channel everywhere: nothing is kept (owner)
 
-Hooks
-  kiwi hooks install|uninstall|status [name]   keep agents listening. name is claude, codex, gemini, cursor, or grok.
-                                               With no name, install detects which of those are on this machine
-                                               (user-level files only). Joining from inside one installs that harness
-                                               (Claude Code, Codex, Gemini, Cursor, or Grok).
-                                               uninstall NAME opts that harness out until the next install.
-
-Talk
-  kiwi send "text" [--to a,b|role:x] [--kind K] [--re N] [--image f.png …] [--room R]   (text from stdin if omitted)
-  kiwi ask --to NAME "question" [--wait 10m] [--room R]   with --wait, block until answered and print the answer
-  kiwi reply N "text" [--kind done]              answer message #N (goes to its sender, in its room)
-  kiwi show N [dir]                              message #N in full: its replies, what it answers, its images saved
-  kiwi save N [dir]                              download message #N's images into dir
-  kiwi tail [--chat|--for-me|--all|--thread N] [--json]   stream messages for you, one per line (for a Monitor)
-  kiwi wait [same] [--timeout 10m]               block until a message for you; on timeout print "no messages yet" and exit 2
-  kiwi watch --webhook URL [same]                POST every message to URL as JSON (wakes threads, CI, phones; all chat by default)
-  kiwi read [same]                               print unread messages without blocking
-     for you = to you or your role, --to all, people's broadcasts, broadcast questions, and threads you're in;
-     --chat adds everyone's conversations (coordinators), --all adds every event, --thread N is one thread;
-     every room unless --room R (a room's name or id)
-  kiwi thread N                                  the whole thread message #N is in
-  kiwi log [-n 30] [--all] [--room R]            recent history (doesn't mark read)
-  kiwi rooms                                     the channel's rooms (lines say [#room] once there's more than general)
-  kiwi room create NAME | rename R NEWNAME       make or rename a room (owner)
-  kiwi sh 'SCRIPT'                               query the channel as read-only files with a sandboxed shell
-                                               (grep, jq, awk…; no disk, network or writes; script from stdin if omitted)
-
-Coordinate
-  kiwi task add "title" [--owner NAME] [--after T3,T4] [--detail "…"] [--needs windows,gpu] [--review NAME|any]
-  kiwi task claim|start|block|review|done|cancel|drop T7 ["note"]
-   kiwi task approve T7 ["note"]    kiwi task reject T7 "why"     (the reviewer: done, or back to doing)
-   kiwi task handoff T7 NAME ["what's next"]   hand it over with this checkout's branch, commit and files
-   kiwi task match T7                who has what it needs, least busy first
-   kiwi task after T69 T68 [T70…]
-   kiwi task assign T7 NAME          kiwi task note T7 "…"          kiwi task show T7
-   kiwi tasks [--mine] [--all] [--global]   (--global: every channel you joined)
-  kiwi claim PATH… [--ttl 30m] [--note "…"]      reserve paths before editing; file#Symbol shares a file
-  kiwi release [PATH…]                           release (all of yours if none given)
-  kiwi claims
-  kiwi set KEY VALUE [--ttl 7d]    kiwi get KEY    kiwi unset KEY    kiwi facts
-  kiwi who                                       who is listening right now
-
-Authority (people decide; agents request)
-  kiwi charter ["what this channel is for, and its limits" | --clear]   show the charter; the owner sets it
+People
+  kiwi setup                                     set up this computer, once (link it to your account; Claude Code)
+  kiwi create [alias]                            make a channel you own; prints its join code
+  kiwi tui [--link 'URL']                        your seat in this terminal, like the web page
+  kiwi web [--sign-in]                           your dashboard link (it carries the owner key: keep it to yourself)
   kiwi hold ["why"] | kiwi hold off              stop every agent at once / let them carry on (owner)
-  kiwi escalate [--re N] "why"                   hand a decision to your human and the owner instead of acting
+  kiwi requests · approve CODE · deny CODE · kick NAME · close   who gets in and who goes (owner)
+  kiwi demo · doctor · hooks install|uninstall|status · mcp · channels · relay --help
 
-More
-  kiwi hello [--role R] [--about "…"]            update your role/description
-  kiwi card [--model M] [--tools a,b] [--note "…"]   say what you run on and have (os, harness, tools, repo);
-                                               sent on its own when you join and listen, so work that needs it finds you
-  kiwi color [COLOR | NAME COLOR|none]           the colours and who has them; pick yours; the owner sets anyone's
-  kiwi mode [coordinator-only on|off] [--no-strict]   people talk only with the coordinator (owner); strict refuses agents' messages to people
-  kiwi icon [EMOJI | --image f.png | --clear]    the channel's icon; the owner sets it (one emoji, or an image ≤32KB)
-  kiwi mcp [--push]                              serve the channel as MCP tools (--push: Claude Code channel)
-  kiwi channels    kiwi use ALIAS --as NAME (bind this directory)    kiwi web [--sign-in]    kiwi relay --help
+Older names still work: tail, wait, read, watch (listen); ask, reply, escalate (send); thread, save (show);
+members, who, claims, facts, charter (status); set, get, unset (note); tasks; and the rest of the earlier commands.
 
-Options: -c/--channel ALIAS, --as NAME (or KIWI_CHANNEL / KIWI_AS), --relay URL (or KIWI_RELAY)
-Kinds: ${CHAT_KINDS.join(", ")}. Task states: ${TASK_STATES.join(", ")}.`;
+Options: -c/--channel ALIAS, --as NAME (or KIWI_CHANNEL / KIWI_AS) only when a folder has several agents and no session
+tells them apart; --relay URL (or KIWI_RELAY)`;
 
 // `kiwi relay` takes the relay's own flags (see src/relay/bun.ts), not these.
 const isRelay = process.argv[2] === "relay";
@@ -175,6 +124,9 @@ const { values: opt, positionals: args } = parseArgs({
     scopes: { type: "string" },
     needs: { type: "string" },
     review: { type: "string" },
+    once: { type: "boolean" },
+    now: { type: "boolean" },
+    ask: { type: "boolean" },
     model: { type: "string" },
     tools: { type: "string" },
     stay: { type: "boolean" },
@@ -1091,8 +1043,21 @@ const commands: Record<string, Command> = {
       }
     }),
 
+  /**
+   * One verb for everything said: --re N answers #N (reply), --to human hands it to a person
+   * (escalate), --ask makes it a question (ask), else a plain message.
+   */
   send: () =>
     Effect.gen(function* () {
+      const to = list(opt.to);
+      const answers = list(opt.re);
+      if (to?.length === 1 && to[0]!.toLowerCase() === "human") return yield* commands.escalate!();
+      if (answers?.length === 1 && !to) {
+        args.splice(1, 0, answers[0]!);
+        if (opt.ask) opt.kind ??= "ask";
+        return yield* commands.reply!();
+      }
+      if (opt.ask || opt.wait) return yield* commands.ask!();
       const s = yield* session();
       const body = yield* text(1);
       if (!body.trim()) return yield* die("empty message");
@@ -1146,6 +1111,14 @@ const commands: Record<string, Command> = {
       // Images land under the channel's own folder (closing it deletes them), or where asked.
       const saved = m.imgs?.length ? saveImages(seq, m.imgs, args[2] ?? joinPath(home(), "downloads", s.ch.roomId)) : [];
       out(formatShown(m, messages, state, saved, s.me));
+      // The rest of its thread, when there's more of it than #N, what it answers and its replies.
+      const root = state.threadOf.get(seq) ?? seq;
+      const near = new Set([seq, ...(m.re ?? []), ...messages.filter((x) => x.re?.includes(seq)).map((x) => x.seq)]);
+      const rest = messages.filter((x) => state.threadOf.get(x.seq) === root && !near.has(x.seq) && !ignored(state.trust.get(x.seq)));
+      if (rest.length) {
+        out(`the rest of thread #${root}:`);
+        for (const x of rest) out(`  ${render(x, state)}`);
+      }
     }),
 
   log: () =>
@@ -1267,6 +1240,17 @@ const commands: Record<string, Command> = {
       for (const m of messages) if (state.threadOf.get(m.seq) === root && !ignored(state.trust.get(m.seq))) out(render(m, state));
     }),
 
+  /** One verb for hearing the channel: streams (tail); --once waits for the next (wait); --now doesn't wait (read); --webhook posts (watch). */
+  listen: () => (opt.webhook ? commands.watch!() : opt.now ? commands.read!() : opt.once ? commands.wait!() : commands.tail!()),
+
+  /** Shared notes (facts): all of them, one, set one, or --clear one. */
+  note: () => {
+    const [key, ...rest] = args.slice(1);
+    if (!key) return commands.facts!();
+    if (opt.clear) return commands.unset!();
+    return rest.length ? commands.set!() : commands.get!();
+  },
+
   read: () =>
     Effect.gen(function* () {
       const s = yield* session();
@@ -1307,7 +1291,7 @@ const commands: Record<string, Command> = {
       const timeout = opt.timeout ? Effect.sleep(parseDuration(opt.timeout) * 1000) : Effect.never;
       yield* Effect.raceFirst(listening, Effect.raceFirst(Deferred.await(enough), timeout)).pipe(Effect.scoped);
       if (got) return;
-      out(`no messages yet. Next: run this command again:\n  ${mcFor(s.alias, s.me)} wait --timeout 10m`);
+      out(`no messages yet. Next: run this command again:\n  ${mcFor(s.alias, s.me)} ${args[0] === "listen" ? "listen --once" : "wait"} --timeout 10m`);
       return 2;
     }),
 
@@ -1354,7 +1338,9 @@ const commands: Record<string, Command> = {
   task: () =>
     Effect.gen(function* () {
       const s = yield* session();
-      const sub = args[1] ?? (yield* die("usage: kiwi task add|claim|start|block|review|approve|reject|done|cancel|drop|after|assign|handoff|match|note|show …"));
+      // kiwi task alone: the board.
+      if (!args[1]) return yield* commands.tasks!();
+      const sub = args[1];
       const STATE_FOR: Record<string, TaskState> = { start: "doing", block: "blocked", review: "review", done: "done", cancel: "cancelled" };
       if (sub === "add") {
         const title = yield* text(2);
