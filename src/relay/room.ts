@@ -895,12 +895,63 @@ export function parseRoomPath(pathname: string): { roomId: string; rest: string 
 export { CLOSE_CLOSED, CLOSE_REMOVED };
 
 /** GET /v1/me/channels: the signed-in person's channel list, from whatever index the adapter keeps. */
-export async function myChannels(req: Request, human: HumanAuth | null, list: (user: string) => Promise<DirectoryEntry[]>): Promise<Response> {
+export async function myChannels(
+  req: Request,
+  human: HumanAuth | null,
+  list: (user: string) => Promise<DirectoryEntry[]>,
+  heads?: HeadSource,
+): Promise<Response> {
   if (!human) throw new HttpError(404, "this relay has no sign-in");
   const user = await human.verify(req.headers.get(HUMAN_HEADER) ?? "");
   if (!user) throw new HttpError(401, "sign in to see your channels", "SignInRequired");
-  const channels = (await list(user)).sort((a, b) => b.at - a.at);
+  const sorted = (await list(user)).sort((a, b) => b.at - a.at);
+  if (!heads) return Response.json({ channels: sorted });
+  // Each channel's newest seq, so the sidebar can mark the closed ones with news: only for channels
+  // in this person's list, the newest HEADS_PER_LISTING of them, read at most once per cache period.
+  let known = await heads.cache?.get(user).catch(() => null);
+  if (!known) {
+    known = {};
+    const read = await Promise.all(sorted.slice(0, HEADS_PER_LISTING).map(async (c) => [c.room, await heads.read(c.room).catch(() => null)] as const));
+    for (const [room, h] of read) if (h) known[room] = h;
+    await heads.cache?.put(user, known).catch(() => {});
+  }
+  const quiet = (heads.now ?? Date.now)() - QUIET_AFTER_MS;
+  const channels = sorted.map((c) => {
+    const h = known[c.room];
+    return h && h.last >= quiet ? { ...c, head: h.head } : c;
+  });
   return Response.json({ channels });
+}
+
+/** A channel's newest message: its seq, and when it arrived. */
+export interface RoomHead {
+  head: number;
+  last: number;
+}
+
+/** Where myChannels gets heads: a pure read per channel, and (on the Worker) a per-person cache. */
+export interface HeadSource {
+  read: (room: string) => Promise<RoomHead | null>;
+  cache?: { get: (user: string) => Promise<Record<string, RoomHead> | null>; put: (user: string, heads: Record<string, RoomHead>) => Promise<void> };
+  now?: () => number;
+}
+
+/** How many channels in one listing get their head read: each read wakes that channel's storage. */
+export const HEADS_PER_LISTING = 50;
+/** How long a person's heads are reused before the channels are read again. */
+export const HEADS_CACHE_SECONDS = 300;
+/** A channel quiet this long gets no head: nothing new to mark. */
+const QUIET_AFTER_MS = 7 * 86_400_000;
+
+/**
+ * A channel's newest message, read without a RoomStore: no migration, nothing written, and a
+ * channel with no tables (closed, or never made here) is null rather than a new empty room.
+ */
+export function readHead(sql: Sql): RoomHead | null {
+  if (!sql.all("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'").length) return null;
+  if (!sql.all("SELECT 1 FROM meta WHERE k = 'owner_pk'").length) return null;
+  const top = sql.all<{ seq: number; ts: number }>("SELECT seq, ts FROM msgs ORDER BY seq DESC LIMIT 1")[0];
+  return { head: top?.seq ?? 0, last: top?.ts ?? 0 };
 }
 
 /**

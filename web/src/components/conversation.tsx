@@ -6,7 +6,8 @@ import { GENERAL_ROOM, ignored, type Color, type Message } from "@mc/protocol.ts
 import { describeScopes, wireScopes } from "@mc/scopes.ts"
 import { newRoomId, colorOf, keptFromPeople, taskId, type Room } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
-import { channelTitle, forgetChannel, loadMember, loadRecent, saveMember, saveRecent, useChannel, useClock, useKnownChannels, type StoredMember } from "@/lib/channel"
+import { channelTitle, forgetChannel, LEFT_CHANNEL, loadMember, loadRecent, saveMember, saveRecent, useChannel, useClock, useKnownChannels, type StoredMember } from "@/lib/channel"
+import { markSeen, setOpenNews } from "@/lib/news"
 import { refreshIcon, useIcons, useLiveIcon } from "@/lib/icons"
 import { excerpt, memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
@@ -29,26 +30,34 @@ function useNow(intervalMs = 30_000): number {
   return useClock(intervalMs)
 }
 
-/** Unread count in the tab title while the tab is in the background. */
-function useTitleBadge(count: number) {
-  const [mark, setMark] = useState(count)
+/**
+ * What's new in the open channel, for the channel list and the tab: what arrived while the tab was
+ * in the background, or in a room not in view. While it's in view the channel is read up to `top`.
+ */
+function useChannelNews(room: string, top: number, arrivals: number, inOtherRooms: number, needs: number) {
+  const [mark, setMark] = useState(arrivals)
   const [hidden, setHidden] = useState(() => document.hidden)
   useEffect(() => {
     const onChange = () => {
-      if (document.hidden) setMark(count)
+      if (document.hidden) setMark(arrivals)
       setHidden(document.hidden)
     }
     document.addEventListener("visibilitychange", onChange)
     return () => document.removeEventListener("visibilitychange", onChange)
-  }, [count])
-  const base = hidden ? mark : count
+  }, [arrivals])
+  const unread = hidden ? arrivals - mark : inOtherRooms
   useEffect(() => {
-    const unread = count - base
-    document.title = unread > 0 ? `(${unread}) Channels` : "Channels"
-    return () => {
-      document.title = "Channels"
-    }
-  }, [count, base])
+    if (!hidden && top > 0) markSeen(room, top, needs)
+  }, [room, top, needs, hidden])
+  useEffect(() => setOpenNews({ room, unread, needs }), [room, unread, needs])
+  // Leaving: the list takes over (and may refresh what it knows of the others).
+  useEffect(
+    () => () => {
+      setOpenNews(null)
+      window.dispatchEvent(new Event(LEFT_CHANNEL))
+    },
+    [room]
+  )
 }
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
@@ -56,7 +65,7 @@ const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Dat
 export function Conversation({ member, onBack, onGone }: { member: StoredMember; onBack: () => void; onGone: () => void }) {
   const me = member.identity.name
   const auth = useAuth()
-  const { ch, connection, gone, messages, roster, state, online, isOwner, requests, send, refreshRequests, refreshRoster } = useChannel(
+  const { ch, connection, gone, messages, roster, state, online, isOwner, requests, send, refreshRequests, refreshRoster, head } = useChannel(
     member,
     auth.status === "loading" ? null : auth.token,
   )
@@ -97,7 +106,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
 
   // Rooms: the conversation shows one at a time; the inboxes (To you, Unanswered, the coordinator's
   // view) and search reach across them, and say which room each message is in.
-  const rooms = useRooms(member.access.roomId, state, messages, me)
+  const rooms = useRooms(member.access.roomId, state, messages, me, reaches)
   const manyRooms = state.rooms.size > 1
   const roomsSlot = useRoomsSlot()
   const [roomDialog, setRoomDialog] = useState<{ room: Room | null } | null>(null)
@@ -125,7 +134,11 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     })
   }, [coordinator, messages, me, reaches])
   const openTasks = useMemo(() => [...state.tasks.values()].filter((t) => t.state !== "done" && t.state !== "cancelled").length, [state.tasks])
-  useTitleBadge(messages.filter((m) => m.from !== me && reaches(m)).length)
+  const arrivals = useMemo(() => messages.filter((m) => m.from !== me && reaches(m)).length, [messages, me, reaches])
+  const inOtherRooms = useMemo(() => [...rooms.unread].reduce((n, [id, c]) => (id === rooms.active ? n : n + c), 0), [rooms.unread, rooms.active])
+  // Needs you: a question to you (or to everyone) that nobody else has answered yet.
+  const needs = useMemo(() => openAsks.filter((m) => m.from !== me && (m.to?.includes(me) || m.to?.includes("*"))).length, [openAsks, me])
+  useChannelNews(member.access.roomId, Math.max(head, messages.at(-1)?.seq ?? 0), arrivals, inOtherRooms, needs)
 
   // Remember the latest message and who's here, for the channel list.
   useEffect(() => {

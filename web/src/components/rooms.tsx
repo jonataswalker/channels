@@ -42,7 +42,7 @@ const subscribeSeen = (l: () => void) => (seenListeners.add(l), () => void seenL
  * Which room this browser has open in a channel, and the last message it saw in each, so a room
  * can say what's new there. Both stay in this browser.
  */
-export function useRooms(roomId: string, state: ChannelState, messages: Message[], me: string) {
+export function useRooms(roomId: string, state: ChannelState, messages: Message[], me: string, reaches: (m: Message) => boolean = () => true) {
   const openKey = `mc.room.${roomId}`
   const seenKey = `mc.room-seen.${roomId}`
   const [active, setActive] = useState<string>(() => localStorage.getItem(openKey) ?? GENERAL_ROOM)
@@ -67,10 +67,10 @@ export function useRooms(roomId: string, state: ChannelState, messages: Message[
       const r = roomOfMessage(state, m)
       newest.set(r, Math.max(newest.get(r) ?? 0, m.seq))
       // A room this browser has never opened starts with nothing new (first visit isn't a backlog).
-      if (m.from !== me && seen[r] !== undefined && m.seq > seen[r]) unread.set(r, (unread.get(r) ?? 0) + 1)
+      if (m.from !== me && seen[r] !== undefined && m.seq > seen[r] && reaches(m)) unread.set(r, (unread.get(r) ?? 0) + 1)
     }
     return { newest, unread }
-  }, [messages, state, me, seen])
+  }, [messages, state, me, seen, reaches])
 
   // Looking at a room marks it read, and the first sight of any room sets where "new" starts.
   useEffect(() => {

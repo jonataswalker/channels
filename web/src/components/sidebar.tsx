@@ -3,6 +3,7 @@ import { useState } from "react"
 
 import { displayName, useAuth } from "@/lib/auth"
 import type { ChannelRow } from "@/lib/channel"
+import type { RowNews } from "@/lib/news"
 import { useIcons, useMemberIcons } from "@/lib/icons"
 import { atChannelLimit, type MyUsage } from "@/lib/usage"
 import { formatShort } from "@/lib/format"
@@ -28,6 +29,7 @@ function rowNote(c: ChannelRow): string {
 /** Your channels: the ones this browser is in, plus (signed in) every one you own, joined, or have agents in. */
 export function Sidebar({
   rows,
+  news,
   active,
   onSelect,
   onNew,
@@ -42,6 +44,8 @@ export function Sidebar({
   className,
 }: {
   rows: ChannelRow[]
+  /** What's new in each row, in the same order. */
+  news: RowNews[]
   active: string
   onSelect: (code: string) => void
   onNew: () => void
@@ -60,6 +64,7 @@ export function Sidebar({
   const [open, setOpen] = useState(true)
   const vault = useVault()
   const q = query.trim().toLowerCase()
+  const newsOf = new Map(rows.map((c, i) => [c.room, news[i]]))
   const shown = q ? rows.filter((c) => c.title.toLowerCase().includes(q) || c.recent?.text.toLowerCase().includes(q)) : rows
   const icons = useIcons()
   useMemberIcons(rows.filter((c) => c.state === "member").map((c) => c.code))
@@ -136,6 +141,9 @@ export function Sidebar({
           shown.map((c) => {
             const selected = c.code === active
             const reachable = c.state === "member"
+            const n = newsOf.get(c.room)
+            // The open channel's own rooms say where its news is; its row says only what needs you.
+            const fresh = !selected && !!n?.fresh
             return (
               <div key={c.room} className="[&:has(li[data-room])>button]:bg-transparent">
                 <button
@@ -143,11 +151,20 @@ export function Sidebar({
                   onClick={() => onSelect(c.code)}
                   aria-current={selected ? "page" : undefined}
                   title={rowNote(c)}
-                  className={cx("flex h-8 w-full items-center gap-2 rounded-row px-2 text-left text-ui transition-colors", selected ? "bg-pick font-medium text-ink" : "text-ink-2 hover:bg-wash hover:text-ink")}
+                  className={cx(
+                    "flex h-8 w-full items-center gap-2 rounded-row px-2 text-left text-ui transition-colors",
+                    selected ? "bg-pick font-medium text-ink" : fresh || n?.needs ? "font-medium text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink"
+                  )}
                 >
                   <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={20} />
-                  <span className={cx("min-w-0 flex-1 truncate", !reachable && "text-ink-3")}>{c.title}</span>
-                  {reachable ? (
+                  <span className={cx("min-w-0 flex-1 truncate", !reachable && !fresh && "text-ink-3")}>{c.title}</span>
+                  {n?.needs ? (
+                    <span aria-label={n.needs === 1 ? "A question for you" : `${n.needs} questions for you`} className="shrink-0 rounded-full bg-ink px-1.5 text-meta font-semibold text-canvas tabular-nums">
+                      {n.needs}
+                    </span>
+                  ) : fresh ? (
+                    <span aria-label="New messages" className="size-1.5 shrink-0 rounded-full bg-ink" />
+                  ) : reachable ? (
                     <span className="shrink-0 text-meta text-ink-3 tabular-nums">{formatShort(c.ts)}</span>
                   ) : c.state !== "pending" ? (
                     <Icon icon={LockIcon} size={12} className="shrink-0 text-ink-3" />

@@ -20,6 +20,8 @@ import {
   errorResponse,
   myChannels,
   myUsage,
+  readHead,
+  HEADS_CACHE_SECONDS,
   onClientFrame,
   parseRoomPath,
   requireInfoFingerprint,
@@ -28,6 +30,8 @@ import {
   type DirectoryEntry,
   type DirectoryUpdate,
   type Effects,
+  type HeadSource,
+  type RoomHead,
   type Sql,
 } from "./room.ts";
 import { onHttp } from "./route.ts";
@@ -73,6 +77,11 @@ export class Channel extends DurableObject<Env> {
 
   private store(roomId: string): RoomStore {
     return new RoomStore(this.sql, roomId, policyFrom(this.env as unknown as Record<string, string | undefined>));
+  }
+
+  /** RPC for the signed-in listing (no HTTP route reaches it): the newest message, a pure read. */
+  head(): RoomHead | null {
+    return readHead(this.sql);
   }
 
   override async fetch(req: Request): Promise<Response> {
@@ -286,6 +295,18 @@ function machineStore(env: Env): MachineStore {
   };
 }
 
+/** Each person's channel heads, kept in this colo's cache so a listing wakes their channels at most once per period. */
+function headCache(origin: string): NonNullable<HeadSource["cache"]> {
+  const key = (user: string) => new Request(`${origin}/__cache/heads/${encodeURIComponent(user)}`);
+  return {
+    get: async (user) => {
+      const hit = await caches.default.match(key(user));
+      return hit ? hit.json() : null;
+    },
+    put: (user, heads) => caches.default.put(key(user), Response.json(heads, { headers: { "cache-control": `max-age=${HEADS_CACHE_SECONDS}` } })),
+  };
+}
+
 function send(ws: WebSocket, f: string): void {
   try {
     ws.send(f);
@@ -345,7 +366,15 @@ export default {
     }
     if (url.pathname === "/v1/me/channels" && req.method === "GET") {
       try {
-        return await myChannels(req, human(env), async (user) => (await env.PEOPLE.get(env.PEOPLE.idFromName(user)).fetch("https://directory/list")).json());
+        return await myChannels(
+          req,
+          human(env),
+          async (user) => (await env.PEOPLE.get(env.PEOPLE.idFromName(user)).fetch("https://directory/list")).json(),
+          {
+            read: async (room) => (await env.CHANNELS.get(env.CHANNELS.idFromName(room)).head()) ?? null,
+            cache: headCache(url.origin),
+          },
+        );
       } catch (err) {
         return errorResponse(err);
       }

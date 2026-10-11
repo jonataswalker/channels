@@ -1108,6 +1108,8 @@ export interface MyChannel {
   member: boolean;
   agents: number;
   at: number;
+  /** The channel's newest seq, when the relay read it (recently active channels, newest first, up to 50). */
+  head?: number;
 }
 
 /** Every channel the signed-in person owns, is in, or has agents in, across all their devices. */
