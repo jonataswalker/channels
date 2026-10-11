@@ -1,20 +1,18 @@
 import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 
-import { describeEvent } from "@mc/format.ts"
-import { ignored, type Message, type TaskState } from "@mc/protocol.ts"
+import type { TaskState } from "@mc/protocol.ts"
 import { taskId, waitingOn, type ChannelState, type Task } from "@mc/state.ts"
-import { formatAgo, formatFull } from "@/lib/format"
+import { formatAgo } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { Icon } from "./icon"
-import { Alert, Button, IconButton, Modal, errorText, toast } from "./kit"
-import { Markdown } from "./markdown"
+import { Alert, Button, IconButton, errorText, toast } from "./kit"
 
-const LABEL: Record<TaskState, string> = { doing: "In progress", blocked: "Blocked", review: "In review", todo: "To do", done: "Done", cancelled: "Cancelled" }
+export const LABEL: Record<TaskState, string> = { doing: "In progress", blocked: "Blocked", review: "In review", todo: "To do", done: "Done", cancelled: "Cancelled" }
 const ORDER: TaskState[] = ["blocked", "doing", "review", "todo", "done", "cancelled"]
 
 /** A task's state as a small circle: empty, half full, dashed, red, or checked. Ink only, except blocked. */
-function StateMark({ state }: { state: TaskState }) {
+export function StateMark({ state }: { state: TaskState }) {
   if (state === "done") {
     return (
       <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-ink text-canvas">
@@ -143,24 +141,27 @@ function Board({ state, now, onForgetFact }: { state: ChannelState; now: number;
   )
 }
 
-export function Tasks({ state, now, onOpen, onForgetFact }: { state: ChannelState; now: number; onOpen: (id: number) => void; onForgetFact: (key: string) => Promise<void> }) {
+/** The board: tasks by state, then claims and facts. `top` sits above it in the same column (the Work overview). */
+export function Tasks({ state, now, onOpen, onForgetFact, top }: { state: ChannelState; now: number; onOpen: (id: number) => void; onForgetFact: (key: string) => Promise<void>; top?: ReactNode }) {
   const [showDone, setShowDone] = useState(false)
   const all = [...state.tasks.values()].sort((a, b) => b.updatedAt - a.updatedAt)
 
-  if (!all.length && !state.claims.length && !state.facts.size) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-8">
-        <div className="max-w-xs">
-          <p className="text-body font-semibold">No tasks yet</p>
-          <p className="mt-1 text-ui leading-normal text-ink-2">When agents split up work with mc task add, each task and who holds it shows up here.</p>
-        </div>
-      </div>
-    )
+  const empty = (
+    <div className="max-w-xs">
+      <p className="text-body font-semibold">No tasks yet</p>
+      <p className="mt-1 text-ui leading-normal text-ink-2">When agents split up work with kiwi task add, each task and who holds it shows up here.</p>
+    </div>
+  )
+  if (!all.length && !state.claims.length && !state.facts.size && !top) {
+    return <div className="flex flex-1 items-center justify-center p-8">{empty}</div>
   }
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-[760px] px-4 py-6 md:px-8">
+      <div className={cx("mx-auto px-4 py-6 md:px-8", top ? "max-w-[880px]" : "max-w-[760px]")}>
+        {top && <div className="mb-8">{top}</div>}
+        {top && all.length > 0 && <h2 className="mb-3 text-title font-semibold">Board</h2>}
+        {!all.length && !state.claims.length && !state.facts.size && empty}
         {ORDER.map((s) => {
           const list = all.filter((t) => t.state === s)
           if (!list.length) return null
@@ -187,102 +188,3 @@ export function Tasks({ state, now, onOpen, onForgetFact }: { state: ChannelStat
   )
 }
 
-function relatedTo(m: Message, id: number): boolean {
-  const ev = m.ev
-  if (!ev) return false
-  return (ev.op === "task.add" && m.seq === id) || ("task" in ev && ev.task === id)
-}
-
-export function TaskDetail({
-  id,
-  state,
-  messages,
-  now,
-  onClose,
-  onOpen,
-}: {
-  id: number | null
-  state: ChannelState
-  messages: Message[]
-  now: number
-  onClose: () => void
-  onOpen: (id: number) => void
-}) {
-  const task = id === null ? undefined : state.tasks.get(id)
-  const history = id === null ? [] : messages.filter((m) => relatedTo(m, id) && !ignored(state.trust.get(m.seq)))
-
-  return (
-    <Modal open={id !== null} onClose={onClose} wide>
-      {task ? (
-        <div>
-          <header className="flex items-start gap-3 px-6 pt-5">
-            <span className="flex pt-1">
-              <StateMark state={task.state} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-title leading-snug font-semibold tracking-[-0.01em]">{task.title}</h2>
-              <p className="mt-0.5 text-meta text-ink-2">
-                <span className="tabular-nums">{taskId(task.id)}</span>, {LABEL[task.state].toLowerCase()}
-              </p>
-            </div>
-            <IconButton label="Close" onClick={onClose}>
-              <Icon icon={Cancel01Icon} size={17} />
-            </IconButton>
-          </header>
-
-          <dl className="mx-6 mt-4 grid grid-cols-[88px_1fr] gap-y-1.5 border-y border-line py-3 text-ui">
-            <dt className="text-ink-2">Owner</dt>
-            <dd>{task.owner ?? <span className="text-ink-3">Unassigned</span>}</dd>
-            <dt className="text-ink-2">Created</dt>
-            <dd title={formatFull(task.createdAt)}>
-              by {task.createdBy}, {formatAgo(task.createdAt, now)}
-            </dd>
-            {task.after.length > 0 && (
-              <>
-                <dt className="text-ink-2">Waits on</dt>
-                <dd className="flex flex-wrap gap-x-3">
-                  {task.after.map((d) => {
-                    const dep = state.tasks.get(d)
-                    return (
-                      <button key={d} type="button" onClick={() => onOpen(d)} className="text-accent hover:underline">
-                        {taskId(d)}
-                        {dep ? `, ${LABEL[dep.state].toLowerCase()}` : ""}
-                      </button>
-                    )
-                  })}
-                </dd>
-              </>
-            )}
-          </dl>
-
-          {task.detail && (
-            <div className="px-6 pt-4 text-body leading-[1.6]">
-              <Markdown>{task.detail}</Markdown>
-            </div>
-          )}
-
-          <div className="px-6 pt-5 pb-6">
-            <h3 className="mb-2 text-meta font-semibold text-ink-2">History</h3>
-            <ol className="grid gap-1.5">
-              {history.map((m) => (
-                <li key={m.seq} className="flex items-baseline justify-between gap-4 text-ui">
-                  <span>
-                    <span className="font-medium">{m.from}</span> <span className="text-ink-2">{describeEvent(m)}</span>
-                  </span>
-                  <time className="shrink-0 text-meta text-ink-3" title={formatFull(m.ts)}>
-                    {formatAgo(m.rts ?? m.ts, now)}
-                  </time>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-      ) : (
-        <div className="p-6">
-          <p className="text-body font-semibold">This task is gone</p>
-          <p className="mt-1 text-ui text-ink-2">It was pruned from the channel’s history.</p>
-        </div>
-      )}
-    </Modal>
-  )
-}

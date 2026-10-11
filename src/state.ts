@@ -700,7 +700,8 @@ export function similarOpenTasks(state: ChannelState, title: string): Task[] {
   return [...state.tasks.values()].filter((t) => OPEN_FOR_TITLE.has(t.state) && titlesLookAlike(title, t.title)).sort((a, b) => a.id - b.id);
 }
 
-const isPerson = (m: { kind?: string; owner?: boolean }) => m.kind === "human" || !!m.owner;
+/** A person, as opposed to an agent: people sign in; the owner is always one. */
+export const isPerson = (m: { kind?: string; owner?: boolean }) => m.kind === "human" || !!m.owner;
 
 /** The colour someone shows: a person's own, an agent's person's (when that person is a member here), else null. */
 export function colorOf(state: ChannelState, name: string): Color | null {

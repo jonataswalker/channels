@@ -241,8 +241,13 @@ try {
   console.log(`ok  ${at}`)
 
   await kiwi(["-c", "smoke", "--as", "bot", "task", "add", "Smoke task", "--owner", "bot"])
-  await page.getByRole("tab", { name: /^Tasks/ }).click()
-  await opens("Task details", () => page.getByRole("button", { name: /Smoke task/ }).first().click({ timeout: 15000 }))
+  await page.getByRole("tab", { name: /^Work/ }).click()
+  // A task opens as its own page (T1150): its activity feed, then back to the board.
+  at = "Task page"
+  await page.getByRole("button", { name: /Smoke task/ }).first().click({ timeout: 15000 })
+  await page.getByRole("region", { name: /^Task T\d+/ }).getByRole("heading", { name: "Activity" }).waitFor()
+  await page.getByRole("button", { name: "Close task" }).click()
+  console.log(`ok  ${at}`)
   await page.getByRole("tab", { name: "Chat" }).click()
   // What the owner can do to a member: each item behind their ⋯ in People.
   for (const item of ["Set role…", "Remove from channel…"])
@@ -252,11 +257,11 @@ try {
       await page.getByRole("menuitem", { name: item }).click()
     })
 
-  at = "Tasks"
-  await page.getByRole("tab", { name: /^Tasks/ }).click()
+  at = "Work"
+  await page.getByRole("tab", { name: /^Work/ }).click()
   await page.getByRole("tab", { name: "Chat" }).click()
   await page.waitForTimeout(300)
-  console.log("ok  Tasks")
+  console.log("ok  Work")
 
   // Anything that announces a popup and isn't covered above: new menus get opened too.
   const triggers = await page.locator("[aria-haspopup]:visible").all()
