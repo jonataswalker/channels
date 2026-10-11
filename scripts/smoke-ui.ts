@@ -196,11 +196,11 @@ try {
   await page.getByPlaceholder(/^Write in #smoke-room/).waitFor()
   console.log(`ok  ${at}`)
   await opens("Room → Rename room…", async () => {
-    await page.getByRole("navigation", { name: "Rooms" }).getByText("smoke-room").hover()
+    await page.getByRole("list", { name: "Rooms" }).getByText("smoke-room").hover()
     await page.getByRole("button", { name: "More for #smoke-room" }).click()
     await page.getByRole("menuitem", { name: "Rename room…" }).click()
   })
-  await page.getByRole("navigation", { name: "Rooms" }).getByRole("button", { name: /general/ }).click()
+  await page.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /general/ }).click()
 
   at = "send and reply"
   await page.getByPlaceholder(/^Write (to the channel|in #general)/).fill("smoke test")

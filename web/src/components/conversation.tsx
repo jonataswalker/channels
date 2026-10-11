@@ -1,5 +1,6 @@
 import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, Search01Icon } from "@hugeicons/core-free-icons"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 
 import { GENERAL_ROOM, ignored, type Color, type Message } from "@mc/protocol.ts"
 import { describeScopes, wireScopes } from "@mc/scopes.ts"
@@ -11,7 +12,7 @@ import { excerpt, memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { Composer } from "./composer"
-import { RoomDialog, RoomMenu, RoomRail, roomOfMessage, useRooms } from "./rooms"
+import { RoomDialog, RoomMenu, RoomRail, roomOfMessage, useRooms, useRoomsSlot } from "./rooms"
 import { ChannelControls, ChannelMenu, InviteButton, People, RequestsBanner, type Filter } from "./controls"
 import { Icon } from "./icon"
 import { Button, IconButton, Spinner, Tabs, TextField } from "./kit"
@@ -90,6 +91,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   // view) and search reach across them, and say which room each message is in.
   const rooms = useRooms(member.access.roomId, state, messages, me)
   const manyRooms = state.rooms.size > 1
+  const roomsSlot = useRoomsSlot()
   const [roomDialog, setRoomDialog] = useState<{ room: Room | null } | null>(null)
   const openAsks = useMemo(() => state.openAsks.filter(reaches), [state.openAsks, reaches])
 
@@ -447,7 +449,9 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       }}
     >
       <div className="flex h-full min-w-0 flex-1">
-        {(manyRooms || isOwner) && tab === "chat" && (
+        {(manyRooms || isOwner) &&
+          roomsSlot &&
+          createPortal(
           <RoomRail
             state={state}
             active={rooms.active}
@@ -456,20 +460,24 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             isOwner={isOwner}
             onCreate={() => setRoomDialog({ room: null })}
             onRename={(room) => setRoomDialog({ room })}
-          />
-        )}
+          />,
+            roomsSlot
+          )}
         <div className={cx("relative flex min-w-0 flex-1 flex-col", root && "hidden md:flex")}>
-          <header className="flex h-[56px] shrink-0 items-center gap-2 px-3 shadow-[inset_0_-0.5px_0_var(--line)] md:px-5">
+          <header className="flex h-12 shrink-0 items-center gap-2 px-3 shadow-[inset_0_-1px_0_var(--line)] md:px-4">
             <IconButton label="Channels" className="md:hidden" onClick={onBack}>
               <Icon icon={ArrowLeft01Icon} size={20} />
             </IconButton>
             <ChannelIconTile icon={icon} title={title} size={20} />
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-title leading-tight font-semibold tracking-[-0.015em]">
+            {/* One line: the channel, the room you're in (rooms are the chat's; tasks are channel-wide), who's here. */}
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <h1 className="min-w-0 truncate text-title font-semibold tracking-[-0.015em]">
                 {title}
-                {manyRooms && !filter && <span className="font-normal text-ink-3"> / #{state.rooms.get(rooms.active)?.name}</span>}
+                {manyRooms && tab === "chat" && !filter && <span className="font-normal text-ink-3"> / #{state.rooms.get(rooms.active)?.name}</span>}
               </h1>
-              <People here={here} subtitle={subtitle} live={connection === "live"} />
+              <span className="hidden shrink-0 sm:flex">
+                <People here={here} subtitle={subtitle} live={connection === "live"} />
+              </span>
             </div>
             <Tabs
               value={tab}
@@ -479,9 +487,9 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 { value: "tasks", label: <>Tasks{openTasks > 0 && <span className="text-ink-3 tabular-nums">{openTasks}</span>}</> },
               ]}
             />
-            <span className="mx-1 h-4 w-px bg-line" />
+            <span className="mx-1 hidden h-4 w-px bg-line md:block" />
             <InviteButton />
-            <IconButton label="Search" active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={tab !== "chat"}>
+            <IconButton label="Search" round active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={tab !== "chat"}>
               <Icon icon={Search01Icon} size={17} />
             </IconButton>
             <ChannelMenu />

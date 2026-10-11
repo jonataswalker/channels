@@ -128,7 +128,8 @@ export default function App() {
             onPalette={() => setPalette(true)}
             className={code ? "hidden md:flex" : "flex"}
           />
-          <main className={cx("min-w-0 flex-1", code ? "flex" : "hidden md:flex")}>
+          {/* The app: one inset panel on the frame (edge to edge on a phone). */}
+          <main className={cx("min-w-0 flex-1 overflow-hidden bg-canvas md:my-2 md:mr-2 md:rounded-card md:shadow-[0_0_0_1px_var(--line)]", code ? "flex" : "hidden md:flex")}>
             {code ? (
               <Boundary resetKey={code}>
                 <ChannelGate key={code} code={code} identity={identity} listed={rows.find((r) => r.code === code)} onBack={close} onGone={close} />

@@ -14,14 +14,15 @@
  */
 :root {
   color-scheme: light dark;
-  --canvas: light-dark(#fafaf8, #0b0c0e);
-  --rail: light-dark(#ecece9, #111215);
-  --raised: light-dark(#ffffff, #141518);
+  /* The panel the app sits in (canvas), the frame around it (rail), and what's raised on the panel. */
+  --canvas: light-dark(#fbfbfa, #0f1012);
+  --rail: light-dark(#efefed, #08090a);
+  --raised: light-dark(#ffffff, #16171a);
   --ink: light-dark(#18181b, #e6e6e8);
   /* Quiet text still clears 4.5:1 on canvas, rail, and raised. ink-3 is that floor; ink-2 stays a step stronger. */
   --ink-2: light-dark(#52525a, #a1a1a8);
   --ink-3: light-dark(#63636b, #86868e);
-  --line: light-dark(#e8e8e4, #1e2026);
+  --line: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.07));
   --wash: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.04));
   --wash-2: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.075));
   --accent: light-dark(#1a1a1a, #f1f1ef);
@@ -38,13 +39,13 @@
    * and anything raised on that panel (cards, popovers, the composer). Hairlines, not shadows,
    * separate them; one shadow is kept for popovers and dialogs.
    */
-  --frame: light-dark(#efefed, #08090a);
-  --panel: light-dark(#fbfbfa, #0f1012);
+  --frame: var(--rail);
+  --panel: var(--canvas);
   --edge: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.07));
   --edge-strong: light-dark(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.14));
   /* The open channel in the list: a white sheet on the grey rail by day, a lighter wash by night. */
-  --pick: light-dark(#ffffff, rgba(255, 255, 255, 0.075));
-  --pick-edge: light-dark(rgba(0, 0, 0, 0.06), transparent);
+  --pick: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.07));
+  --pick-edge: transparent;
   /* An agent with no colour yet: a quiet body, eyes a step darker. */
   --char: light-dark(#d7d7d2, #35373e);
   --char-ink: light-dark(#6c6c70, #a0a0a6);
@@ -117,7 +118,7 @@ body,
 
 body {
   margin: 0;
-  background: var(--canvas);
+  background: var(--rail);
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 14px;
