@@ -4,7 +4,7 @@ import { createPortal } from "react-dom"
 
 import { GENERAL_ROOM, ignored, type Color, type Message } from "@mc/protocol.ts"
 import { describeScopes, wireScopes } from "@mc/scopes.ts"
-import { newRoomId, colorOf, keptFromPeople , type Room } from "@mc/state.ts"
+import { newRoomId, colorOf, keptFromPeople, taskId, type Room } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
 import { channelTitle, forgetChannel, loadMember, loadRecent, saveMember, saveRecent, useChannel, useClock, useKnownChannels, type StoredMember } from "@/lib/channel"
 import { refreshIcon, useIcons, useLiveIcon } from "@/lib/icons"
@@ -17,7 +17,9 @@ import { ChannelControls, ChannelMenu, InviteButton, People, RequestsBanner, typ
 import { Icon } from "./icon"
 import { Button, IconButton, Spinner, Tabs, TextField } from "./kit"
 import { DayMark, EventGroup, EventRow, MessageRow, isAgent, standsAlone, type ThreadSummary } from "./message"
-import { TaskDetail, Tasks } from "./tasks"
+import { TaskPage } from "./task-page"
+import { WorkOverview } from "./work"
+import { Tasks } from "./tasks"
 import { ThreadPanel } from "./thread"
 
 /** Messages this close together from one sender read as one run. */
@@ -58,7 +60,10 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   useLiveIcon(member)
   const icon = useIcons().get(member.access.roomId) ?? null
   const now = useNow()
-  const [tab, setTab] = useState<"chat" | "tasks">("chat")
+  const [tab, setTabState] = useState<"chat" | "tasks">("chat")
+  // Once someone picks a tab, it stays theirs; until then, coordinator-only mode opens on Work for people.
+  const picked = useRef(false)
+  const setTab = useCallback((t: "chat" | "tasks") => ((picked.current = true), setTabState(t)), [])
   // undefined: the default view (the coordinator's, in coordinator-only mode for people); null: Everything.
   const [chosen, setFilter] = useState<Filter | null | undefined>(undefined)
   const [search, setSearch] = useState<string | null>(null)
@@ -98,6 +103,9 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   // Coordinator-only: a person talks with the coordinator, and sees that exchange by default.
   const meM = state.members.get(me)
   const coordinator = state.mode.coordinatorOnly && meM && !isAgent(meM) && state.coordinator !== me ? state.coordinator : null
+  useEffect(() => {
+    if (coordinator && !picked.current) setTabState("tasks")
+  }, [coordinator])
   const filter = useMemo<Filter | null>(
     () => (chosen === undefined ? (coordinator ? { kind: "coordinator" } : null) : chosen?.kind === "coordinator" && !coordinator ? null : chosen),
     [chosen, coordinator]
@@ -484,7 +492,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
               onChange={setTab}
               options={[
                 { value: "chat", label: "Chat" },
-                { value: "tasks", label: <>Tasks{openTasks > 0 && <span className="text-ink-3 tabular-nums">{openTasks}</span>}</> },
+                { value: "tasks", label: <>Work{openTasks > 0 && <span className="text-ink-3 tabular-nums">{openTasks}</span>}</> },
               ]}
             />
             <span className="mx-1 hidden h-4 w-px bg-line md:block" />
@@ -497,8 +505,34 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
 
           <RequestsBanner />
 
-          {tab === "tasks" ? (
+          {openTask !== null ? (
+            <TaskPage
+              id={openTask}
+              state={state}
+              messages={messages}
+              me={me}
+              now={now}
+              onOpen={setOpenTask}
+              onClose={() => setOpenTask(null)}
+              noteBlocked={state.members.get(me)?.scopes.includes("tasks") === false ? "The owner hasn’t let you change tasks here, so you can’t comment on one." : null}
+              onNote={async (note) => void (await send(`noted on ${taskId(openTask)}`, { kind: "event", ev: { op: "task.update", task: openTask, note } }))}
+            />
+          ) : tab === "tasks" ? (
             <Tasks
+              top={
+                <WorkOverview
+                  state={state}
+                  messages={messages}
+                  me={me}
+                  now={now}
+                  online={online}
+                  onOpenTask={setOpenTask}
+                  onOpenMessage={(seq) => {
+                    setTab("chat")
+                    jump(seq)
+                  }}
+                />
+              }
               state={state}
               now={now}
               onOpen={setOpenTask}
@@ -632,7 +666,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
           </ThreadPanel>
         )}
 
-        <TaskDetail id={openTask} state={state} messages={messages} now={now} onClose={() => setOpenTask(null)} onOpen={setOpenTask} />
         {roomDialog && (
           <RoomDialog
             state={state}

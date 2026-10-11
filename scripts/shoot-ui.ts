@@ -146,6 +146,7 @@ try {
   await bot("ask", "--to", "jonatas", "Ship it as 0.8.12, or wait for the web?")
   const firstTask = /T\d+/.exec(await bot("task", "add", "Write fewer rows per message", "--owner", "atlas"))?.[0] ?? "T0"
   await bot("task", "add", "Polish the conversation feed")
+  await bot("send", `${firstTask}: rows per message are down from 6 to 4. https://github.com/ojowwalker77/channels/pull/41`)
   await bot("claim", "src/relay/room.ts", "--note", "fewer writes")
   await bot("set", "relay.version", "667ce081")
   await bot("set", "canary", "off")
@@ -166,7 +167,7 @@ try {
   await owner.getByPlaceholder(/^Write in #design/).waitFor()
   await owner.getByPlaceholder(/^Write in #design/).fill("Moodboard: Linear's activity feed, one reading column.")
   await owner.keyboard.press("Enter")
-  await owner.getByRole("navigation", { name: "Rooms" }).getByRole("button", { name: /general/ }).click()
+  await owner.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /general/ }).click()
 
   // An agent asking to join, left pending (its CLI waits in the background).
   void kiwi(["join", code, "kiwi-2", "--relay", BASE, "--as", "scout", "--role", "frontend"], (o) => void (pendingOut = o)).catch(() => {})
@@ -188,12 +189,13 @@ try {
         await owner.locator("button[aria-label='Reply']").last().dispatchEvent("click")
         await owner.getByRole("button", { name: "Close thread" }).waitFor()
       }, () => owner.getByRole("button", { name: "Close thread" }).click())
-      await shoot(owner, tag, "04-tasks", () => owner.getByRole("tab", { name: /^Tasks/ }).click(), () => owner.getByRole("tab", { name: "Chat" }).click())
-      await shoot(owner, tag, "05-task-details", async () => {
-        await owner.getByRole("tab", { name: /^Tasks/ }).click()
+      await shoot(owner, tag, "04-tasks", () => owner.getByRole("tab", { name: /^Work/ }).click(), () => owner.getByRole("tab", { name: "Chat" }).click())
+      await shoot(owner, tag, "05-task-page", async () => {
+        await owner.getByRole("tab", { name: /^Work/ }).click()
         await owner.getByRole("button", { name: /Write fewer rows/ }).first().click()
+        await owner.getByRole("heading", { name: "Activity" }).waitFor()
       }, async () => {
-        await owner.keyboard.press("Escape")
+        await owner.getByRole("button", { name: "Close task" }).click()
         await owner.getByRole("tab", { name: "Chat" }).click()
       })
       await shoot(owner, tag, "06-people", () => owner.getByRole("button", { name: /\d+ members?$/ }).click())
@@ -207,8 +209,8 @@ try {
       await shoot(owner, tag, "11-palette", () => owner.getByRole("button", { name: /^Go to…/ }).click())
       await shoot(owner, tag, "12-composer-kind", () => owner.getByRole("button", { name: /^Message/ }).click())
       await shoot(owner, tag, "13-join-request", () => review.click())
-      await shoot(owner, tag, "14-room", () => owner.getByRole("navigation", { name: "Rooms" }).getByRole("button", { name: /design/ }).click(), () =>
-        owner.getByRole("navigation", { name: "Rooms" }).getByRole("button", { name: /general/ }).click(),
+      await shoot(owner, tag, "14-room", () => owner.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /design/ }).click(), () =>
+        owner.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /general/ }).click(),
       )
       await shoot(owner, tag, "15-new-channel-menu", () => owner.getByRole("button", { name: "New channel or join" }).click())
 
