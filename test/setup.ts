@@ -20,7 +20,8 @@ const DIRS: Record<string, string> = {
   CLAUDE_CONFIG_DIR: join(root, "claude"),
 };
 
-const SESSION = ["CLAUDECODE", "CODEX_THREAD_ID", "GEMINI_CLI", "CURSOR_AGENT", "GROK_SESSION_ID"];
+// The session's id, process and version too: they decide which seat a command acts for, and whether hooks listen.
+const SESSION = ["CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "AI_AGENT", "CLAUDE_CODE_EXECPATH", "CODEX_THREAD_ID", "GEMINI_CLI", "CURSOR_AGENT", "GROK_SESSION_ID"];
 
 function isolate(): void {
   for (const key of SESSION) delete process.env[key];

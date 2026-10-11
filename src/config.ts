@@ -38,6 +38,25 @@ export interface ChannelConfig extends ChannelAccess {
   title?: string;
 }
 
+/** One agent's seat in a working directory (seats.ts reads and writes these). */
+export interface SeatRecord {
+  alias: string;
+  as: string;
+  harness?: "claude" | "codex" | "gemini" | "cursor" | "grok";
+  session?: string;
+  pid?: number;
+  at?: number;
+}
+
+/** Drop the seats `drop` matches from every directory. */
+export function dropSeats(cfg: Config, drop: (b: SeatRecord) => boolean): void {
+  for (const [dir, v] of Object.entries(cfg.bindings ?? {})) {
+    const kept = (Array.isArray(v) ? v : [v]).filter((b) => !drop(b));
+    if (!kept.length) delete cfg.bindings![dir];
+    else cfg.bindings![dir] = kept.length === 1 ? kept[0]! : kept;
+  }
+}
+
 /** A join request this machine is waiting on. */
 export interface PendingJoin {
   code: string;
@@ -51,8 +70,16 @@ export interface Config {
   default?: string;
   channels: Record<string, ChannelConfig>;
   pending?: Record<string, PendingJoin>;
-  /** Working directory → the agent working there (read by the Claude Code hooks). */
-  bindings?: Record<string, { alias: string; as: string }>;
+  /**
+   * Agents that asked to join without picking a name and are still waiting: "room dir harness session"
+   * → the name they asked under, so running the same join again resumes the same request.
+   */
+  asking?: Record<string, { as: string; at: number }>;
+  /**
+   * Working directory → the agent (or agents) working there: what commands and hooks act for
+   * without -c/--as (see seats.ts). One seat is a plain object, several an array.
+   */
+  bindings?: Record<string, SeatRecord | SeatRecord[]>;
   /** What this computer's person chose in `kiwi setup` about Claude Code hooks. */
   claudeHooks?: "on" | "off";
   /**
@@ -419,7 +446,7 @@ export function wipeChannel(alias: string): void {
     c = cfg.channels[alias];
     delete cfg.channels[alias];
     if (cfg.default === alias) delete cfg.default;
-    for (const [dir, b] of Object.entries(cfg.bindings ?? {})) if (b.alias === alias) delete cfg.bindings![dir];
+    dropSeats(cfg, (b) => b.alias === alias);
   });
   if (c) {
     rmSync(identityDir(c.roomId), { recursive: true, force: true });
@@ -446,7 +473,7 @@ export function forgetMember(alias: string, name: string): void {
   const personHere = !!c.person && identitiesIn(c.roomId).includes(c.person);
   if (!left.length && !ownerHere && !personHere) return wipeChannel(alias);
   updateConfig((cfg) => {
-    for (const [dir, b] of Object.entries(cfg.bindings ?? {})) if (b.alias === alias && b.as === name) delete cfg.bindings![dir];
+    dropSeats(cfg, (b) => b.alias === alias && b.as === name);
     const ch = cfg.channels[alias];
     if (ch?.person === name) delete ch.person;
     if (ch?.as === name) ch.as = left[0] ?? ch.owner;

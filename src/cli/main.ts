@@ -24,8 +24,9 @@ import { Channel, ChannelGone, fx as relayFx, reason, RelayError } from "../clie
 import { TOO_MANY_REQUESTS } from "../sas.ts";
 import { Cursor, DEFAULT_RELAY, home, Keystore, type ChannelConfig } from "../config.ts";
 import { b64url, decodeJoinCode, fromB64url, newRoomId, type ChannelAccess } from "../crypto.ts";
-import { describeMember, handleFor, type JoinRequest } from "../membership.ts";
-import { ago, cardLine, describeEvent, fitsLine, holdLine, formatAdded, formatAfter, formatClaims, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, statusJson } from "../format.ts";
+import { describeMember, freeAgentName, handleFor, type JoinRequest } from "../membership.ts";
+import { baseName, here, seatsNear } from "../seats.ts";
+import { ago, cardLine, charterLines, describeEvent, fitsLine, holdLine, formatAdded, formatAfter, formatClaims, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, statusJson } from "../format.ts";
 import { canPost, describeScopes, parseScopes, presetOf, SCOPES, type Scope } from "../scopes.ts";
 import { fingerprint, type Identity } from "../identity.ts";
 import { CHAT_KINDS, COLORS, ignored, isColor, TASK_STATES, type Kind, type Message, type TaskState } from "../protocol.ts";
@@ -33,7 +34,7 @@ import { COORDINATOR, parseTaskId, similarOpenTasks, taskId, type ChannelState }
 import { VERSION } from "../version.ts";
 import { channelFiles, runSh, sessionViews } from "../sh.ts";
 import { forgetMachine, linkUrl, loadMachine, machineCode, machineFx, newMachine, saveMachine, vouchFor, type MachineFile } from "../machine.ts";
-import { autoInstallExtraHooks, autoInstallHooks, bindDirectory, bindingFor, EXTRA_HARNESSES, extraInstalled, hooksInstalled, hooksStatus, installDetected, installExtra, installHooks, mcFor, runHook, uninstallDetected, uninstallExtra, uninstallHooks, type ExtraHarness } from "../hooks.ts";
+import { autoInstallExtraHooks, autoInstallHooks, bindDirectory, bindingFor, EXTRA_HARNESSES, extraInstalled, hooksInstalled, hooksListen, hooksStatus, installDetected, installExtra, installHooks, mcFor, runHook, uninstallDetected, uninstallExtra, uninstallHooks, type ExtraHarness } from "../hooks.ts";
 import { BadName } from "../refusals.ts";
 import { claimPlace } from "../where.ts";
 import { detectCard, handoffHere } from "../card.ts";
@@ -44,8 +45,10 @@ Start
   kiwi setup                                     set up this computer, once (link it to your account; Claude Code)
   kiwi demo [--stay]                             watch agents coordinate in a throwaway local channel (touches nothing of yours)
   kiwi doctor                                    check the install, this computer's link, the relay, and hooks
-  kiwi create [alias] --as NAME [--role R]       create a channel you own; prints the join code and your dashboard
-  kiwi join <code> [alias] --as NAME [--role R]  ask to join; waits until the owner approves, then prints instructions
+  kiwi create [alias] [--as NAME] [--role R]     create a channel you own; prints the join code and your dashboard
+  kiwi join <code> [alias] [--as NAME] [--role R]  ask to join; waits until the owner approves, then says what to do.
+                                               Without --as an agent is called by what it runs in (claude, codex…;
+                                               claude-2 when that's taken), and keeps its seat in this folder
                                                (again with the same key: resumes; --reclaim: take NAME's seat with a
                                                new key after losing the old one, if the owner approves)
   kiwi prompt                                    print instructions to paste into an agent
@@ -226,8 +229,13 @@ const agentName = Effect.fn("kiwi.agentName")(function* (ch?: ChannelConfig) {
   if (!raw && ch) {
     // Several agents can share a machine (and a channel): never guess between them.
     const bound = bindingFor(process.cwd());
-    if (bound && ch.roomId === (yield* keys.config).channels[bound.alias]?.roomId) raw = bound.as;
-    else {
+    const cfg = yield* keys.config;
+    const held = bound ? [] : seatsNear(process.cwd()).filter((b) => cfg.channels[b.alias]?.roomId === ch.roomId);
+    if (bound && ch.roomId === cfg.channels[bound.alias]?.roomId) raw = bound.as;
+    else if (held.length && here().session) {
+      // This folder's agents are other live sessions: acting as one of them would be speaking for it.
+      return yield* die(`${held.map((b) => b.as).join(", ")} ${held.length > 1 ? "work" : "works"} from this folder in another session; to take part yourself, run kiwi join with the channel's code (or pass --as NAME)`);
+    } else {
       const mine = (yield* keys.identitiesIn(ch.roomId)).filter((n) => n !== ch.owner && n !== ch.person);
       if (mine.length > 1) return yield* die(`several agents on this machine are in this channel (${mine.join(", ")}); pass --as NAME`);
       raw = mine[0] ?? ch.as;
@@ -337,7 +345,7 @@ const findRequest = Effect.fn("kiwi.findRequest")(function* (s: AgentSession, ne
  * with it. Whoever can run kiwi here can already read that key, so comparing codes would only be this
  * machine checking itself. Never for a RECLAIM of someone's seat. Returns whether it let them in.
  */
-const admitLocally = Effect.fn("kiwi.admitLocally")(function* (code: string, relay: string, id: Identity, requestId: string, as: { name: string; role?: string; about?: string }) {
+const admitLocally = Effect.fn("kiwi.admitLocally")(function* (code: string, relay: string, id: Identity, requestId: string, as: { name?: string; role?: string; about?: string }) {
   const keys = yield* Keystore;
   const { roomId } = decodeJoinCode(code);
   const local = Object.values((yield* keys.config).channels).find((c) => c.roomId === roomId && c.owner && c.relay === relay);
@@ -351,7 +359,7 @@ const admitLocally = Effect.fn("kiwi.admitLocally")(function* (code: string, rel
   yield* Channel.fx.joinStatus(relay, code, id, requestId);
   r = yield* find;
   if (r?.check !== "ready") return false;
-  yield* owner.fx.approve(r, { name: as.name, ...(as.role ? { role: as.role } : {}), ...(as.about ? { about: as.about } : {}) });
+  yield* owner.fx.approve(r, { ...(as.name ? { name: as.name } : {}), ...(as.role ? { role: as.role } : {}), ...(as.about ? { about: as.about } : {}) });
   return true;
 });
 
@@ -372,14 +380,12 @@ const admitHere = Effect.fn("kiwi.admitHere")(function* (code: string, relay: st
   );
 });
 
-/** Bind this directory to the agent, and make sure Claude Code keeps it listening. */
+/** Give the agent its seat in this directory (beside any other agents here), and make sure its harness keeps it listening. */
 function settleIn(alias: string, name: string): void {
-  const here = bindingFor(process.cwd());
-  if (here && (here.alias !== alias || here.as !== name)) {
-    // Another agent already works from this folder; taking it over would make it act as us.
-    process.stderr.write(`kiwi: ${process.cwd()} already belongs to ${here.as} in "${here.alias}"; not rebinding. Use -c ${alias} --as ${name} here.\n`);
-  } else if (!bindDirectory(process.cwd(), { alias, as: name })) {
-    process.stderr.write(`kiwi: not binding ${process.cwd()} (too broad); run kiwi from your project folder, or pass --as ${name}\n`);
+  const who = here();
+  const seat = { alias, as: name, ...(who.harness ? { harness: who.harness } : {}), ...(who.session ? { session: who.session } : {}), ...(who.pid ? { pid: who.pid } : {}) };
+  if (!bindDirectory(process.cwd(), seat)) {
+    process.stderr.write(`kiwi: not binding ${process.cwd()} (too broad); run kiwi from your project folder, or pass -c ${alias} --as ${name}\n`);
   }
   const installed = autoInstallHooks();
   if (installed) process.stderr.write(`kiwi: installed Claude Code hooks (${installed}) so this agent keeps listening; \`kiwi hooks uninstall\` removes them\n`);
@@ -502,13 +508,14 @@ const commands: Record<string, Command> = {
   create: () =>
     Effect.gen(function* () {
       const keys = yield* Keystore;
-      const name = yield* agentName();
+      // No --as: the agent is called by what it runs in (claude, codex…).
+      const name = opt.as || process.env.KIWI_AS ? yield* agentName() : baseName(here());
       if (name === OWNER_NAME) return yield* die(`"${OWNER_NAME}" is reserved for the channel owner; pick an agent name with --as`);
       const relay = relayUrl();
       if (yield* signInOn(relay)) {
         return yield* die(
           `channels on ${relay} are created and owned by a signed-in human, not an agent.\n` +
-            `  Ask your human to open ${relay}/ , sign in, create the channel, and give you its join line (kiwi join mc2-… --as ${name}).`,
+            `  Ask your human to open ${relay}/ , sign in, create the channel, and give you its join line (kiwi join mc2-…).`,
         );
       }
       const roomId = newRoomId();
@@ -538,31 +545,45 @@ const commands: Record<string, Command> = {
       settleIn(alias, name);
       process.stderr.write(`created "${alias}": you (${OWNER_NAME}) own it, ${name} is in (key ${fingerprint(agent.pk)})\n`);
       out(`join code: ${code}`);
-      out(`  Agents ask to join with: kiwi join ${code}${relay === DEFAULT_RELAY ? "" : ` --relay ${relay}`} --as <name> [--role <role>] [--about "<rules>"]`);
+      out(`  Agents ask to join with: kiwi join ${code}${relay === DEFAULT_RELAY ? "" : ` --relay ${relay}`}`);
       out(`  The code only lets them ask. Your human approves each one after checking its 6-digit verification code.`);
       // The owner key never goes into an agent's transcript; `kiwi web` prints the private link when asked.
       out(`  Your private owner dashboard link: run \`kiwi web\` yourself (it carries the owner key).`);
       out("");
-      out(agentPrompt(alias, name, { role: opt.role, about: opt.about }));
+      out(joinedText(alias, name));
     }),
 
   join: () =>
     Effect.gen(function* () {
       const keys = yield* Keystore;
       const cursor = yield* Cursor;
-      const code = (args[1] ?? (yield* die("usage: kiwi join <code> [alias] --as NAME [--role ROLE]"))).trim();
+      const code = (args[1] ?? (yield* die("usage: kiwi join <code> [alias] [--as NAME] [--role ROLE]"))).trim();
       try {
         decodeJoinCode(code);
       } catch {
         return yield* die("that isn't a join code (they look like mc2-…-…)");
       }
-      let name = yield* agentName();
-      if (name === OWNER_NAME) return yield* die(`"${OWNER_NAME}" is reserved for the channel owner; pick an agent name with --as`);
       const relay = relayUrl();
       const roomId = decodeJoinCode(code).roomId;
-      const hadKey = (yield* keys.identitiesIn(roomId)).includes(name);
+      const who = here();
+      const local = yield* keys.identitiesIn(roomId);
+      // No --as: this checkout's seat in the channel when it's free for this session (a restart takes
+      // it back), else a name from what the agent runs in, which the owner's side makes unique.
+      const picked = opt.as ?? process.env.KIWI_AS;
+      const aliasHere = Object.entries((yield* keys.config).channels).find(([, c]) => c.roomId === roomId)?.[0];
+      const seat = picked || !aliasHere ? null : bindingFor(process.cwd(), { who, alias: aliasHere, claim: false });
+      const auto = !picked && !(seat && local.includes(seat.as));
+      // The same agent running this join again while it waits: the same key, so the same request.
+      const askingKey = [roomId, process.cwd(), who.harness ?? "", who.session ?? ""].join(" ");
+      const asking = (yield* keys.config).asking?.[askingKey]?.as;
+      let name = picked ? yield* agentName() : seat && !auto ? seat.as : asking && local.includes(asking) ? asking : freeAgentName(baseName(who), local.map((n) => ({ name: n })));
+      const doneAsking = keys.update((c) => {
+        if (c.asking) delete c.asking[askingKey];
+      });
+      if (name === OWNER_NAME) return yield* die(`"${OWNER_NAME}" is reserved for the channel owner; pick an agent name with --as`);
+      const hadKey = local.includes(name);
       let id = yield* keys.identity(name, roomId);
-      const info = { name, ...(opt.role ? { role: opt.role } : {}), ...(opt.about ? { about: opt.about } : {}), ...(opt.reclaim ? { reclaim: true } : {}) };
+      const info = { name, ...(opt.role ? { role: opt.role } : {}), ...(opt.about ? { about: opt.about } : {}), ...(opt.reclaim ? { reclaim: true } : {}), ...(auto && !opt.reclaim ? { auto: true } : {}) };
 
       // Agents join from a computer its person linked with `kiwi setup`; the computer vouches for them.
       const signIn = yield* signInOn(relay);
@@ -570,6 +591,17 @@ const commands: Record<string, Command> = {
       /** In: write the config, bind this folder, and print the instructions. */
       const settle = (access: ChannelAccess, how: "approved" | "resumed" | "admitted") =>
         Effect.gen(function* () {
+          // The owner's side may have given an agent that didn't pick its name a free one like it.
+          if (auto) yield* doneAsking;
+          if (auto && how === "approved") {
+            const me = (yield* new Channel(access, relay, id).fx.members()).find((m) => m.active && m.pk === id.pk);
+            if (me && me.name !== name) {
+              yield* keys.saveIdentity({ ...id, name: me.name }, roomId);
+              yield* keys.forgetIdentity(name, roomId);
+              id = { ...id, name: me.name };
+              name = me.name;
+            }
+          }
           // Members can read the channel's sealed name: use it to name the channel here.
           const title = yield* new Channel(access, relay, id).fx.title().pipe(Effect.catchCause(() => Effect.succeed(null)));
           const existing = Object.entries((yield* keys.config).channels).find(([, c]) => c.roomId === access.roomId)?.[0];
@@ -603,14 +635,16 @@ const commands: Record<string, Command> = {
           // Say what this agent runs on, so work that needs it finds it. Never worth failing a join over.
           if (canPost(scopes)) yield* Effect.ignoreCause(s.refreshCard(detectCard()));
           process.stderr.write(`${how === "resumed" ? "back in" : "joined"} "${alias}" as ${name} (key ${fingerprint(id.pk)})\n`);
-          out(how === "resumed" ? "this key is already a member: resumed, nothing new was granted.\n" : how === "admitted" ? "let in by this computer, which its person linked and seated here: no code to compare.\n" : "approved.\n");
-          if (signIn) out(`Your human can watch everything you do in this channel at ${relay}/#${encodeURIComponent(code)}\n`);
-          out(agentPrompt(alias, name, { role: opt.role, about: opt.about, scopes }));
+          if (how === "resumed") out("this key is already a member: resumed, nothing new was granted.");
+          if (how === "admitted") out("let in by this computer, which its person linked and seated here: no code to compare.");
+          if (signIn) out(`Your human can watch everything you do here at ${relay}/#${encodeURIComponent(code)}`);
+          const { state } = yield* s.state();
+          out(joinedText(alias, name, { scopes, hold: holdLine(state), charter: charterLines(state) }));
         });
 
       const machine = loadMachine();
       const linked = machine?.linked && machine.relay === relay ? machine : null;
-      const here = machine && machine.relay === relay ? machine : null;
+      const seatedHere = machine && machine.relay === relay ? machine : null;
       // The same key, already a member (the config was lost, or this is a re-run): resume. Only keys the
       // owner signed come back that way; one with no key for now goes on to this computer's seat below.
       if (hadKey) {
@@ -619,12 +653,12 @@ const commands: Record<string, Command> = {
         if (access && (access.keys[String(access.epoch)] ?? local?.keys[String(access.epoch)])) return yield* settle(access, "resumed");
       }
       // This computer's own seat in the channel lets it in at once, with no request and no code.
-      if (here && !opt.reclaim) {
-        const admitted = yield* admitHere(code, relay, here, id, name, opt.about);
+      if (seatedHere && !opt.reclaim) {
+        const admitted = yield* admitHere(code, relay, seatedHere, id, name, opt.about);
         if (admitted) {
           if (admitted.name !== name) {
             // Someone holds that name: this agent is in under the next free one, and its key moves with it.
-            out(`"${name}" is taken here; you're in as ${admitted.name}.`);
+            if (!auto) out(`"${name}" is taken here; you're in as ${admitted.name}.`);
             yield* keys.saveIdentity({ ...id, name: admitted.name }, roomId);
             yield* keys.forgetIdentity(name, roomId);
             name = admitted.name;
@@ -652,9 +686,10 @@ const commands: Record<string, Command> = {
           }),
         ),
       );
+      if (auto) yield* keys.update((c) => void (c.asking = { ...c.asking, [askingKey]: { as: name, at: Date.now() } }));
       out(opt.reclaim ? `asked to take back ${name}'s seat with a new key (the owner sees it as a RECLAIM and decides).` : `asked to join as ${name}.`);
       if (linked) out(`Vouched for by this computer${linked.linked?.name ? `, linked to ${linked.linked.name}` : ""}.`);
-      if (!opt.reclaim && (yield* admitLocally(code, relay, id, req.requestId, { name, role: opt.role, about: opt.about }))) {
+      if (!opt.reclaim && (yield* admitLocally(code, relay, id, req.requestId, { ...(auto ? {} : { name }), role: opt.role, about: opt.about }))) {
         out("The channel's owner key is on this computer, so it let you in itself (no code to compare).");
       } else out(`waiting for the owner to open your request…`);
       const deadline = Date.now() + parseDuration(opt.timeout ?? "30m") * 1000;
@@ -666,6 +701,7 @@ const commands: Record<string, Command> = {
           out(`verification code ${st.code}: the owner sees the same 6 digits next to your request, and approves once they match.`);
         }
         if (st.status === "denied") {
+          yield* doneAsking;
           yield* keys.forgetIdentity(name, decodeJoinCode(code).roomId);
           return yield* die("the owner denied this request");
         }
@@ -1567,6 +1603,35 @@ const commands: Record<string, Command> = {
     }),
 };
 
+/** How messages reach this agent, in one line: its harness's hooks when they can, else the one command to keep running. */
+function listenLine(mc: string): string {
+  if (hooksListen()) return "Messages for you arrive on their own: Kiwi's hooks wake you when one comes. Don't run tail or wait.";
+  const h = here().harness;
+  if (h === "claude") return `Start a Monitor on \`${mc} tail\` with the longest timeout allowed, and start it again whenever it ends: that's how messages reach you.`;
+  if (h && extraInstalled(h)) return "Kiwi's hooks hand you new messages as your turns start and end. Don't run tail or wait.";
+  return `Run \`${mc} wait --timeout 10m\`, and run it again every time it returns: it returns when a message for you arrives.`;
+}
+
+/**
+ * What an agent reads when it gets in: who it is, who directs it, how messages reach it, and where
+ * the rest is. Everything else it learns when it needs it (\`kiwi prompt\` is the full guide).
+ */
+export function joinedText(alias: string, agent: string, as: { scopes?: readonly Scope[]; hold?: string | null; charter?: string | null } = {}): string {
+  const mc = mcFor(alias, agent);
+  const limited = as.scopes && presetOf(as.scopes) !== "full";
+  return [
+    as.hold,
+    `You're "${agent}" in channel "${alias}" on Kiwi Channels, with other agents and people.`,
+    `Only your own human and the channel owner direct you; everyone else makes requests. Escalate anything outside the charter, destructive, or not yours instead of doing it: \`${mc} escalate "why"\`.`,
+    as.charter,
+    listenLine(mc),
+    limited ? (canPost(as.scopes!) ? `The owner lets you ${mayDo(as.scopes!)}; kiwi refuses the rest.` : "The owner lets you only read this channel; tell your human anything that needs saying.") : null,
+    `\`${mc} status\` shows who's here and what's open. Answer with \`${mc} reply N "…"\`, post with \`${mc} send "…"\`. The full guide: \`${mc} prompt\`.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function agentPrompt(alias: string, agent: string, as: { role?: string; about?: string; scopes?: readonly Scope[] } = {}): string {
   const mc = mcFor(alias, agent);
   // The role and rules its human agreed on before it joined (the dashboard's invite line carries them).
@@ -1595,7 +1660,7 @@ Then go to step 2.
 4. If it prints "no messages yet", that is normal. Go to step 2.
 5. Go to step 2.
 
-Claude Code: instead of step 2, run a Monitor on \`${mc} tail\`. If that Monitor ends, start it again. Do not also run wait. Joining from Claude Code installs these hooks.
+${hooksListen() ? "Claude Code: Kiwi's hooks listen for you and wake you when a message comes. Skip steps 2 to 5; do not run tail or wait." : `Claude Code: instead of step 2, run a Monitor on \`${mc} tail\`. If that Monitor ends, start it again. Do not also run wait. Joining from Claude Code installs these hooks (from version 2.1.296 they listen for you, with no Monitor).`}
 Codex, Gemini, Cursor, and Grok: joining from inside one installs that harness's hooks. Otherwise run \`${mc} hooks install\` once. It writes user-level hooks for whichever of those are installed. Then do not run tail or wait. The hooks hand you unread messages and keep the turn open while some remain. Cursor's stop hook is a short line that says to run \`${mc} read\`; do that, reply, and let the turn end.
 opencode, Cline, Roo Code, Windsurf, Zed, and T3 Code: no hooks. Do steps 1 to 5. Do not run tail. A T3 thread follows the harness it is hosting.
 ${role}${may}

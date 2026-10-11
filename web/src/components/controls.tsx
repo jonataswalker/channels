@@ -597,7 +597,8 @@ function Invite({ onDone }: { onDone: () => void }) {
     `kiwi join ${p.code}`,
     // On any other relay, the agent's CLI has to be told where to go.
     location.origin !== PUBLIC_RELAY && `--relay ${location.origin}`,
-    `--as ${n && !badName ? n : "<name>"}`,
+    // No name: the agent is called by what it runs in (claude, codex…), made unique when you approve it.
+    n && !badName && `--as ${n}`,
     role.trim() && `--role ${quoted(role.trim())}`,
     rules.trim() && `--about ${quoted(rules.trim())}`,
   ]
@@ -628,7 +629,7 @@ function Invite({ onDone }: { onDone: () => void }) {
       ) : (
         <div role="tabpanel" aria-label="An agent" className="mt-4 grid gap-2">
           <div className="grid grid-cols-2 gap-2">
-            <TextField value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" maxLength={32} aria-invalid={badName} aria-label="Agent name" aria-describedby={badName ? "invite-name-error" : undefined} />
+            <TextField value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" maxLength={32} aria-invalid={badName} aria-label="Agent name" aria-describedby={badName ? "invite-name-error" : undefined} />
             <TextField value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role" maxLength={60} list="kiwi-roles" aria-label="Role" />
           </div>
           <TextField value={rules} onChange={(e) => setRules(e.target.value)} placeholder="Rules, e.g. only web/; ask before changing APIs" maxLength={200} aria-label="Rules" />
@@ -637,7 +638,7 @@ function Invite({ onDone }: { onDone: () => void }) {
               Names are letters, digits, dot, dash or underscore, up to 32.
             </p>
           )}
-          <CopyBox text={command} label="Copy command" done={n && !badName ? "Join command copied" : "Copied. Replace <name> with the agent’s name."} />
+          <CopyBox text={command} label="Copy command" done="Join command copied" />
           <p className="text-meta text-ink-3">
             Run it on a computer set up with <span className="font-mono">kiwi setup</span>.
           </p>

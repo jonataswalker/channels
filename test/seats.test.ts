@@ -1,0 +1,100 @@
+// Seats: which agent a command or hook acts for, with no -c/--as. Several agents can work from one
+// checkout; a session finds its own seat, a restart takes its old one back, and a second live agent
+// never acts as the first.
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadConfig, updateConfig, wipeChannel } from "../src/config.ts";
+import { freeAgentName } from "../src/membership.ts";
+import { baseName, bindDirectory, bindingFor, here, seatsAt } from "../src/seats.ts";
+
+let home = "";
+let dir = "";
+const prevHome = process.env.KIWI_HOME;
+
+beforeEach(() => {
+  home = mkdtempSync(join(tmpdir(), "kiwi-seats-"));
+  dir = join(home, "proj");
+  mkdirSync(dir);
+  process.env.KIWI_HOME = home;
+  // Seats only count for channels this machine knows.
+  updateConfig((c) => {
+    c.channels.ch = { roomId: "room", ownerPk: "o", ownerXpk: "x", epoch: 0, keys: {}, relay: "http://127.0.0.1:1", code: "mc2-x" } as never;
+    c.channels.other = { roomId: "room2", ownerPk: "o", ownerXpk: "x", epoch: 0, keys: {}, relay: "http://127.0.0.1:1", code: "mc2-y" } as never;
+  });
+});
+
+afterEach(() => {
+  if (prevHome === undefined) delete process.env.KIWI_HOME;
+  else process.env.KIWI_HOME = prevHome;
+  rmSync(home, { recursive: true, force: true });
+});
+
+/** A pid that isn't running: a session that's gone. */
+const DEAD = 2 ** 22 + 12345;
+
+test("what each harness says about itself", () => {
+  expect(here({ CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s1", CLAUDE_PID: "42" })).toEqual({ harness: "claude", session: "s1", pid: 42 });
+  expect(here({ CODEX_THREAD_ID: "t1" })).toEqual({ harness: "codex", session: "t1" });
+  expect(here({ GROK_SESSION_ID: "g1" })).toEqual({ harness: "grok", session: "g1" });
+  expect(here({ GEMINI_CLI: "1" })).toEqual({ harness: "gemini" });
+  expect(here({})).toEqual({});
+  expect(baseName(here({ CLAUDECODE: "1" }))).toBe("claude");
+  expect(baseName({})).toBe("agent");
+});
+
+test("a session finds its own seat; a second live session in the same checkout finds none", () => {
+  bindDirectory(dir, { alias: "ch", as: "claude", harness: "claude", session: "s1", pid: process.pid });
+  expect(bindingFor(join(dir, "src"), { who: { harness: "claude", session: "s1", pid: process.pid } })?.as).toBe("claude");
+  // Another Claude Code session, while the first one's process lives: not its seat.
+  expect(bindingFor(dir, { who: { harness: "claude", session: "s2", pid: process.pid + 1 } })).toBeNull();
+});
+
+test("a restart takes its old seat back once the session that held it is gone", () => {
+  bindDirectory(dir, { alias: "ch", as: "claude", harness: "claude", session: "old", pid: DEAD });
+  const b = bindingFor(dir, { who: { harness: "claude", session: "new", pid: process.pid } });
+  expect(b?.as).toBe("claude");
+  // It's now this session's: the seat remembers it.
+  expect(seatsAt(loadConfig(), dir)[0]).toMatchObject({ session: "new", pid: process.pid });
+  // Another harness never takes a Claude seat.
+  bindDirectory(dir, { alias: "ch", as: "claude", harness: "claude", session: "x", pid: DEAD });
+  expect(bindingFor(dir, { who: { harness: "codex", session: "t1" } })).toBeNull();
+});
+
+test("two agents in one checkout each act as themselves", () => {
+  bindDirectory(dir, { alias: "ch", as: "claude", harness: "claude", session: "s1", pid: process.pid });
+  bindDirectory(dir, { alias: "ch", as: "claude-2", harness: "claude", session: "s2", pid: process.pid });
+  expect(seatsAt(loadConfig(), dir)).toHaveLength(2);
+  expect(bindingFor(dir, { who: { harness: "claude", session: "s1", pid: process.pid } })?.as).toBe("claude");
+  expect(bindingFor(dir, { who: { harness: "claude", session: "s2", pid: process.pid } })?.as).toBe("claude-2");
+});
+
+test("a plain terminal in a folder with one agent acts as it, as before seats; with two it guesses neither", () => {
+  bindDirectory(dir, { alias: "ch", as: "claude", harness: "claude", session: "s1", pid: process.pid });
+  expect(bindingFor(dir, { who: {} })?.as).toBe("claude");
+  bindDirectory(dir, { alias: "ch", as: "claude-2", harness: "claude", session: "s2", pid: process.pid });
+  expect(bindingFor(dir, { who: {} })).toBeNull();
+});
+
+test("without a session, the last join in a folder wins, as before seats", () => {
+  bindDirectory(dir, { alias: "ch", as: "pic" });
+  bindDirectory(dir, { alias: "other", as: "pic" });
+  expect(seatsAt(loadConfig(), dir)).toEqual([expect.objectContaining({ alias: "other", as: "pic" })]);
+  // One seat is stored as a plain object, which older clients read.
+  expect(Array.isArray(loadConfig().bindings?.[dir])).toBe(false);
+});
+
+test("a channel that's gone takes its seats with it, and leaves the others", () => {
+  bindDirectory(dir, { alias: "ch", as: "claude", harness: "claude", session: "s1", pid: process.pid });
+  bindDirectory(dir, { alias: "other", as: "claude", harness: "claude", session: "s2", pid: process.pid });
+  wipeChannel("ch");
+  expect(seatsAt(loadConfig(), dir).map((b) => b.alias)).toEqual(["other"]);
+});
+
+test("free names: the base, then -2, -3…; every name anyone held stays taken", () => {
+  expect(freeAgentName("claude", [])).toBe("claude");
+  expect(freeAgentName("claude", [{ name: "Claude" }])).toBe("claude-2");
+  expect(freeAgentName("claude", [{ name: "claude" }, { name: "claude-2" }])).toBe("claude-3");
+  expect(freeAgentName("kiwi", [])).toBe("kiwi-2");
+});

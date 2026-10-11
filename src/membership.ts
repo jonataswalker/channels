@@ -59,6 +59,11 @@ export interface MemberInfo {
   admits?: { since: number; until: number };
   /** An agent a computer let in: that computer's key. Kept when the owner re-signs the record, so revoking the computer finds it. */
   via?: string;
+  /**
+   * In a join request only: the agent didn't pick its name (kiwi join without --as), so a taken
+   * one means "give me a free one like it", never a RECLAIM of that seat.
+   */
+  auto?: boolean;
 }
 
 /** The member a request's name already belongs to: approving it would move their seat to the new key. */
@@ -340,6 +345,11 @@ export interface JoinRequest extends MemberInfo {
   reclaims?: ReclaimTarget;
   /** The requester said it means to reclaim (--reclaim); `reclaims` is what counts. */
   reclaim?: boolean;
+  /**
+   * The agent didn't pick its name: this is the name it asked under ("claude"), and `name` is a free
+   * one like it ("claude-2"). Approval picks again if that one was taken in the meantime.
+   */
+  askedAs?: string;
   /**
    * The key of the computer that vouched for this agent, when its signature (over this channel and
    * this agent's key, sealed to the owner) checks out. The relay can't forge it.
