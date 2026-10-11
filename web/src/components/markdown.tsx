@@ -54,7 +54,8 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   useEffect(() => () => window.clearTimeout(timer.current), [])
   return (
     <div className="group relative my-2">
-      <pre ref={preRef} className="overflow-x-auto rounded-ctl bg-wash px-3 py-2.5 font-mono text-ui leading-relaxed shadow-[inset_0_0_0_0.5px_var(--line)] [&>code]:bg-transparent [&>code]:p-0">
+      {/* On a phone, long lines wrap rather than run off the edge with no sign there's more. */}
+      <pre ref={preRef} className="overflow-x-auto rounded-ctl border border-edge bg-wash-2 px-3 py-2.5 font-mono text-ui leading-relaxed text-ink max-sm:break-all max-sm:whitespace-pre-wrap [&>code]:bg-transparent [&>code]:p-0">
         {children}
       </pre>
       <button
