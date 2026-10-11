@@ -42,6 +42,11 @@ export interface MemberInfo {
    * says the same thing to one that loads it all.
    */
   later?: { scopes: Scope[]; since: number };
+  /**
+   * The role (and rules) from log position `since` on, after the owner set it with role.set (re-signed
+   * with every change), for a client that loads only the tail of the log. `about` absent: unchanged.
+   */
+  laterRole?: { role: string | null; about?: string | null; since: number };
   /** In a join request only: the requester means to take over the seat under this name with a new key. */
   reclaim?: boolean;
 }
@@ -132,6 +137,7 @@ export async function makeRecord(owner: Identity, room: string, m: MemberInfo & 
     ...(m.color && (m.kind === "human" || m.owner) ? { color: m.color } : {}),
     ...(!m.owner && wireScopes(m.scopes) ? { scopes: wireScopes(m.scopes)! } : {}),
     ...(!m.owner && m.later ? { later: { scopes: wireScopes(m.later.scopes), since: m.later.since } } : {}),
+    ...(!m.owner && m.laterRole ? { laterRole: m.laterRole } : {}),
     at: Date.now(),
   });
 }
@@ -154,6 +160,7 @@ export async function openRecord(key: string, sealed: string, room: string, owne
     const l = (rec as { later?: { scopes?: unknown; since?: unknown } }).later;
     // null is everything; anything unreadable is nothing.
     const later = !owner && l && Number.isInteger(l.since) ? { scopes: l.scopes === null ? [...SCOPES] : (readScopes(l.scopes) ?? []), since: l.since as number } : undefined;
+    const laterRole = owner ? undefined : readLaterRole((rec as { laterRole?: unknown }).laterRole);
     return {
       pk: rec.member,
       xpk: rec.mxpk,
@@ -166,6 +173,7 @@ export async function openRecord(key: string, sealed: string, room: string, owne
       ...(isColor(rec.color) ? { color: rec.color } : {}),
       ...(scopes ? { scopes } : {}),
       ...(later ? { later } : {}),
+      ...(laterRole ? { laterRole } : {}),
       owner,
       at: rec.at,
       active: true,
@@ -173,6 +181,15 @@ export async function openRecord(key: string, sealed: string, room: string, owne
   } catch {
     return null;
   }
+}
+
+/** A record's later role, if it reads as one: a role string (or null for none), rules likewise, and where it took effect. */
+function readLaterRole(x: unknown): MemberInfo["laterRole"] {
+  if (!x || typeof x !== "object") return undefined;
+  const r = x as { role?: unknown; about?: unknown; since?: unknown };
+  const okText = (v: unknown, max: number) => v === null || (typeof v === "string" && v.length <= max);
+  if (!Number.isInteger(r.since) || !okText(r.role, 200) || (r.about !== undefined && !okText(r.about, 2000))) return undefined;
+  return { role: r.role as string | null, ...(r.about !== undefined ? { about: r.about as string | null } : {}), since: r.since as number };
 }
 
 /** A pending join request, as the owner sees it after opening its box. */

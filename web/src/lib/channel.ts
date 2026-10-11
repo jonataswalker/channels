@@ -760,6 +760,7 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
         sponsor: m.sponsor,
         ...(m.scopes ? { scopes: m.scopes } : {}),
         ...(m.later ? { later: m.later } : {}),
+        ...(m.laterRole ? { laterRole: m.laterRole } : {}),
       })),
     [roster]
   )

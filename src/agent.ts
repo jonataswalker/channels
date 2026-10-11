@@ -74,6 +74,7 @@ export class AgentSession {
         color: m.color,
         ...(m.scopes ? { scopes: m.scopes } : {}),
         ...(m.later ? { later: m.later } : {}),
+        ...(m.laterRole ? { laterRole: m.laterRole } : {}),
       }));
     }
     return this.roster;
@@ -468,7 +469,14 @@ export class AgentSession {
       if (!m.roleRequest) throw new Rejected(`${member} hasn't asked for a role`);
       ev = { op: "role.set", member, role: m.roleRequest.role ?? null, about: m.roleRequest.about ?? null };
     } else ev = { op: "role.set", member, ...decision };
-    return this.ownerCh.send(ev.op === "role.refuse" ? `kept ${member}'s role` : `made ${member} ${ev.role ?? "unassigned"}`, { kind: "event", ev });
+    const seq = await this.ownerCh.send(ev.op === "role.refuse" ? `kept ${member}'s role` : `made ${member} ${ev.role ?? "unassigned"}`, { kind: "event", ev });
+    // Then the member's record says it too, for clients holding only the log's tail. If this fails,
+    // the owner's next reconcile puts it right; the role.set already counts for every client.
+    if (ev.op === "role.set" && !m.owner) {
+      const rec = (await this.ownerCh.members()).find((x) => x.active && x.name === member && x.pk === m.pk);
+      if (rec) await this.ownerCh.updateRole(rec, ev.role, ev.about, seq).catch(() => {});
+    }
+    return seq;
   }
 
   /**

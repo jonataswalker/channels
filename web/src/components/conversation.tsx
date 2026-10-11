@@ -443,7 +443,10 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         await refreshRoster()
       }}
       onRole={async (ev) => {
-        await send(ev.op === "role.set" ? `made ${ev.member} ${ev.role ?? "unassigned"}` : `kept ${ev.member}'s role`, { kind: "event", ev })
+        const seq = await send(ev.op === "role.set" ? `made ${ev.member} ${ev.role ?? "unassigned"}` : `kept ${ev.member}'s role`, { kind: "event", ev })
+        // Then the member's record says it too, for views holding only the log's tail (T885).
+        const target = ev.op === "role.set" ? roster.find((m) => m.active && m.name === ev.member && !m.owner) : undefined
+        if (ev.op === "role.set" && target) await ch.updateRole(target, ev.role, ev.about, seq).catch(() => {})
       }}
       onDeny={async (r) => {
         await ch.deny(r.id)
