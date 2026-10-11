@@ -163,6 +163,12 @@ export function findRoom(state: ChannelState, nameOrId: string): Room | null {
   return state.rooms.get(t) ?? [...state.rooms.values()].find((r) => r.name.toLowerCase() === t.toLowerCase()) ?? null;
 }
 
+/** A new room id: 8 random characters from [a-z0-9]. Made once by the owner's client; it never changes. */
+export function newRoomId(): string {
+  const abc = "abcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => abc[b % abc.length]).join("");
+}
+
 /** The role that makes a member the channel's coordinator. */
 export const COORDINATOR = "coordinator";
 const isCoordinatorRole = (role: string | undefined) => role?.trim().toLowerCase() === COORDINATOR;

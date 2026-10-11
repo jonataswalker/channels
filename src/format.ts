@@ -209,6 +209,13 @@ export function memberJson(state: ChannelState, name: string, online: Snapshot["
   };
 }
 
+/** The rooms, one a line: "#design (id k3f9q2xa) · 12 messages". */
+export function formatRooms(state: ChannelState): string {
+  const count = new Map<string, number>();
+  for (const id of state.roomOf.values()) count.set(id, (count.get(id) ?? 0) + 1);
+  return [...state.rooms.values()].map((r) => `#${inlineText(r.name, 40)} (id ${r.id}) · ${count.get(r.id) ?? 0} messages`).join("\n");
+}
+
 /** "read only", or what the scopes cover: "write messages; claim paths (contributor)". */
 export function mayDo(scopes: readonly Scope[]): string {
   if (!scopes.length) return "read only";

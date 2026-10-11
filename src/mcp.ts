@@ -13,7 +13,7 @@ import { loadImages, saveImages } from "./attach.ts";
 import { loadSummary, memberLoad, showsLoad } from "./load.ts";
 import { forgetMember, home, identitiesIn, loadConfig, signingBudget, wipeChannel, writeCursor } from "./config.ts";
 import { ChannelGone } from "./client.ts";
-import { formatAdded, formatAfter, formatClaims, formatFact, formatMessage, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration } from "./format.ts";
+import { formatAdded, formatAfter, formatClaims, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration } from "./format.ts";
 import { parseScopes, SCOPES } from "./scopes.ts";
 import { CHAT_KINDS, type Kind, type Message } from "./protocol.ts";
 import { inlineText } from "./membership.ts";
@@ -182,6 +182,28 @@ export async function runMcp(s: AgentSession, opts: { push?: boolean } = {}): Pr
       }),
     );
     server.registerTool(
+      "create_room",
+      {
+        description: "Make a room in this channel (like a channel in a Discord server). Only call this after your human explicitly told you to.",
+        inputSchema: { name: z.string().describe("the room's name, e.g. design") },
+      },
+      guard(async ({ name }) => {
+        const { id, state } = await s.createRoom(name);
+        return `made #${state.rooms.get(id)?.name ?? name} (id ${id})`;
+      }),
+    );
+    server.registerTool(
+      "rename_room",
+      {
+        description: "Rename a room (general too; its id stays). Only call this after your human explicitly told you to.",
+        inputSchema: { room: z.string().describe("the room's current name or id"), name: z.string().describe("its new name") },
+      },
+      guard(async ({ room, name }) => {
+        await s.renameRoom(room, name);
+        return `renamed to #${name}`;
+      }),
+    );
+    server.registerTool(
       "set_mode",
       {
         description:
@@ -309,6 +331,12 @@ export async function runMcp(s: AgentSession, opts: { push?: boolean } = {}): Pr
   );
 
   server.registerTool(
+    "rooms",
+    { description: "The channel's rooms, with their ids. Messages say their room as [#name] once there's more than one. Example: call rooms." },
+    guard(async () => formatRooms((await s.state()).state)),
+  );
+
+  server.registerTool(
     "send",
     {
       description: "Post a message. Omit `to` to address everyone; `role:x` addresses everyone with that role. Example: send {\"text\":\"hello\",\"to\":[\"win\"]}.",
@@ -318,19 +346,26 @@ export async function runMcp(s: AgentSession, opts: { push?: boolean } = {}): Pr
         kind: kind.optional(),
         re: z.array(z.number().int()).optional(),
         images: z.array(z.string()).optional().describe("local image files to attach (png, jpg, gif, webp, ≤256KB each)"),
+        room: z.string().optional().describe("the room's name or id; general if omitted (a reply defaults to its parent's room)"),
       },
     },
-    guard(async ({ text, to, kind, re, images }) => `sent #${await s.send(text, { to, kind, re, imgs: images?.length ? loadImages(images) : undefined })}`),
+    guard(async ({ text, to, kind, re, images, room }) => `sent #${await s.send(text, { to, kind, re, room, imgs: images?.length ? loadImages(images) : undefined })}`),
   );
 
   server.registerTool(
     "ask",
     {
       description: "Ask a question. With wait_seconds, blocks until someone replies and returns the answer. Example: ask {\"text\":\"is it done?\",\"to\":[\"win\"],\"wait_seconds\":60}.",
-      inputSchema: { text: z.string(), to: z.array(z.string()).optional(), wait_seconds: z.number().int().min(0).max(3600).optional(), blocking: z.boolean().optional() },
+      inputSchema: {
+        text: z.string(),
+        to: z.array(z.string()).optional(),
+        wait_seconds: z.number().int().min(0).max(3600).optional(),
+        blocking: z.boolean().optional(),
+        room: z.string().optional().describe("the room's name or id; general if omitted"),
+      },
     },
-    guard(async ({ text, to, wait_seconds, blocking }) => {
-      const { seq, replies } = await s.ask(text, { to, kind: blocking ? "blocking" : "ask", waitSec: wait_seconds });
+    guard(async ({ text, to, wait_seconds, blocking, room }) => {
+      const { seq, replies } = await s.ask(text, { to, kind: blocking ? "blocking" : "ask", waitSec: wait_seconds, room });
       if (!wait_seconds) return `asked #${seq}`;
       if (!replies.length) return `no answer to #${seq} within ${wait_seconds}s; replies will still reach you`;
       return replies.map((r) => formatMessage(r)).join("\n");

@@ -9,8 +9,8 @@ import type { ChannelAccess } from "./crypto.ts";
 import { inlineText, type JoinRequest } from "./membership.ts";
 import type { Identity } from "./identity.ts";
 import { canPost, describeScopes, refusal, wireScopes, type Scope } from "./scopes.ts";
-import { ignored, TASK_STATES, type Color, type Event, type ImageAttachment, type Kind, type Message, type Presence, type TaskState } from "./protocol.ts";
-import { claimConflict, fold, keptFromPeople, overlaps, taskId, waitingOn, wouldCycle, type ChannelState, type Roster } from "./state.ts";
+import { GENERAL_ROOM, ignored, TASK_STATES, type Color, type Event, type ImageAttachment, type Kind, type Message, type Presence, type TaskState } from "./protocol.ts";
+import { claimConflict, findRoom, fold, keptFromPeople, newRoomId, overlaps, taskId, waitingOn, wouldCycle, type ChannelState, type Roster, type RoomsFloor } from "./state.ts";
 
 /** How often a listening agent re-announces itself. Receivers treat 2.5x this as offline. */
 export const PRESENCE_EVERY_MS = 60_000;
@@ -27,6 +27,8 @@ export interface Delivery {
   forMe?: boolean;
   /** Only messages in the thread this message (root or reply) is in. */
   thread?: number;
+  /** Only chat in this room (an id); events, which are channel-wide, still arrive as usual. Default: every room. */
+  room?: string;
 }
 
 export class Rejected extends Error {}
@@ -117,7 +119,60 @@ export class AgentSession {
     // On the owner's machine, any command finishes a rotation owed to a member leaving.
     await this.ownerChores();
     const [messages, roster] = await Promise.all([this.sync(), this.members()]);
-    return { messages, state: fold(messages, roster) };
+    return { messages, state: await this.foldState(messages, roster) };
+  }
+
+  /**
+   * Fold with the room list the owner signed into the settings: the relay keeps only so many
+   * messages, so a room's create may be gone from the log. A message in a room we don't know,
+   * newer than our last look, sends us to check that list again (it may have just been made).
+   */
+  private async foldState(messages: Message[], roster: Roster): Promise<ChannelState> {
+    this.roomsFloor ??= await this.ch.rooms().catch(() => null);
+    let state = fold(messages, roster, Date.now(), undefined, this.roomsFloor);
+    const unknown = [...state.rejected].some(([seq, why]) => seq > this.roomsCheckedAt && why.startsWith("no room "));
+    if (unknown) {
+      this.roomsCheckedAt = state.head;
+      this.roomsFloor = await this.ch.rooms().catch(() => null);
+      state = fold(messages, roster, Date.now(), undefined, this.roomsFloor);
+    }
+    return state;
+  }
+  private roomsFloor: RoomsFloor | null | undefined;
+  private roomsCheckedAt = 0;
+
+  /** A room's id from its name or id (# optional); general when none is given. */
+  async roomId(nameOrId: string | undefined, state?: ChannelState): Promise<string> {
+    if (!nameOrId) return GENERAL_ROOM;
+    const s = state ?? (await this.state()).state;
+    const room = findRoom(s, nameOrId);
+    if (!room) throw new Rejected(`no room ${nameOrId}: kiwi rooms lists them`);
+    return room.id;
+  }
+
+  /** Owner: make a room. Its id is made here and never changes; the name can (renameRoom). */
+  async createRoom(name: string): Promise<{ id: string; state: ChannelState }> {
+    if (!this.ownerCh) throw new Rejected("only the channel owner's machine makes rooms");
+    const id = newRoomId();
+    const state = await this.roomEvent({ op: "room.create", id, name }, `made the room #${name}`);
+    return { id, state };
+  }
+
+  /** Owner: rename a room (general too; ids stay). */
+  async renameRoom(nameOrId: string, name: string): Promise<ChannelState> {
+    if (!this.ownerCh) throw new Rejected("only the channel owner's machine names rooms");
+    const id = await this.roomId(nameOrId);
+    return this.roomEvent({ op: "room.rename", id, name }, `renamed a room to #${name}`);
+  }
+
+  /** Send a room event as the owner, confirm it, then sign the room list into the settings as of it. */
+  private async roomEvent(ev: Event, body: string): Promise<ChannelState> {
+    const seq = await this.ownerCh!.send(body, { kind: "event", ev });
+    const state = await this.confirm(seq);
+    const list = [...state.rooms.values()].filter((r) => r.id !== GENERAL_ROOM || r.name !== GENERAL_ROOM).map(({ id, name }) => ({ id, name }));
+    await this.ownerCh!.setRooms({ list, since: seq });
+    this.roomsFloor = { list, since: seq };
+    return state;
   }
 
   /** The agent's read cursor, starting at the channel head the first time. */
@@ -201,10 +256,10 @@ export class AgentSession {
         if (m.seq > (messages.at(-1)?.seq ?? 0)) {
           messages = [...messages, m];
           appendCache(this.cfg.roomId, [m]);
-          state = fold(messages, await this.members());
+          state = await this.foldState(messages, await this.members());
           // From someone we don't know yet? We may have missed a roster update while offline:
           // check again before calling it forged and moving past it for good.
-          if (state.trust.get(m.seq) === "forged") state = fold(messages, await this.members(true));
+          if (state.trust.get(m.seq) === "forged") state = await this.foldState(messages, await this.members(true));
         }
         if (!seen.has(m.seq) && this.wants(m, state, opts)) await onMessage(m, state);
         writeCursor(this.alias, this.me, m.seq);
@@ -305,11 +360,15 @@ export class AgentSession {
     return [...out];
   }
 
+  /** Send a message; `room` is a room's name or id (general if none). */
   async send(body: string, opts: SendOptions = {}): Promise<number> {
     await this.mayI({ kind: opts.kind ?? "msg", ev: opts.ev });
     const to = await this.resolveTo(opts.to);
     if (opts.kind !== "event") await this.mayTalkTo(to);
-    return this.ch.send(body, { ...opts, to });
+    // A reply goes in its parent's room unless told otherwise (fold puts it there anyway).
+    const parent = !opts.room && opts.re?.length ? (await this.state()).state.roomOf.get(opts.re[0]!) : undefined;
+    const room = opts.ev ? undefined : (parent ?? (await this.roomId(opts.room)));
+    return this.ch.send(body, { ...opts, to, room });
   }
 
   /**
@@ -342,9 +401,9 @@ export class AgentSession {
    * referencing it). Returns the replies; they're marked seen so tail/wait
    * don't deliver them a second time.
    */
-  async ask(body: string, opts: { to?: string[]; kind?: Kind; waitSec?: number; signal?: AbortSignal; imgs?: ImageAttachment[] }): Promise<{ seq: number; replies: Message[] }> {
+  async ask(body: string, opts: { to?: string[]; kind?: Kind; waitSec?: number; signal?: AbortSignal; imgs?: ImageAttachment[]; room?: string }): Promise<{ seq: number; replies: Message[] }> {
     const head = await this.ch.head();
-    const seq = await this.send(body, { to: opts.to, kind: opts.kind ?? "ask", imgs: opts.imgs });
+    const seq = await this.send(body, { to: opts.to, kind: opts.kind ?? "ask", imgs: opts.imgs, room: opts.room });
     if (!opts.waitSec) return { seq, replies: [] };
     const replies = await this.awaitReplies(seq, head, opts.waitSec, opts.signal);
     return { seq, replies };
@@ -378,15 +437,15 @@ export class AgentSession {
     return replies;
   }
 
-  /** Reply to message #seq, addressed to its sender. */
+  /** Reply to message #seq, addressed to its sender, in its room (a thread lives in one). */
   async reply(seq: number, body: string, kind: Kind = "msg", imgs?: ImageAttachment[]): Promise<number> {
-    const { messages } = await this.state();
+    const { messages, state } = await this.state();
     const orig = messages.find((m) => m.seq === seq);
     if (!orig) throw new Rejected(`no message #${seq}`);
     const to = orig.from === this.me ? orig.to : [orig.from];
     await this.mayI({ kind });
     await this.mayTalkTo(to);
-    return this.ch.send(body, { to, kind, re: [seq], imgs });
+    return this.ch.send(body, { to, kind, re: [seq], imgs, room: state.roomOf.get(seq) ?? orig.room });
   }
 
   /** Announce yourself. After joining, a different role or rules is a request: the owner decides. */
@@ -579,13 +638,16 @@ export function wants(me: string, m: Message, state: ChannelState | null, d: Del
   // Forged messages never reach an agent: they're noise at best, prompt injection at worst. Nor do
   // ones the owner didn't let their sender send (outside its scopes).
   if (ignored(state?.trust.get(m.seq))) return false;
+  // One room only: other rooms' chat stays out; events are channel-wide.
+  if (d.room !== undefined && m.kind !== "event" && (state?.roomOf.get(m.seq) ?? m.room ?? GENERAL_ROOM) !== d.room) return false;
   if (d.all) return true;
   // Any message of a thread names it: its root, or a reply in it.
   if (d.thread !== undefined) return m.kind !== "event" && (state?.threadOf.get(m.seq) ?? m.seq) === (state?.threadOf.get(d.thread) ?? d.thread);
   const role = state?.members.get(me)?.role;
   const addressed = isDirectedAt(m, me) || !!m.to?.includes("*") || (!!role && !!m.to?.includes(`role:${role}`));
   // Everyone hears when the channel's mode changes: it changes who they may talk to.
-  if (m.kind === "event") return addressed || m.ev?.op === "hello" || m.ev?.op === "mode.set";
+  // Everyone hears about a new or renamed room: it's somewhere they can now talk.
+  if (m.kind === "event") return addressed || m.ev?.op === "hello" || m.ev?.op === "mode.set" || m.ev?.op === "room.create" || m.ev?.op === "room.rename";
   if (d.chat) return true;
   // Coordinator-only (with a coordinator in place): what people say goes to the coordinator, who
   // relays it. Another agent gets a person's message only if it's addressed to that agent by name.

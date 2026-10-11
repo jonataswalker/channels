@@ -6,14 +6,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join as joinPath, join } from "node:path";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { AgentSession, Rejected } from "../agent.ts";
+import { AgentSession, Rejected, type Delivery } from "../agent.ts";
 import { loadImages, saveImages } from "../attach.ts";
 import { Channel, ChannelGone, RelayError, relayConfig } from "../client.ts";
 import { TOO_MANY_REQUESTS } from "../sas.ts";
 import { DEFAULT_RELAY, forgetIdentity, home, forgetMember, identitiesIn, loadConfig, loadIdentity, readCursor, updateConfig, wipeChannel, writeCursor, type ChannelConfig } from "../config.ts";
 import { b64url, decodeJoinCode, newRoomId, type ChannelAccess } from "../crypto.ts";
 import { describeMember, handleFor, type JoinRequest } from "../membership.ts";
-import { ago, describeEvent, formatAdded, formatAfter, formatClaims, formatFact, formatMessage, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, statusJson } from "../format.ts";
+import { ago, describeEvent, formatAdded, formatAfter, formatClaims, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, statusJson } from "../format.ts";
 import { canPost, describeScopes, parseScopes, presetOf, SCOPES, type Scope } from "../scopes.ts";
 import { fingerprint } from "../identity.ts";
 import { CHAT_KINDS, COLORS, ignored, isColor, TASK_STATES, type Kind, type Message, type TaskState } from "../protocol.ts";
@@ -58,9 +58,9 @@ Hooks
                                                uninstall NAME opts that harness out until the next install.
 
 Talk
-  kiwi send "text" [--to a,b|role:x] [--kind K] [--re N] [--image f.png …]   (text from stdin if omitted)
-  kiwi ask --to NAME "question" [--wait 10m]     with --wait, block until answered and print the answer
-  kiwi reply N "text" [--kind done]              answer message #N (goes to its sender)
+  kiwi send "text" [--to a,b|role:x] [--kind K] [--re N] [--image f.png …] [--room R]   (text from stdin if omitted)
+  kiwi ask --to NAME "question" [--wait 10m] [--room R]   with --wait, block until answered and print the answer
+  kiwi reply N "text" [--kind done]              answer message #N (goes to its sender, in its room)
   kiwi show N [dir]                              message #N in full: its replies, what it answers, its images saved
   kiwi save N [dir]                              download message #N's images into dir
   kiwi tail [--chat|--for-me|--all|--thread N] [--json]   stream messages for you, one per line (for a Monitor)
@@ -68,9 +68,12 @@ Talk
   kiwi watch --webhook URL [same]                POST every message to URL as JSON (wakes threads, CI, phones; all chat by default)
   kiwi read [same]                               print unread messages without blocking
      for you = to you or your role, --to all, people's broadcasts, broadcast questions, and threads you're in;
-     --chat adds everyone's conversations (coordinators), --all adds every event, --thread N is one thread
+     --chat adds everyone's conversations (coordinators), --all adds every event, --thread N is one thread;
+     every room unless --room R (a room's name or id)
   kiwi thread N                                  the whole thread message #N is in
-  kiwi log [-n 30] [--all]                       recent history (doesn't mark read)
+  kiwi log [-n 30] [--all] [--room R]            recent history (doesn't mark read)
+  kiwi rooms                                     the channel's rooms (lines say [#room] once there's more than general)
+  kiwi room create NAME | rename R NEWNAME       make or rename a room (owner)
   kiwi sh 'SCRIPT'                               query the channel as read-only files with a sandboxed shell
                                                (grep, jq, awk…; no disk, network or writes; script from stdin if omitted)
 
@@ -138,6 +141,7 @@ const { values: opt, positionals: args } = parseArgs({
     clear: { type: "boolean" },
     force: { type: "boolean" },
     scopes: { type: "string" },
+    room: { type: "string" },
     n: { type: "string", short: "n" },
     help: { type: "boolean", short: "h" },
     version: { type: "boolean", short: "v" },
@@ -207,10 +211,11 @@ function render(m: Message, state?: ChannelState | null): string {
   return opt.json ? JSON.stringify({ ...m, trust: state?.trust.get(m.seq) }) : formatMessage(m, state?.trust.get(m.seq), state ?? undefined);
 }
 
-/** Which messages tail/wait/read/watch hand over: --chat, --for-me, --all or --thread N (default: those for you). */
-function delivery(): { forMe?: boolean; chat?: boolean; all?: boolean; thread?: number } {
+/** Which messages tail/wait/read/watch hand over: --chat, --for-me, --all or --thread N (default: those for you), in every room unless --room. */
+async function delivery(s: AgentSession): Promise<Delivery> {
   const thread = opt.thread === undefined ? undefined : Number(opt.thread.replace(/^#/, "")) || die("--thread takes a message number");
-  return { forMe: opt["for-me"], chat: opt.chat, all: opt.all, ...(thread !== undefined ? { thread } : {}) };
+  const room = opt.room === undefined ? undefined : await s.roomId(opt.room);
+  return { forMe: opt["for-me"], chat: opt.chat, all: opt.all, ...(thread !== undefined ? { thread } : {}), ...(room !== undefined ? { room } : {}) };
 }
 
 function list(s: string | undefined): string[] | undefined {
@@ -693,6 +698,29 @@ const commands: Record<string, () => Promise<void>> = {
   },
 
   /** What each member may do besides read: listed for anyone, set by the owner. */
+  /** The channel's rooms: listed for anyone. */
+  async rooms() {
+    const s = await session();
+    out(formatRooms((await s.state()).state));
+  },
+
+  /** Owner: make or rename a room. */
+  async room() {
+    const s = await session();
+    const [sub, a, b] = args.slice(1);
+    if (sub === "create") {
+      const name = a ?? die("usage: kiwi room create NAME");
+      const { id, state } = await s.createRoom(name);
+      return out(`made #${state.rooms.get(id)?.name ?? name} (id ${id}); send there with --room ${state.rooms.get(id)?.name ?? id}`);
+    }
+    if (sub === "rename") {
+      const room = a ?? die("usage: kiwi room rename NAME|ID NEWNAME");
+      await s.renameRoom(room, b ?? die("usage: kiwi room rename NAME|ID NEWNAME"));
+      return out(`renamed #${room} to #${b}`);
+    }
+    die("usage: kiwi room create NAME | kiwi room rename NAME|ID NEWNAME (owner); kiwi rooms lists them");
+  },
+
   async scope() {
     const s = await session();
     const [name, given] = args.slice(1);
@@ -785,7 +813,7 @@ const commands: Record<string, () => Promise<void>> = {
     const kind = (opt.kind ?? "msg") as Kind;
     if (!CHAT_KINDS.includes(kind)) die(`kind must be one of: ${CHAT_KINDS.join(", ")}`);
     const re = list(opt.re)?.map((x) => Number(x.replace(/^#/, ""))).filter((n) => n > 0);
-    out(`sent #${await s.send(body, { to: list(opt.to), kind, re, imgs: images() })}`);
+    out(`sent #${await s.send(body, { to: list(opt.to), kind, re, imgs: images(), room: opt.room })}`);
   },
 
   async ask() {
@@ -794,7 +822,7 @@ const commands: Record<string, () => Promise<void>> = {
     if (!body.trim()) die('usage: kiwi ask --to NAME "question" [--wait 10m]');
     const waitSec = opt.wait ? parseDuration(opt.wait) : 0;
     const kind = (opt.kind ?? "ask") as Kind;
-    const { seq, replies } = await s.ask(body, { to: list(opt.to), kind, waitSec, imgs: images() });    if (!waitSec) return out(`asked #${seq}`);
+    const { seq, replies } = await s.ask(body, { to: list(opt.to), kind, waitSec, imgs: images(), room: opt.room });    if (!waitSec) return out(`asked #${seq}`);
     if (!replies.length) die(`no answer to #${seq} within ${opt.wait}; replies will still arrive in tail/wait`, 2);
     for (const r of replies) out(render(r));
   },
@@ -829,7 +857,10 @@ const commands: Record<string, () => Promise<void>> = {
   async log() {
     const s = await session();
     const { messages, state } = await s.state();
-    const shown = opt.all ? messages : messages.filter((m) => m.kind !== "event" || m.ev?.op !== "hello");
+    const room = opt.room === undefined ? undefined : await s.roomId(opt.room, state);
+    const shown = (opt.all ? messages : messages.filter((m) => m.kind !== "event" || m.ev?.op !== "hello")).filter(
+      (m) => room === undefined || (m.kind !== "event" && state.roomOf.get(m.seq) === room),
+    );
     for (const m of shown.slice(-Number(opt.n ?? 30))) out(render(m, state));
   },
 
@@ -899,7 +930,7 @@ const commands: Record<string, () => Promise<void>> = {
 
   async read() {
     const s = await session();
-    const { messages, state } = await s.read(delivery());
+    const { messages, state } = await s.read(await delivery(s));
     for (const m of messages) out(render(m, state));
   },
 
@@ -907,7 +938,7 @@ const commands: Record<string, () => Promise<void>> = {
     const s = await session();
     await s.listen((m, state) => out(render(m, state)), {
       client: "tail",
-      ...delivery(),
+      ...(await delivery(s)),
       onStatus: (msg) => process.stderr.write(`kiwi: ${msg}\n`),
       onNotice: (text) => out(`* ${text}`),
     });
@@ -929,7 +960,7 @@ const commands: Record<string, () => Promise<void>> = {
       },
       {
         client: "wait",
-        ...delivery(),
+        ...(await delivery(s)),
         signal: ac.signal,
         onStatus: (msg) => process.stderr.write(`kiwi: ${msg}\n`),
         onNotice: (text) => {
@@ -979,7 +1010,7 @@ const commands: Record<string, () => Promise<void>> = {
       {
         client: "watch",
         // A webhook stands in for a person watching (a phone, CI): all chat unless narrowed.
-        ...delivery(),
+        ...(await delivery(s)),
         ...(!opt["for-me"] && opt.thread === undefined ? { chat: true } : {}),
         onStatus: (msg) => process.stderr.write(`kiwi: ${msg}\n`),
         onNotice: (text) =>
@@ -1224,6 +1255,8 @@ opencode, Cline, Roo Code, Windsurf, Zed, and T3 Code: no hooks. Do steps 1 to 5
 ${role}${may}
 ## Reference
 "For you" means: to you or your role, to everyone (\`--to all\`), people's broadcasts, broadcast questions, and every thread you're in. \`${mc} show 42\` prints one message in full. \`${mc} thread 42\` prints one thread.
+
+A channel can have rooms, like channels in a Discord server. You get messages from every room. Once there is more than one room, each line shows its room as [#name]. A reply goes in the room of the message it answers. To post in a room, add \`--room NAME\`; without it, a message goes to general. \`${mc} rooms\` lists them.
 
 ## Look before you act
 \`${mc} status\` shows members (and who is online), each member's role and load (free, busy or overloaded, with what they're doing), open tasks and their owners, claimed paths, shared facts, and questions waiting on you. Run it when you start, and before picking up new work. Before assigning a task, pick someone whose role fits and who isn't overloaded (\`${mc} status --json\` gives the same as data).
