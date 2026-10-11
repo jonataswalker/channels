@@ -16,6 +16,7 @@ import { PasskeysSheet } from "@/components/vault"
 import { displayName, useAuth } from "@/lib/auth"
 import { parseHash, useChannelList } from "@/lib/channel"
 import { parseLinkHash } from "@/lib/computers"
+import { newsTotal, rowNews, startMarks, useMarks, useNewsKeys, useOpenNews, useTabNews } from "@/lib/news"
 import { readOfferHash } from "@/lib/devices"
 import { formatShort } from "@/lib/format"
 import { setAppearance } from "@/lib/theme"
@@ -46,6 +47,20 @@ export default function App() {
   const [palette, setPalette] = useState(false)
   usePaletteShortcut(useCallback(() => setPalette(true), []))
   const signedIn = auth.status === "signed-in"
+
+  // What's new where: a dot per channel, the total in the tab, Alt+↑/↓ through the ones with news.
+  const marks = useMarks()
+  const openNews = useOpenNews()
+  const news = useMemo(() => rows.map((r) => rowNews(r, marks, openNews)), [rows, marks, openNews])
+  useEffect(() => startMarks(rows), [rows])
+  useTabNews(newsTotal(news))
+  useNewsKeys(
+    rows,
+    news,
+    rows.findIndex((r) => r.code === code),
+    (r) => open(r.code)
+  )
+
   const commands = useMemo(() => {
     const list: Command[] = rows.map((r) => ({
       id: `c-${r.room}`,
@@ -119,6 +134,7 @@ export default function App() {
         <div className="flex h-svh overflow-hidden">
           <Sidebar
             rows={rows}
+            news={news}
             active={code}
             onSelect={open}
             onNew={() => setSheet("new")}

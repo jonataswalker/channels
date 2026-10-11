@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -407,5 +408,40 @@ describe("bringing your channels to another device", () => {
     expect((await onDeviceHttp(await at(`/${id}`, "HEAD"), store, human, t0 + TRANSFER_TTL_MS))!.status).toBe(200);
     expect((await onDeviceHttp(await at(`/${id}`, "HEAD"), store, human, t0 + TRANSFER_TTL_MS + 1))!.status).toBe(404);
     expect(rows.size).toBe(0);
+  });
+});
+
+describe("what's new in each listed channel", () => {
+  test("the listing carries each channel's head, read without writing a row or migrating an old room", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mc-heads-"));
+    let r = startRelay({ port: 0, hostname: "127.0.0.1", dataDir: dir, human });
+    try {
+      const owner = await generateIdentity("alice");
+      const alice = () => token("user_alice");
+      const { access } = await Channel.create(r.url.origin, owner, { name: "alice", kind: "human" }, [], undefined, await alice(), "heads");
+      const ch = new Channel(access, r.url.origin, owner, undefined, alice);
+      const seq = await ch.send("one");
+      expect((await myChannels(r.url.origin, await alice())).find((c) => c.room === access.roomId)?.head).toBe(seq);
+      expect((await myChannels(r.url.origin, await token("user_bob"))).some((c) => c.room === access.roomId)).toBe(false);
+      r.stop(true);
+
+      // The room as an older relay left it (no read_only column), with the relay restarted cold.
+      const file = join(dir, `${access.roomId}.sqlite`);
+      const old = new Database(file);
+      old.run("ALTER TABLE members DROP COLUMN read_only");
+      old.close();
+      r = startRelay({ port: 0, hostname: "127.0.0.1", dataDir: dir, human });
+      const watch = new Database(file, { readonly: true });
+      const version = () => (watch.query("PRAGMA data_version").get() as { data_version: number }).data_version;
+      const before = version();
+      expect((await myChannels(r.url.origin, await alice())).find((c) => c.room === access.roomId)?.head).toBe(seq);
+      // Nothing committed to the room's file: no rows written, no column added.
+      expect(version()).toBe(before);
+      expect((watch.query("PRAGMA table_info(members)").all() as { name: string }[]).map((c) => c.name)).not.toContain("read_only");
+      watch.close();
+    } finally {
+      r.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

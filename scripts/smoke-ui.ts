@@ -311,6 +311,31 @@ try {
   await page.waitForTimeout(300)
   console.log("ok  Work")
 
+  // What's new where (T1245): with another channel open, the agent writes in this one. The next
+  // listing carries its head, the row gets a dot, the tab a total, and Alt+↓ goes there.
+  at = "news in a closed channel"
+  await plus.click()
+  await page.getByRole("menuitem", { name: "New channel" }).click()
+  await page.getByRole("dialog").getByRole("textbox").fill("smoke-2")
+  await page.getByRole("button", { name: "Create channel" }).click()
+  await page.waitForURL((u) => u.href !== channel && /#mc2-/.test(u.href))
+  await page.getByPlaceholder(/^Write to the channel/).waitFor()
+  await kiwi(["-c", "smoke", "--as", "bot", "send", "news from the bot"])
+  // The listing is asked for at most every 5 minutes: forget the last one, then refocus.
+  await page.evaluate(() => {
+    localStorage.removeItem("mc.listing")
+    window.dispatchEvent(new Event("focus"))
+  })
+  const smokeRow = page.getByRole("navigation", { name: "Channels" }).getByRole("button", { name: /^smoke\b(?!-)/ })
+  await smokeRow.getByLabel("New messages").waitFor({ timeout: 10000 })
+  if (!/^\(1\) /.test(await page.title())) throw new Error(`the tab says "${await page.title()}"`)
+  if (process.env.SMOKE_SHOTS) await page.screenshot({ path: join(process.env.SMOKE_SHOTS, "news.png") })
+  await page.keyboard.press("Alt+ArrowDown")
+  await page.waitForURL(channel)
+  await page.getByText("news from the bot").first().waitFor()
+  await page.waitForFunction(() => document.title === "Channels")
+  console.log(`ok  ${at}`)
+
   // Anything that announces a popup and isn't covered above: new menus get opened too.
   const triggers = await page.locator("[aria-haspopup]:visible").all()
   for (const [i, t] of triggers.entries()) {

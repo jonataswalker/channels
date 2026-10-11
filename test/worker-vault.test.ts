@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { b64url } from "../src/crypto.ts";
 import { fetchVault, newVault, openVault, putVault, resealVault } from "../src/vault.ts";
+import { Channel, myChannels } from "../src/client.ts";
+import { generateIdentity } from "../src/identity.ts";
 
 const on = process.env.KIWI_WORKER_E2E === "1";
 setDefaultTimeout(120_000);
@@ -62,4 +64,17 @@ test.skipIf(!on)("setup, a second setup, a signed save and a thief, on the Worke
   expect(await putVault(relay, t, user, 1, await resealVault(got.blob, user, first.key, opened, 2, opened), opened.writer)).toEqual({ version: 2 });
   // Someone with the session but not the writer key, at the right version: 403.
   await expect(putVault(relay, t, user, 2, second.blob, second.writer)).rejects.toThrow(/writer key/);
+});
+
+test.skipIf(!on)("the listing's heads on the Worker: read through the channel, then reused for the cache period", async () => {
+  const user = `user_${crypto.randomUUID().slice(0, 8)}`;
+  const t = () => token(user);
+  const owner = await generateIdentity("alice");
+  const { access } = await Channel.create(relay, owner, { name: "alice", kind: "human" }, [], undefined, await t(), "heads");
+  const ch = new Channel(access, relay, owner, undefined, t);
+  const seq = await ch.send("one");
+  expect((await myChannels(relay, await t())).find((c) => c.room === access.roomId)?.head).toBe(seq);
+  // A second send inside the cache period isn't read again: the channel isn't woken per listing.
+  await ch.send("two");
+  expect((await myChannels(relay, await t())).find((c) => c.room === access.roomId)?.head).toBe(seq);
 });

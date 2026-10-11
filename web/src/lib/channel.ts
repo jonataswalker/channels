@@ -253,6 +253,27 @@ export interface ChannelRow {
   owner: boolean
   /** Agents the signed-in person vouched for that are in it. */
   agents: number
+  /** The channel's newest seq, from the signed-in listing (what marks a closed channel "new"). */
+  head?: number
+}
+
+/** The signed-in listing, kept so a reload (or another tab) within LISTING_EVERY doesn't ask again. */
+const LISTING_KEY = "mc.listing"
+const LISTING_EVERY = 5 * 60_000
+/** Sent when the person leaves a channel: a moment to refresh the list (within LISTING_EVERY). */
+export const LEFT_CHANNEL = "mc:left-channel"
+
+function readListing(): { at: number; rows: MyChannel[] } | null {
+  const v = read<{ at: number; rows: MyChannel[] }>(LISTING_KEY)
+  return v && typeof v.at === "number" && Array.isArray(v.rows) && v.at <= Date.now() ? v : null
+}
+
+function writeListing(rows: MyChannel[]) {
+  try {
+    localStorage.setItem(LISTING_KEY, JSON.stringify({ at: Date.now(), rows }))
+  } catch {
+    // A full disk asks again next time.
+  }
 }
 
 const untitled = (room: string) => `Channel ${room.slice(0, 4).toUpperCase()}`
@@ -265,7 +286,7 @@ const untitled = (room: string) => `Channel ${room.slice(0, 4).toUpperCase()}`
 export function useChannelList(signedIn: boolean, token: () => Promise<string | null>): ChannelRow[] {
   const local = useKnownChannels()
   const [pending, setPending] = useState(pendingChannels)
-  const [remote, setRemote] = useState<MyChannel[]>([])
+  const [remote, setRemote] = useState<MyChannel[]>(() => (signedIn ? (readListing()?.rows ?? []) : []))
   // Signed out: nothing remote is ours. Clearing as `signedIn` flips keeps the
   // next sign-in from flashing the previous account's channels.
   if (!signedIn && remote.length > 0) setRemote([])
@@ -278,14 +299,22 @@ export function useChannelList(signedIn: boolean, token: () => Promise<string | 
   }, [])
 
   useEffect(() => {
-    if (!signedIn) return
+    if (!signedIn) {
+      localStorage.removeItem(LISTING_KEY)
+      return
+    }
     let timer: number | undefined
     let cancelled = false
+    // Each listing wakes every listed channel on the relay, so it's asked for on load, focus and
+    // leaving a channel, never on a timer, and at most once per LISTING_EVERY (other tabs included).
     const load = async () => {
+      const last = readListing()
+      if (last && Date.now() - last.at < LISTING_EVERY) return
       const t = await readToken()
       if (!t || cancelled) return
       try {
         const rows = await myChannels(location.origin, t)
+        writeListing(rows)
         if (!cancelled) setRemote(rows)
       } catch (err) {
         // The relay didn't answer: keep the last list. (Unless the sign-in is gone: then say so.)
@@ -296,16 +325,22 @@ export function useChannelList(signedIn: boolean, token: () => Promise<string | 
       clearTimeout(timer)
       timer = window.setTimeout(load, 600)
     }
+    // Another tab fetched it: use theirs.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === LISTING_KEY) setRemote(readListing()?.rows ?? [])
+    }
     void load()
-    const every = window.setInterval(load, 60_000)
     window.addEventListener("focus", soon)
     window.addEventListener(CHANGED, soon)
+    window.addEventListener(LEFT_CHANNEL, soon)
+    window.addEventListener("storage", onStorage)
     return () => {
       cancelled = true
       clearTimeout(timer)
-      clearInterval(every)
       window.removeEventListener("focus", soon)
       window.removeEventListener(CHANGED, soon)
+      window.removeEventListener(LEFT_CHANNEL, soon)
+      window.removeEventListener("storage", onStorage)
     }
   }, [signedIn])
 
@@ -326,6 +361,7 @@ export function useChannelList(signedIn: boolean, token: () => Promise<string | 
         state: "member",
         owner: m.identity.pk === m.access.ownerPk,
         agents: theirs.get(room)?.agents ?? 0,
+        head: theirs.get(room)?.head,
       })
     }
     for (const p of pending) {
@@ -349,6 +385,7 @@ export function useChannelList(signedIn: boolean, token: () => Promise<string | 
         state: r.owner || r.member ? "elsewhere" : "agents",
         owner: r.owner,
         agents: r.agents,
+        head: r.head,
       })
     }
     return [...rows.values()].sort((a, b) => b.ts - a.ts)
@@ -527,6 +564,8 @@ export interface ChannelHandle {
   send: (body: string, opts: SendOptions) => Promise<number>
   refreshRequests: () => Promise<void>
   refreshRoster: () => Promise<void>
+  /** The channel's newest seq when this view opened (0 until the relay says). */
+  head: number
 }
 
 /**
@@ -762,5 +801,5 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
     [onGone]
   )
 
-  return { ch, connection, gone, messages, roster, state, online: live, isOwner, requests, send, refreshRequests, refreshRoster }
+  return { ch, connection, gone, messages, roster, state, online: live, isOwner, requests, send, refreshRequests, refreshRoster, head: start?.head ?? 0 }
 }

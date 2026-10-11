@@ -20,6 +20,7 @@ import {
   authenticateSocket,
   errorResponse,
   myChannels,
+  readHead,
   myUsage,
   onClientFrame,
   parseRoomPath,
@@ -27,6 +28,7 @@ import {
   welcomeFrames,
   wsHeaders,
   type DirectoryEntry,
+  type Sql,
   type Effects,
 } from "./room.ts";
 import { onHttp } from "./route.ts";
@@ -111,7 +113,7 @@ export function startRelay(
   machineSweep.unref?.();
 
   /** A store for the room; rooms that don't exist get a throwaway in-memory DB (so no file appears). */
-  const storeFor = (roomId: string, creating: boolean): RoomStore => {
+  const sqlFor = (roomId: string, creating: boolean): Sql => {
     let db = dbs.get(roomId);
     if (!db) {
       if (!creating && !existsSync(file(roomId))) db = new Database(":memory:");
@@ -122,16 +124,12 @@ export function startRelay(
       }
     }
     const d = db;
-    return new RoomStore(
-      {
-        run: (q, ...p) => void d.query(q).run(...p),
-        all: <T>(q: string, ...p: (string | number | null)[]) => d.query(q).all(...p) as T[],
-      },
-      roomId,
-      policy,
-      opts.now,
-    );
+    return {
+      run: (q, ...p) => void d.query(q).run(...p),
+      all: <T>(q: string, ...p: (string | number | null)[]) => d.query(q).all(...p) as T[],
+    };
   };
+  const storeFor = (roomId: string, creating: boolean): RoomStore => new RoomStore(sqlFor(roomId, creating), roomId, policy, opts.now);
 
   const apply = (roomId: string, fx: Effects, sender?: ServerWebSocket<SocketData>) => {
     const room = sockets.get(roomId) ?? new Set();
@@ -202,8 +200,11 @@ export function startRelay(
           );
         }
         if (url.pathname === "/v1/me/channels" && req.method === "GET") {
-          return await myChannels(req, human, async (user) =>
-            (people.query("SELECT entry FROM entries WHERE user = ?").all(user) as { entry: string }[]).map((r) => JSON.parse(r.entry) as DirectoryEntry),
+          return await myChannels(
+            req,
+            human,
+            async (user) => (people.query("SELECT entry FROM entries WHERE user = ?").all(user) as { entry: string }[]).map((r) => JSON.parse(r.entry) as DirectoryEntry),
+            { read: async (room) => (existsSync(file(room)) ? readHead(sqlFor(room, false)) : null), now: opts.now },
           );
         }
         const route = parseRoomPath(url.pathname);
