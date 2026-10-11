@@ -24,6 +24,7 @@
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -93,11 +94,11 @@ export function isListening(alias: string, as: string): boolean {
   return alive;
 }
 
-/** Hold the one background listener slot for `as` on `alias`; false when a live one already has it. */
-function takeListenSlot(alias: string, as: string): boolean {
+/** Hold the one background listener slot for `as` on `alias` in this session; false when a live one already has it. */
+function takeListenSlot(alias: string, as: string, session: string): boolean {
   const dir = join(home(), "listen-hooks");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const file = join(dir, `${encodeURIComponent(alias)}.${encodeURIComponent(as)}`);
+  const file = join(dir, `${encodeURIComponent(alias)}.${encodeURIComponent(as)}.${encodeURIComponent(session)}`);
   for (let tries = 0; tries < 2; tries++) {
     try {
       writeFileSync(file, String(process.pid), { flag: "wx" });
@@ -119,6 +120,15 @@ function takeListenSlot(alias: string, as: string): boolean {
     }
   }
   return false;
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 // ---------- installing into Claude Code ----------
@@ -179,8 +189,9 @@ function hookCommand(arg: string): string {
 export function installHooks(): string {
   const s = readSettings();
   s.hooks ??= {};
-  // The listener only for a Claude Code that can run it (asyncRewake): checked here, where its version is known.
-  const listen = rewakeCapable();
+  // The listener only for a Claude Code that can run it (asyncRewake), checked where its version is known
+  // (kiwi join from inside it). Elsewhere (kiwi setup, hooks install in a terminal) keep whatever's there.
+  const listen = claudeVersion() ? rewakeCapable() : Object.keys(EVENTS).every((event) => hasHook(s, event, LISTEN));
   for (const [event, arg] of Object.entries(EVENTS)) {
     s.hooks[event] = [
       ...withoutOurs(s.hooks[event]),
@@ -212,7 +223,7 @@ function hasHook(s: Settings, event: string, arg: string): boolean {
 /** Ours are all there, and so is the listener when this Claude Code can run it. */
 export function hooksInstalled(): boolean {
   const s = readSettings();
-  const listen = rewakeCapable();
+  const listen = claudeVersion() ? rewakeCapable() : false;
   return Object.entries(EVENTS).every(([event, arg]) => hasHook(s, event, arg) && (!listen || hasHook(s, event, LISTEN)));
 }
 
@@ -221,7 +232,8 @@ const REWAKE_SINCE = [2, 1, 296] as const;
 
 /** The Claude Code version running this process, from what it sets on its hooks and shell commands. */
 export function claudeVersion(env: Record<string, string | undefined> = process.env): number[] | null {
-  const m = /claude-code_(\d+)-(\d+)-(\d+)/.exec(env.AI_AGENT ?? "") ?? /\/(\d+)\.(\d+)\.(\d+)\//.exec(env.CLAUDE_CODE_EXECPATH ?? "");
+  // AI_AGENT ("claude-code_2-1-296_agent") on its shell commands; else the version folder its binary sits in (…/2.1.296/claude).
+  const m = /^claude-code_(\d+)-(\d+)-(\d+)_/.exec(env.AI_AGENT ?? "") ?? /[\\/](\d+)\.(\d+)\.(\d+)[\\/]claude(?:\.exe)?$/.exec(env.CLAUDE_CODE_EXECPATH ?? "");
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
@@ -241,6 +253,8 @@ export function rewakeCapable(env: Record<string, string | undefined> = process.
  */
 export function hooksListen(env: Record<string, string | undefined> = process.env): boolean {
   if (!env.CLAUDECODE || env.GROK_SESSION_ID) return false;
+  // When this Claude Code does say its version and it's too old for asyncRewake, the settings' listener isn't for it.
+  if (claudeVersion(env) && !rewakeCapable(env)) return false;
   try {
     const s = readSettings();
     return Object.keys(EVENTS).every((event) => hasHook(s, event, LISTEN));
@@ -642,7 +656,7 @@ const answer = Effect.fn("Hooks.answer")(function* (event: string, input: HookIn
  * line, so the following turn arms a fresh one instead of the session going deaf.
  */
 const listen = Effect.fn("Hooks.listen")(function* (b: Binding, cfg: ChannelConfig, who: Here) {
-  if (!hooksListen() || isListening(b.alias, b.as) || !takeListenSlot(b.alias, b.as)) return 0;
+  if (!hooksListen() || isListening(b.alias, b.as) || !takeListenSlot(b.alias, b.as, who.session ?? "")) return 0;
   const s = yield* openSession(b.alias, cfg, b.as);
   const got: string[] = [];
   const enough = yield* Deferred.make<void>();
@@ -654,7 +668,13 @@ const listen = Effect.fn("Hooks.listen")(function* (b: Binding, cfg: ChannelConf
     client: "hook",
     onNotice: (text) => Effect.andThen(Effect.sync(() => void got.push(`* ${text}`)), woke),
   });
-  yield* Effect.raceFirst(hearing, Effect.raceFirst(Deferred.await(enough), Effect.sleep(LISTEN_SECONDS * 1000))).pipe(Effect.scoped);
+  // Its session ending ends it too, before it reads a message nobody would get.
+  const sessionGone = who.pid ? Effect.repeat(Effect.sync(() => alive(who.pid!)), { while: (up) => up, schedule: Schedule.spaced("2 seconds") }) : Effect.never;
+  const ended = yield* Effect.raceFirst(
+    Effect.as(hearing, "heard" as const),
+    Effect.raceFirst(Effect.as(Deferred.await(enough), "heard" as const), Effect.raceFirst(Effect.as(Effect.sleep(LISTEN_SECONDS * 1000), "day" as const), Effect.as(sessionGone, "gone" as const))),
+  ).pipe(Effect.scoped);
+  if (ended === "gone" && !got.length) return 0;
   const mc = mcFor(b.alias, b.as, process.cwd(), who);
   const text = got.join("\n");
   process.stderr.write(

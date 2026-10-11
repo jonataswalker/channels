@@ -86,14 +86,20 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+/** How long a seat with no process to check stays its session's after that session last used it. */
+const STALE_MS = 12 * 3600_000;
+/** How often a session's use of its seat is written down (so `seen` is fresh enough for STALE_MS). */
+const SEEN_EVERY_MS = 10 * 60_000;
+
 /**
  * Whether a session other than `who` still holds this seat. A seat records its harness's process
- * when the harness says (Claude Code); otherwise a live listener for it is the sign of life.
+ * when the harness says (Claude Code), and then it's held while that process runs. Otherwise
+ * (Codex, Grok…) it's held while that session listens or has used it in the last 12 hours.
  */
-export function heldElsewhere(b: Binding, who: Here, listening: (alias: string, as: string) => boolean): boolean {
+export function heldElsewhere(b: Binding, who: Here, listening: (alias: string, as: string) => boolean, now = Date.now()): boolean {
   if (!b.session || b.session === who.session) return false;
   if (b.pid) return b.pid !== who.pid && pidAlive(b.pid);
-  return listening(b.alias, b.as);
+  return listening(b.alias, b.as) || now - (b.seen ?? b.at ?? 0) < STALE_MS;
 }
 
 /**
@@ -136,26 +142,31 @@ export function bindingFor(dir: string, opts: SeatOptions = {}): Binding | null 
     const seats = seatsAt(cfg, d).filter((b) => cfg.channels[b.alias] && (!opts.alias || b.alias === opts.alias));
     if (!seats.length) continue;
     const mine = who.session ? seats.find((b) => b.session === who.session) : undefined;
-    if (mine) return mine;
+    if (mine) {
+      // Note that this session still uses it, so nobody takes it for stale (seats with no process to check).
+      if (opts.claim !== false && !mine.pid && Date.now() - (mine.seen ?? mine.at ?? 0) > SEEN_EVERY_MS) {
+        updateConfig((c) => store(c, d, seatsAt(c, d).map((b) => (b.alias === mine.alias && b.as === mine.as ? { ...b, seen: Date.now() } : b))));
+      }
+      return mine;
+    }
     // A plain terminal (or a harness that names no session) in a folder with one agent acts as that agent, as before seats.
     if (!who.session && seats.length === 1) return seats[0]!;
     // Seats this agent could be: no other live session holds them, and the harness fits (or one side doesn't say).
     const free = seats.filter((b) => !heldElsewhere(b, who, listening) && (!b.harness || !who.harness || b.harness === who.harness));
-    // Several free seats: only a session can say which is its old one (the newest of its harness); anyone else would be guessing.
-    const pick = free.length === 1 ? free[0]! : free.length > 1 && who.session && who.harness ? newest(free.filter((b) => b.harness === who.harness)) : null;
+    // Several free seats: the one of this session's harness, when there's exactly one; otherwise it would be guessing.
+    const ofMine = free.filter((b) => who.harness && b.harness === who.harness);
+    const pick = free.length === 1 ? free[0]! : who.session && ofMine.length === 1 ? ofMine[0]! : null;
     if (!pick) return null;
     if (opts.claim !== false && who.session && (pick.session !== who.session || (who.pid && pick.pid !== who.pid))) {
-      const taken: Binding = { ...pick, session: who.session, ...(who.pid ? { pid: who.pid } : {}), ...(who.harness && !pick.harness ? { harness: who.harness } : {}), at: Date.now() };
+      // The previous holder's process goes with it: this session's, or none.
+      const { pid: _gone, ...rest } = pick;
+      const taken: Binding = { ...rest, session: who.session, ...(who.pid ? { pid: who.pid } : {}), ...(who.harness && !pick.harness ? { harness: who.harness } : {}), at: Date.now(), seen: Date.now() };
       updateConfig((c) => store(c, d, seatsAt(c, d).map((b) => (b.alias === pick.alias && b.as === pick.as ? taken : b))));
       return taken;
     }
     return pick;
   }
   return null;
-}
-
-function newest(seats: Binding[]): Binding | null {
-  return seats.length ? seats.reduce((a, b) => ((b.at ?? 0) > (a.at ?? 0) ? b : a)) : null;
 }
 
 /** The seats in `dir` or its nearest ancestor that has any, whoever holds them. */

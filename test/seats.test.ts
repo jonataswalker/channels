@@ -98,3 +98,32 @@ test("free names: the base, then -2, -3…; every name anyone held stays taken",
   expect(freeAgentName("claude", [{ name: "claude" }, { name: "claude-2" }])).toBe("claude-3");
   expect(freeAgentName("kiwi", [])).toBe("kiwi-2");
 });
+
+test("taking a seat drops the previous holder's process when the new session names none", () => {
+  bindDirectory(dir, { alias: "ch", as: "codex", harness: "codex", session: "t0", pid: DEAD });
+  expect(bindingFor(dir, { who: { harness: "codex", session: "t1" } })?.as).toBe("codex");
+  expect(seatsAt(loadConfig(), dir)[0]!.pid).toBeUndefined();
+});
+
+test("a seat with no process to check is held by its session until it's gone quiet for half a day", () => {
+  bindDirectory(dir, { alias: "ch", as: "codex", harness: "codex", session: "t1" });
+  expect(bindingFor(dir, { who: { harness: "codex", session: "t2" } })).toBeNull();
+  updateConfig((c) => {
+    c.bindings![dir] = { ...(c.bindings![dir] as object), at: Date.now() - 13 * 3600_000, seen: Date.now() - 13 * 3600_000 } as never;
+  });
+  expect(bindingFor(dir, { who: { harness: "codex", session: "t2" } })?.as).toBe("codex");
+});
+
+test("several free seats of one harness: none is guessed", () => {
+  bindDirectory(dir, { alias: "ch", as: "claude", harness: "claude", session: "a", pid: DEAD });
+  bindDirectory(dir, { alias: "ch", as: "claude-2", harness: "claude", session: "b", pid: DEAD });
+  expect(bindingFor(dir, { who: { harness: "claude", session: "c", pid: process.pid } })).toBeNull();
+});
+
+test("a suffixed name still fits in 32 characters", () => {
+  const base = "a".repeat(32);
+  const taken = [{ name: base }, ...Array.from({ length: 99 }, (_, i) => ({ name: `${"a".repeat(31 - String(i + 2).length)}-${i + 2}` }))];
+  const name = freeAgentName(base, taken);
+  expect(name.length).toBeLessThanOrEqual(32);
+  expect(name.endsWith("-101")).toBe(true);
+});

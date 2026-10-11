@@ -45,7 +45,10 @@ export interface SeatRecord {
   harness?: "claude" | "codex" | "gemini" | "cursor" | "grok";
   session?: string;
   pid?: number;
+  /** When a session took this seat. */
   at?: number;
+  /** When its session last used it (kept for seats with no process to check). */
+  seen?: number;
 }
 
 /** Drop the seats `drop` matches from every directory. */

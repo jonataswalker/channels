@@ -307,9 +307,10 @@ export function admitRoster(entries: readonly ReadEntry[], ownerPk: string, now 
  */
 export function freeAgentName(base: string, members: readonly Pick<Member, "name">[]): string {
   const taken = new Set(members.map((m) => nameKey(m.name)));
-  const stem = base.slice(0, 29);
   if (!taken.has(nameKey(base)) && !RESERVED_NAMES.has(nameKey(base))) return base;
-  for (let n = 2; ; n++) if (!taken.has(nameKey(`${stem}-${n}`))) return `${stem}-${n}`;
+  // Names are at most 32 characters, suffix included.
+  const named = (n: number) => `${base.slice(0, 31 - String(n).length)}-${n}`;
+  for (let n = 2; ; n++) if (!taken.has(nameKey(named(n)))) return named(n);
 }
 
 /** A record's later role, if it reads as one: a role string (or null for none), rules likewise, and where it took effect. */

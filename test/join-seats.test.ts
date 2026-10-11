@@ -2,7 +2,7 @@
 // owner's side), a seat per agent in its checkout (no -c/--as afterwards, two agents in one checkout
 // each act as themselves, a restart takes its seat back), and Claude Code's hooks doing the listening.
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startRelay } from "../src/relay/bun.ts";
@@ -178,6 +178,66 @@ describe("joining without --as", () => {
   });
 });
 
+describe("review fixes (#1352)", () => {
+  test("a join that died while waiting: running it again after the approval takes the name the owner's side gave", async () => {
+    const owner = scratch("own6");
+    const code = created(await ok(owner, ["create", "rerun", "--as", "boss"]));
+    await join_(owner, scratch("first"), code, { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "f", CLAUDE_PID: String(process.pid) });
+    const b = scratch("died");
+    const S = { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "d", CLAUDE_PID: String(process.pid) };
+    // It asks, shows its code, and its shell gives up before the owner gets to it.
+    const p = spawn(b, ["join", code, "--timeout", "4s"], S);
+    let listed = "";
+    await until(async () => {
+      listed = await ok(owner, ["requests"]);
+      return /\d{3}-\d{3}/.test(listed);
+    }, "request with a code");
+    expect(listed).toContain("claude-2");
+    expect(await p.exited).toBe(3);
+    await ok(owner, ["approve", /(\d{3}-\d{3})/.exec(listed)![1]!, "--yes"]);
+    const again = await run(b, ["join", code, "--timeout", "5s"], S);
+    expect(again.code).toBe(0);
+    expect(again.out).toContain('You\'re "claude-2"');
+    const room = readdirSync(join(b, "identities"))[0]!;
+    expect(readdirSync(join(b, "identities", room))).toEqual(["claude-2.json"]);
+    expect(await ok(b, ["status"], S)).toContain("claude-2 (you)");
+  });
+
+  test("two live Codex sessions in one folder: the second isn't the first, and joins as codex-2", async () => {
+    const owner = scratch("own7");
+    const code = created(await ok(owner, ["create", "codex", "--as", "boss"]));
+    const h = scratch("codex");
+    const T1 = { CODEX_THREAD_ID: "t1" };
+    const T2 = { CODEX_THREAD_ID: "t2" };
+    expect((await join_(owner, h, code, T1)).out).toContain('You\'re "codex"');
+    const refused = await run(h, ["send", "who am i"], T2);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("in another session");
+    expect((await join_(owner, h, code, T2)).out).toContain('You\'re "codex-2"');
+    await ok(h, ["send", "from t1"], T1);
+    await ok(h, ["send", "from t2"], T2);
+    const log = await ok(owner, ["log"]);
+    expect(log).toContain("codex → all: from t1");
+    expect(log).toContain("codex-2 → all: from t2");
+  });
+
+  test("two joins at once on one machine ask under different names", async () => {
+    const owner = scratch("own8");
+    const code = created(await ok(owner, ["create", "race", "--as", "boss"]));
+    const h = scratch("race");
+    const d1 = join(h, "one");
+    const d2 = join(h, "two");
+    mkdirSync(d1);
+    mkdirSync(d2);
+    const [a, b] = await Promise.all([
+      run(h, ["join", code, "--timeout", "3s"], { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "r1", CLAUDE_PID: String(process.pid) }, d1),
+      run(h, ["join", code, "--timeout", "3s"], { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "r2", CLAUDE_PID: String(process.pid) }, d2),
+    ]);
+    const asked = [a.out, b.out].map((o) => /asked to join as (\S+)\./.exec(o)?.[1]).sort();
+    expect(asked).toEqual(["claude", "claude-2"]);
+  });
+});
+
 describe("Claude Code's hooks do the listening", () => {
   test("installed with asyncRewake; the listener wakes the session with the message; nothing nags about a Monitor", async () => {
     const owner = scratch("own4");
@@ -206,6 +266,15 @@ describe("Claude Code's hooks do the listening", () => {
     await ok(owner, ["send", "--to", "claude", "wake up"]);
     expect(await listening.exited).toBe(2);
     expect(await new Response(listening.stderr).text()).toContain("boss → claude: wake up");
+
+    // A listener whose session ends goes too, and leaves the next message unread for whoever comes next.
+    const session = Bun.spawn(["sleep", "120"]);
+    const orphan = spawn(h, ["hook", "listen"], { ...S, CLAUDE_CODE_SESSION_ID: "L2", CLAUDE_PID: String(session.pid) }, h, JSON.stringify({ session_id: "L2", cwd: h }));
+    await Bun.sleep(1500);
+    session.kill();
+    expect(await orphan.exited).toBe(0);
+    await ok(owner, ["send", "--to", "claude", "after the session ended"]);
+    expect(await ok(h, ["read"], S)).toContain("after the session ended");
   });
 
   test("an older Claude Code, or none, gets the Monitor instructions and no listener", async () => {

@@ -575,8 +575,18 @@ const commands: Record<string, Command> = {
       const auto = !picked && !(seat && local.includes(seat.as));
       // The same agent running this join again while it waits: the same key, so the same request.
       const askingKey = [roomId, process.cwd(), who.harness ?? "", who.session ?? ""].join(" ");
-      const asking = (yield* keys.config).asking?.[askingKey]?.as;
-      let name = picked ? yield* agentName() : seat && !auto ? seat.as : asking && local.includes(asking) ? asking : freeAgentName(baseName(who), local.map((n) => ({ name: n })));
+      let name = picked ? yield* agentName() : seat && !auto ? seat.as : "";
+      if (!name) {
+        // Picked and written down in one locked step, so two joins on this machine at once never pick the same name.
+        yield* keys.update((c) => {
+          const now = Date.now();
+          const asking = Object.fromEntries(Object.entries(c.asking ?? {}).filter(([, a]) => now - a.at < 7 * 86_400_000));
+          const mine = asking[askingKey]?.as;
+          const waiting = Object.entries(asking).filter(([k]) => k.startsWith(`${roomId} `) && k !== askingKey).map(([, a]) => ({ name: a.as }));
+          name = mine && local.includes(mine) ? mine : freeAgentName(baseName(who), [...local.map((n) => ({ name: n })), ...waiting]);
+          c.asking = { ...asking, [askingKey]: { as: name, at: mine && local.includes(mine) ? asking[askingKey]!.at : now } };
+        });
+      }
       const doneAsking = keys.update((c) => {
         if (c.asking) delete c.asking[askingKey];
       });
@@ -588,20 +598,25 @@ const commands: Record<string, Command> = {
       // Agents join from a computer its person linked with `kiwi setup`; the computer vouches for them.
       const signIn = yield* signInOn(relay);
 
+      /** This agent's key goes by `to` from now on. A stray key under that name here can't be a member (we hold the name): it goes. */
+      const renameKey = (to: string) =>
+        Effect.gen(function* () {
+          if ((yield* keys.identitiesIn(roomId)).includes(to)) yield* keys.forgetIdentity(to, roomId);
+          yield* keys.saveIdentity({ ...id, name: to }, roomId);
+          yield* keys.forgetIdentity(name, roomId);
+          id = { ...id, name: to };
+          name = to;
+        });
+
       /** In: write the config, bind this folder, and print the instructions. */
       const settle = (access: ChannelAccess, how: "approved" | "resumed" | "admitted") =>
         Effect.gen(function* () {
-          // The owner's side may have given an agent that didn't pick its name a free one like it.
           if (auto) yield* doneAsking;
-          if (auto && how === "approved") {
-            const me = (yield* new Channel(access, relay, id).fx.members()).find((m) => m.active && m.pk === id.pk);
-            if (me && me.name !== name) {
-              yield* keys.saveIdentity({ ...id, name: me.name }, roomId);
-              yield* keys.forgetIdentity(name, roomId);
-              id = { ...id, name: me.name };
-              name = me.name;
-            }
-          }
+          // This key's name is whatever its record says: the owner's side may have given it another one
+          // (a free name like the one it asked for, or one the owner typed), maybe while an earlier run of
+          // this join waited and died. Every way in, resumed included, takes the record's word.
+          const me = (yield* new Channel(access, relay, id).fx.members()).find((m) => m.active && m.pk === id.pk);
+          if (me && me.name !== name) yield* renameKey(me.name);
           // Members can read the channel's sealed name: use it to name the channel here.
           const title = yield* new Channel(access, relay, id).fx.title().pipe(Effect.catchCause(() => Effect.succeed(null)));
           const existing = Object.entries((yield* keys.config).channels).find(([, c]) => c.roomId === access.roomId)?.[0];
@@ -659,10 +674,7 @@ const commands: Record<string, Command> = {
           if (admitted.name !== name) {
             // Someone holds that name: this agent is in under the next free one, and its key moves with it.
             if (!auto) out(`"${name}" is taken here; you're in as ${admitted.name}.`);
-            yield* keys.saveIdentity({ ...id, name: admitted.name }, roomId);
-            yield* keys.forgetIdentity(name, roomId);
-            name = admitted.name;
-            id = { ...id, name };
+            yield* renameKey(admitted.name);
           }
           return yield* settle(admitted.access, "admitted");
         }
@@ -686,7 +698,6 @@ const commands: Record<string, Command> = {
           }),
         ),
       );
-      if (auto) yield* keys.update((c) => void (c.asking = { ...c.asking, [askingKey]: { as: name, at: Date.now() } }));
       out(opt.reclaim ? `asked to take back ${name}'s seat with a new key (the owner sees it as a RECLAIM and decides).` : `asked to join as ${name}.`);
       if (linked) out(`Vouched for by this computer${linked.linked?.name ? `, linked to ${linked.linked.name}` : ""}.`);
       if (!opt.reclaim && (yield* admitLocally(code, relay, id, req.requestId, { ...(auto ? {} : { name }), role: opt.role, about: opt.about }))) {
