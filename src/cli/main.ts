@@ -598,12 +598,27 @@ const commands: Record<string, Command> = {
       // Agents join from a computer its person linked with `kiwi setup`; the computer vouches for them.
       const signIn = yield* signInOn(relay);
 
-      /** This agent's key goes by `to` from now on. A stray key under that name here can't be a member (we hold the name): it goes. */
+      /**
+       * This agent's key goes by `to` from now on. Only ever this key's own files are removed: another
+       * agent on this machine waiting under that name (its own request) has its key moved aside, and its
+       * pending join follows it there.
+       */
       const renameKey = (to: string) =>
         Effect.gen(function* () {
-          if ((yield* keys.identitiesIn(roomId)).includes(to)) yield* keys.forgetIdentity(to, roomId);
-          yield* keys.saveIdentity({ ...id, name: to }, roomId);
-          yield* keys.forgetIdentity(name, roomId);
+          const names = yield* keys.identitiesIn(roomId);
+          const ours: string[] = [];
+          for (const n of names) if ((yield* keys.identity(n, roomId)).pk === id.pk) ours.push(n);
+          if (names.includes(to) && !ours.includes(to)) {
+            const other = yield* keys.identity(to, roomId);
+            const aside = freeAgentName(to, names.map((n) => ({ name: n })));
+            yield* keys.saveIdentity({ ...other, name: aside }, roomId);
+            yield* keys.forgetIdentity(to, roomId);
+            yield* keys.update((c) => {
+              for (const [k, a] of Object.entries(c.asking ?? {})) if (k.startsWith(`${roomId} `) && a.as === to) c.asking![k] = { ...a, as: aside };
+            });
+          }
+          if (!ours.includes(to)) yield* keys.saveIdentity({ ...id, name: to }, roomId);
+          for (const n of ours) if (n !== to) yield* keys.forgetIdentity(n, roomId);
           id = { ...id, name: to };
           name = to;
         });

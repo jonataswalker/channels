@@ -29,7 +29,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { openSession, type AgentSession } from "./agent.ts";
-import { home, Keystore, loadConfig, writeCursor, type ChannelConfig } from "./config.ts";
+import { Cursor, home, Keystore, loadConfig, type ChannelConfig } from "./config.ts";
 import { ChannelGone } from "./client.ts";
 import { charterLines, formatMessage, holdLine } from "./format.ts";
 import { bindingFor as seatFor, here, seatsNear, type Binding, type Here, type SeatOptions } from "./seats.ts";
@@ -93,6 +93,33 @@ export function isListening(alias: string, as: string): boolean {
   }
   return alive;
 }
+
+function deliveredFile(alias: string, as: string, session: string): string {
+  return join(home(), "listen-hooks", `${encodeURIComponent(alias)}.${encodeURIComponent(as)}.${encodeURIComponent(session)}.delivered`);
+}
+
+/** How far the background listener handed messages to this session, still to be committed (0: nothing). */
+function deliveredUpTo(alias: string, as: string, session: string): number {
+  try {
+    return Number(readFileSync(deliveredFile(alias, as, session), "utf8")) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function noteDelivered(alias: string, as: string, session: string, seq: number): void {
+  mkdirSync(join(home(), "listen-hooks"), { recursive: true, mode: 0o700 });
+  writeFileSync(deliveredFile(alias, as, session), String(Math.max(seq, deliveredUpTo(alias, as, session))));
+}
+
+/** The session took its turn after the listener woke it: what it was handed is read now. */
+const commitDelivered = Effect.fn("Hooks.commitDelivered")(function* (alias: string, as: string, session: string) {
+  const upTo = deliveredUpTo(alias, as, session);
+  if (!upTo) return;
+  const cursor = yield* Cursor;
+  if (((yield* cursor.read(alias, as)) ?? 0) < upTo) yield* cursor.write(alias, as, upTo);
+  rmSync(deliveredFile(alias, as, session), { force: true });
+});
 
 /** Hold the one background listener slot for `as` on `alias` in this session; false when a live one already has it. */
 function takeListenSlot(alias: string, as: string, session: string): boolean {
@@ -581,6 +608,8 @@ const answer = Effect.fn("Hooks.answer")(function* (event: string, input: HookIn
   const hooked = hooksListen();
   const listening = hooked || isListening(b.alias, b.as);
   const s = yield* openSession(b.alias, cfg, b.as);
+  // A hook from the session the listener woke: it has seen what it was handed.
+  if (who.session) yield* commitDelivered(b.alias, b.as, who.session);
 
   if (event === "session-start") {
     const lines = [
@@ -658,31 +687,31 @@ const answer = Effect.fn("Hooks.answer")(function* (event: string, input: HookIn
 const listen = Effect.fn("Hooks.listen")(function* (b: Binding, cfg: ChannelConfig, who: Here) {
   if (!hooksListen() || isListening(b.alias, b.as) || !takeListenSlot(b.alias, b.as, who.session ?? "")) return 0;
   const s = yield* openSession(b.alias, cfg, b.as);
-  // Read, hand over, then commit: listen moves the cursor as messages arrive, so until stderr has
-  // them, any way out (its session ending, Claude Code stopping it, a failed write) puts it back.
-  const since = yield* s.cursor();
-  let handedOver = false;
-  process.on("exit", () => {
-    if (!handedOver) writeCursor(b.alias, b.as, since);
-  });
+  // Peek: the listener never moves the agent's cursor. It reads on a copy that starts past what it already
+  // handed this session, hands the messages over, and notes how far that went; the session's next hook
+  // (deliveredUpTo) commits it. A listener that dies, or a session that's gone, means a duplicate, never a loss.
+  const real = yield* Cursor;
+  let at = Math.max((yield* s.cursor()), deliveredUpTo(b.alias, b.as, who.session ?? ""));
+  const peek = Cursor.of({ read: () => Effect.succeed(at), write: (_c, _a, seq) => Effect.sync(() => void (at = Math.max(at, seq))), seen: real.seen, markSeen: () => Effect.void });
   const got: string[] = [];
   const enough = yield* Deferred.make<void>();
   const woke = Effect.suspend(() =>
     // Linger briefly so a burst of messages is one wake-up.
     got.length === 1 ? Effect.asVoid(Effect.forkScoped(Effect.andThen(Effect.sleep(400), Deferred.succeed(enough, undefined)))) : Effect.void,
   );
-  const hearing = s.listen((m, state) => Effect.andThen(Effect.sync(() => void got.push(formatMessage(m, state.trust.get(m.seq), state, s.me))), woke), {
-    client: "hook",
-    onNotice: (text) => Effect.andThen(Effect.sync(() => void got.push(`* ${text}`)), woke),
-  });
-  // Its session ending ends it too, before it reads a message nobody would get.
+  const hearing = s
+    .listen((m, state) => Effect.andThen(Effect.sync(() => void got.push(formatMessage(m, state.trust.get(m.seq), state, s.me))), woke), {
+      client: "hook",
+      onNotice: (text) => Effect.andThen(Effect.sync(() => void got.push(`* ${text}`)), woke),
+    })
+    .pipe(Effect.provideService(Cursor, peek));
+  // Its session ending ends it too: nobody would get what it read.
   const sessionGone = who.pid ? Effect.repeat(Effect.sync(() => alive(who.pid!)), { while: (up) => up, schedule: Schedule.spaced("2 seconds") }) : Effect.never;
   const ended = yield* Effect.raceFirst(
     Effect.as(hearing, "heard" as const),
     Effect.raceFirst(Effect.as(Deferred.await(enough), "heard" as const), Effect.raceFirst(Effect.as(Effect.sleep(LISTEN_SECONDS * 1000), "day" as const), Effect.as(sessionGone, "gone" as const))),
   ).pipe(Effect.scoped);
-  // Nobody to hand them to: they stay unread (the exit puts the cursor back).
-  if (ended === "gone") return 0;
+  if (ended === "gone" || (who.pid && !alive(who.pid))) return 0;
   const mc = mcFor(b.alias, b.as, process.cwd(), who);
   const text = got.join("\n");
   try {
@@ -692,10 +721,10 @@ const listen = Effect.fn("Hooks.listen")(function* (b: Binding, cfg: ChannelConf
         ? `New Kiwi Channels messages for you (${b.alias}). Handle them; answer with \`${mc} reply N "…"\`:\n${text.length > MAX_CONTEXT ? `${text.slice(0, MAX_CONTEXT)}\n… (more: run \`${mc} log\`)` : text}\n`
         : "Kiwi Channels: a day with no messages for you. Nothing to do; just end your turn.\n",
     );
-    handedOver = true;
   } catch {
     return 0;
   }
+  if (got.length) noteDelivered(b.alias, b.as, who.session ?? "", at);
   return 2;
 });
 

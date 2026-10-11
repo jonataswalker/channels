@@ -221,6 +221,46 @@ describe("review fixes (#1352)", () => {
     expect(log).toContain("codex-2 → all: from t2");
   });
 
+  test("two agents of one machine let in under new names never lose each other's keys", async () => {
+    const owner = scratch("own9");
+    const code = created(await ok(owner, ["create", "keys", "--as", "boss"]));
+    // Another computer already holds "claude".
+    await join_(owner, scratch("remote"), code, { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "rm", CLAUDE_PID: String(process.pid) });
+    const h = scratch("twokeys");
+    const d2 = join(h, "two");
+    const d3 = join(h, "three");
+    mkdirSync(d2);
+    mkdirSync(d3);
+    const procs = [Bun.spawn(["sleep", "120"]), Bun.spawn(["sleep", "120"])];
+    const S2 = { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s2", CLAUDE_PID: String(procs[0]!.pid) };
+    const S3 = { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s3", CLAUDE_PID: String(procs[1]!.pid) };
+    try {
+      // Locally they ask as claude and claude-2; the owner is offered claude-2 and claude-3.
+      const j2 = spawn(h, ["join", code, "--timeout", "40s"], S2, d2);
+      await until(async () => (await ok(owner, ["requests"])).includes("claude-2"), "first request");
+      const j3 = spawn(h, ["join", code, "--timeout", "40s"], S3, d3);
+      let listed = "";
+      await until(async () => {
+        listed = await ok(owner, ["requests"]);
+        return (listed.match(/\d{3}-\d{3}/g) ?? []).length === 2;
+      }, "both requests with codes");
+      expect(listed).toContain("claude-3");
+      expect(listed).not.toContain("claude-2-2");
+      for (const c of listed.match(/\d{3}-\d{3}/g)!) await ok(owner, ["approve", c, "--yes"]);
+      expect(await j2.exited).toBe(0);
+      expect(await j3.exited).toBe(0);
+      await ok(h, ["send", "two here"], S2, d2);
+      await ok(h, ["send", "three here"], S3, d3);
+      const log = await ok(owner, ["log"]);
+      expect(log).toMatch(/claude-[23] → all: two here/);
+      expect(log).toMatch(/claude-[23] → all: three here/);
+      const room = readdirSync(join(h, "identities"))[0]!;
+      expect(readdirSync(join(h, "identities", room)).sort()).toEqual(["claude-2.json", "claude-3.json"]);
+    } finally {
+      for (const p of procs) p.kill();
+    }
+  });
+
   test("two joins at once on one machine ask under different names", async () => {
     const owner = scratch("own8");
     const code = created(await ok(owner, ["create", "race", "--as", "boss"]));
@@ -276,8 +316,15 @@ describe("Claude Code's hooks do the listening", () => {
     await ok(owner, ["send", "--to", "claude", "after the session ended"]);
     expect(await ok(h, ["read"], S)).toContain("after the session ended");
 
-    // Read, hand over, then commit: a listener that hears a message but has nobody to hand it to
-    // (its session is gone) leaves it unread.
+    // Peek: what the listener handed over is committed by the session's next hook, not by the listener.
+    const peeking = spawn(h, ["hook", "listen"], S, h, input);
+    await Bun.sleep(1000);
+    await ok(owner, ["send", "--to", "claude", "handed, not yet read"]);
+    expect(await peeking.exited).toBe(2);
+    // The same session's next hook commits it: its prompt hook doesn't hand it over a second time.
+    expect((await run(h, ["hook", "prompt"], S, h, input)).out).not.toContain("handed, not yet read");
+
+    // A listener that hears a message but has nobody to hand it to (its session is gone) leaves it unread.
     await ok(owner, ["send", "--to", "claude", "nobody to hand this to"]);
     const late = await run(h, ["hook", "listen"], { ...S, CLAUDE_CODE_SESSION_ID: "L3", CLAUDE_PID: DEAD }, h, JSON.stringify({ session_id: "L3", cwd: h }));
     expect(late.code).toBe(0);

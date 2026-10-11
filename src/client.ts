@@ -905,7 +905,8 @@ export class Channel {
         // checks it, never the budget. (A person is admitted under their account's handle, whatever they typed.)
         // An agent that didn't pick its name is offered a free one like it instead: never a RECLAIM.
         const asked = inlineText(info.name, 40);
-        const auto = r.kind !== "human" && info.auto === true ? (NAME_RE.test(asked) ? asked : "agent") : undefined;
+        // The base it asked under, without a suffix its own machine added ("claude-2" → "claude"), so the next free one is claude-3, not claude-2-2.
+        const auto = r.kind !== "human" && info.auto === true ? (NAME_RE.test(asked) ? asked.replace(/-\d+$/, "") || asked : "agent") : undefined;
         if (auto) offered.push({ name: (info.name = freeAgentName(auto, offered)) });
         const seat = r.kind === "human" || auto ? undefined : seats.find((m) => nameKey(m.name) === nameKey(String(info.name ?? "")));
         const reclaims = seat ? { name: seat.name, pk: seat.pk, kind: seat.kind, owner: seat.owner, ...(seat.sponsor ? { sponsor: seat.sponsor } : {}) } : undefined;
