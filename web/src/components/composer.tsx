@@ -200,13 +200,13 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
       <input ref={picker} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden" onChange={(e) => (pick(e.target.files), (e.target.value = ""))} />
 
       {matches.length > 0 && (
-        <div className="animate-rise absolute bottom-full left-4 z-20 mb-1 w-64 overflow-hidden rounded-[10px] bg-raised p-1 shadow-pop md:left-8">
+        <div className="animate-rise absolute bottom-full left-4 z-20 mb-1 w-64 overflow-hidden rounded-card bg-raised p-1 shadow-pop md:left-8">
           {matches.map((p, i) => (
             <button
               key={p.name}
               type="button"
               onMouseDown={(e) => (e.preventDefault(), complete(p))}
-              className={cx("flex w-full items-center gap-2.5 rounded-[7px] px-2 py-1.5 text-left text-[13px]", i === mention!.index ? "bg-wash-2" : "hover:bg-wash")}
+              className={cx("flex w-full items-center gap-2.5 rounded-row px-2 py-1.5 text-left text-ui", i === mention!.index ? "bg-wash-2" : "hover:bg-wash")}
             >
               <Monogram name={p.label} agent={p.agent} color={p.color} size={20} />
               <span className="truncate font-medium">{p.label}</span>
@@ -218,7 +218,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
 
       <div
         className={cx(
-          "relative rounded-[18px] bg-raised shadow-[0_0_0_1px_var(--line),0_2px_8px_-4px_rgba(0,0,0,0.08)] transition-shadow focus-within:shadow-[0_0_0_1px_color-mix(in_srgb,var(--ink)_24%,transparent),0_2px_8px_-4px_rgba(0,0,0,0.08)]",
+          "relative rounded-card bg-raised shadow-[0_0_0_1px_var(--line),0_2px_8px_-4px_rgba(0,0,0,0.08)] transition-shadow focus-within:shadow-[0_0_0_1px_color-mix(in_srgb,var(--ink)_24%,transparent),0_2px_8px_-4px_rgba(0,0,0,0.08)]",
           dropping && "shadow-[0_0_0_1.5px_var(--ink)]"
         )}
         onDragEnter={(e) => {
@@ -241,9 +241,9 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
           pick(e.dataTransfer.files)
         }}
       >
-        {dropping && <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-[14px] border border-dashed border-ink-3 bg-canvas/85 text-[13px] text-ink-2">Drop images</div>}
+        {dropping && <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-card border border-dashed border-ink-3 bg-canvas/85 text-ui text-ink-2">Drop images</div>}
         {replyTo && !thread && (
-          <div className="flex items-center gap-2 px-4 pt-2.5 text-[12.5px] text-ink-2">
+          <div className="flex items-center gap-2 px-4 pt-2.5 text-ui text-ink-2">
             <span className="min-w-0 truncate">
               Replying to <span className="font-medium text-ink">{nameOf(replyTo.from)}</span> <span className="text-ink-3">{excerpt(replyTo.body, 80)}</span>
             </span>
@@ -257,7 +257,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
           <div className="flex gap-2 overflow-x-auto px-3.5 pt-3">
             {files.map((f, i) => (
               <span key={i} className="group relative shrink-0">
-                <img src={`data:${f.mime};base64,${f.data}`} alt={f.name} title={f.name} className="size-16 rounded-[8px] object-cover shadow-[0_0_0_0.5px_var(--line)]" />
+                <img src={`data:${f.mime};base64,${f.data}`} alt={f.name} title={f.name} className="size-16 rounded-ctl object-cover shadow-[0_0_0_0.5px_var(--line)]" />
                 <button
                   type="button"
                   aria-label={`Remove ${f.name}`}
@@ -322,7 +322,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
               onClearReply()
             }
           }}
-          className="block max-h-[220px] min-h-[48px] w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14.5px] leading-[1.5] outline-none placeholder:text-ink-3 focus-visible:outline-none"
+          className="block max-h-[220px] min-h-[48px] w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-body leading-[1.5] outline-none placeholder:text-ink-3 focus-visible:outline-none"
         />
 
         <div className="flex items-center gap-1 px-2 pb-2">
@@ -337,7 +337,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
                 type="button"
                 disabled={disabled}
                 className={cx(
-                  "flex h-8 items-center gap-1 rounded-full px-3 text-[12.5px] font-medium transition-colors",
+                  "flex h-8 items-center gap-1 rounded-full px-3 text-ui font-medium transition-colors",
                   kind === "msg" ? "text-ink-2 hover:bg-wash hover:text-ink data-popup-open:bg-wash" : "bg-wash-2 text-ink"
                 )}
               >
@@ -354,7 +354,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
               ))}
             </MenuRadioGroup>
           </Menu>
-          <span className="ml-auto hidden truncate pr-1 text-[11.5px] text-ink-3 sm:block">{routeNote ?? "Return to send"}</span>
+          <span className="ml-auto hidden truncate pr-1 text-meta text-ink-3 sm:block">{routeNote ?? "Return to send"}</span>
           <button
             type="button"
             aria-label="Send"

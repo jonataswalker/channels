@@ -41,8 +41,8 @@ function Stage({ children, width = 380 }: { children: ReactNode; width?: number 
 function Heading({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <>
-      <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.02em]">{title}</h2>
-      {children && <p className="mt-2 text-[14px] leading-normal text-ink-2">{children}</p>}
+      <h2 className="text-display leading-tight font-semibold tracking-[-0.02em]">{title}</h2>
+      {children && <p className="mt-2 text-body leading-normal text-ink-2">{children}</p>}
     </>
   )
 }
@@ -59,18 +59,18 @@ function Specimen() {
     <div className="grid grid-cols-[24px_1fr] gap-x-3">
       <Monogram name={name} agent={agent} size={24} />
       <div>
-        <p className="text-[13px]">
+        <p className="text-ui">
           <span className="font-semibold">{name}</span>
           {said && <span className="text-ink-2"> {said}</span>}
         </p>
-        <p className="text-[13.5px] leading-[1.55]">{body}</p>
+        <p className="text-ui leading-[1.55]">{body}</p>
       </div>
     </div>
   )
   return (
-    <div aria-hidden className="grid gap-3.5 rounded-[12px] p-5 shadow-[inset_0_0_0_1px_var(--line)] select-none">
+    <div aria-hidden className="grid gap-3.5 rounded-card p-5 shadow-[inset_0_0_0_1px_var(--line)] select-none">
       {row("claude", true, null, "Taking the reconnect backoff. I’ve claimed src/relay so nobody collides.")}
-      <div className="grid grid-cols-[24px_1fr] gap-x-3 text-[12.5px] text-ink-2">
+      <div className="grid grid-cols-[24px_1fr] gap-x-3 text-ui text-ink-2">
         <span className="flex justify-center pt-[2px] text-ink-3">
           <Icon icon={CheckListIcon} size={13} />
         </span>
@@ -89,7 +89,7 @@ export function Welcome({ onNew, onJoin }: { onNew: () => void; onJoin: () => vo
   return (
     <Stage width={500}>
       <Wordmark className="text-[40px] leading-none" />
-      <p className="mt-4 text-[16px] leading-[1.5] text-ink-2">
+      <p className="mt-4 text-title leading-[1.5] text-ink-2">
         Private channels where your agents work together in real time. You approve everyone who joins, watch the work, and step in when it matters.
       </p>
       <div className="mt-7 flex flex-wrap gap-2">
@@ -109,7 +109,7 @@ export function Welcome({ onNew, onJoin }: { onNew: () => void; onJoin: () => vo
       <div className="mt-12">
         <Specimen />
       </div>
-      <p className="mt-5 flex items-center gap-1.5 text-[12px] text-ink-3">
+      <p className="mt-5 flex items-center gap-1.5 text-meta text-ink-3">
         <Icon icon={LockIcon} size={12} />
         End-to-end encrypted. Close a channel and nothing is left on the relay.
       </p>
@@ -150,15 +150,15 @@ export function NewChannel({ open, onClose, onCreated, usage }: { open: boolean;
           if (canCreate && !full) void create()
         }}
       >
-        <h2 className="text-[15px] font-semibold">New channel</h2>
-        <p className="mt-1 text-[13px] leading-normal text-ink-2">You own it and approve everyone who joins. Only members can read its name.</p>
+        <h2 className="text-title font-semibold">New channel</h2>
+        <p className="mt-1 text-ui leading-normal text-ink-2">You own it and approve everyone who joins. Only members can read its name.</p>
         {canCreate ? (
           <TextField className="mt-4" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="payments-refactor" maxLength={60} autoComplete="off" />
         ) : (
-          <p className="mt-4 text-[13px] text-ink-2">Sign in first. Channels here belong to a signed-in person.</p>
+          <p className="mt-4 text-ui text-ink-2">Sign in first. Channels here belong to a signed-in person.</p>
         )}
-        {full && !error && <p className="mt-3 text-[13px] leading-normal text-ink-2">You own {usage!.owned} channels, the most you can have here. Close one you no longer need to create another.</p>}
-        {error && <Reason text={error} className="mt-3 rounded-[8px] bg-wash px-3 py-2.5 text-alert" />}
+        {full && !error && <p className="mt-3 text-ui leading-normal text-ink-2">You own {usage!.owned} channels, the most you can have here. Close one you no longer need to create another.</p>}
+        {error && <Reason text={error} className="mt-3 rounded-ctl bg-wash px-3 py-2.5 text-alert" />}
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             Cancel
@@ -190,10 +190,10 @@ export function JoinWithCode({ open, onClose, onJoin }: { open: boolean; onClose
           setCode("")
         }}
       >
-        <h2 className="text-[15px] font-semibold">Join with a code</h2>
-        <p className="mt-1 text-[13px] leading-normal text-ink-2">A code only lets you ask. The owner lets you in after checking a short number with you.</p>
-        <TextField className="mt-4 font-mono text-[12.5px]" autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder="mc2-…" autoComplete="off" spellCheck={false} />
-        {code.trim() && !valid && <p className="mt-2 text-[12.5px] text-ink-2">Join codes start with mc2- and have two more parts.</p>}
+        <h2 className="text-title font-semibold">Join with a code</h2>
+        <p className="mt-1 text-ui leading-normal text-ink-2">A code only lets you ask. The owner lets you in after checking a short number with you.</p>
+        <TextField className="mt-4 font-mono text-ui" autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder="mc2-…" autoComplete="off" spellCheck={false} />
+        {code.trim() && !valid && <p className="mt-2 text-ui text-ink-2">Join codes start with mc2- and have two more parts.</p>}
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             Cancel
@@ -283,7 +283,7 @@ export function ChannelGate({ code, identity, listed, onBack, onGone }: { code: 
         <Heading title={`Open this channel as ${id.name}?`}>
           This link carries a private key. Open it only if you made it yourself, with kiwi web on your own computer. Never open one that someone sent you.
         </Heading>
-        <p className="mt-4 text-[12px] text-ink-3">Key {id.pk.slice(0, 16)}</p>
+        <p className="mt-4 text-meta text-ink-3">Key {id.pk.slice(0, 16)}</p>
         <div className="mt-6 flex gap-2">
           <Button
             size="lg"
@@ -375,7 +375,7 @@ export function ChannelGate({ code, identity, listed, onBack, onGone }: { code: 
           {phase.code && <VerifyCode code={phase.code} />}
           <div className="flex items-center gap-3">
             <Spinner />
-            <span className="text-[13px] text-ink-2">This page updates the moment you’re in.</span>
+            <span className="text-ui text-ink-2">This page updates the moment you’re in.</span>
           </div>
           <Button variant="ghost" className="mt-6 -ml-3.5" onClick={giveUp}>
             Cancel request
@@ -447,8 +447,8 @@ function AskToJoin({ code, listed, onAsked, onCancel }: { code: string; listed?:
         <Heading title={intro.title}>{intro.text}</Heading>
         {!intro.text && (
           <>
-            <p className="mt-3 text-[14px] leading-normal text-ink-2">Kiwi Channels is a private chat where people and their AI agents work together. Here’s what happens:</p>
-            <ol className="mt-4 grid list-decimal gap-2 pl-5 text-[14px] leading-normal text-ink-2 marker:text-ink-3">
+            <p className="mt-3 text-body leading-normal text-ink-2">Kiwi Channels is a private chat where people and their AI agents work together. Here’s what happens:</p>
+            <ol className="mt-4 grid list-decimal gap-2 pl-5 text-body leading-normal text-ink-2 marker:text-ink-3">
               <li>Sign in, so {owner ?? "the owner"} sees who’s asking.</li>
               <li>{who} lets you in after checking a short number with you.</li>
               <li>Messages are end-to-end encrypted, and only your browser can read them.</li>
@@ -484,15 +484,15 @@ function AskToJoin({ code, listed, onAsked, onCancel }: { code: string; listed?:
       }}
     >
       <Heading title={intro.title}>{intro.text ?? `A code only lets you ask. ${owner ?? "The owner"} approves every member, person or agent.`}</Heading>
-      <label className="mt-6 block text-[12px] font-medium text-ink-2" htmlFor="ask-name">
+      <label className="mt-6 block text-meta font-medium text-ink-2" htmlFor="ask-name">
         Your name in the channel
       </label>
       <TextField id="ask-name" className="mt-1.5" value={name} onChange={(e) => setName(e.target.value)} autoFocus aria-invalid={!!name && !valid} />
-      <label className="mt-4 block text-[12px] font-medium text-ink-2" htmlFor="ask-role">
+      <label className="mt-4 block text-meta font-medium text-ink-2" htmlFor="ask-role">
         Role <span className="font-normal text-ink-3">(optional)</span>
       </label>
       <TextField id="ask-role" className="mt-1.5" value={role} onChange={(e) => setRole(e.target.value)} placeholder="reviewer" />
-      {error && <p className="mt-3 text-[13px] text-alert">{error}</p>}
+      {error && <p className="mt-3 text-ui text-alert">{error}</p>}
       <div className="mt-6 flex gap-2">
         <Button size="lg" type="submit" disabled={!valid || busy}>
           {busy ? <Spinner className="border-white/30 border-t-white" /> : "Ask to join"}
@@ -501,7 +501,7 @@ function AskToJoin({ code, listed, onAsked, onCancel }: { code: string; listed?:
           Cancel
         </Button>
       </div>
-      <p className="mt-6 text-[12px] leading-normal text-ink-3">Your key is made in this browser. Once you’re in, messages are decrypted here and nowhere else.</p>
+      <p className="mt-6 text-meta leading-normal text-ink-3">Your key is made in this browser. Once you’re in, messages are decrypted here and nowhere else.</p>
     </form>
   )
 }

@@ -78,7 +78,7 @@ export function Palette({ open, onClose, commands }: { open: boolean; onClose: (
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-overlay transition-opacity duration-150 data-starting-style:opacity-0" />
         <Dialog.Popup
           aria-label="Go to a channel or run a command"
-          className="fixed top-[14vh] left-1/2 z-50 flex max-h-[min(480px,70svh)] w-[calc(100%-2rem)] max-w-[560px] -translate-x-1/2 flex-col overflow-hidden rounded-[14px] bg-raised shadow-pop transition-[opacity,scale] duration-150 ease-out outline-none data-starting-style:scale-[0.98] data-starting-style:opacity-0"
+          className="fixed top-[14vh] left-1/2 z-50 flex max-h-[min(480px,70svh)] w-[calc(100%-2rem)] max-w-[560px] -translate-x-1/2 flex-col overflow-hidden rounded-card bg-raised shadow-pop transition-[opacity,scale] duration-150 ease-out outline-none data-starting-style:scale-[0.98] data-starting-style:opacity-0"
         >
           <label className="flex h-12 shrink-0 items-center gap-2.5 px-4 shadow-[inset_0_-1px_0_var(--line)]">
             <Icon icon={Search01Icon} size={17} className="shrink-0 text-ink-3" />
@@ -109,17 +109,17 @@ export function Palette({ open, onClose, commands }: { open: boolean; onClose: (
               aria-expanded
               aria-controls="palette-list"
               aria-activedescendant={shown[at] ? `palette-${shown[at].id}` : undefined}
-              className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-ink-3 focus-visible:outline-none"
+              className="min-w-0 flex-1 bg-transparent text-title outline-none placeholder:text-ink-3 focus-visible:outline-none"
             />
           </label>
           <div ref={list} id="palette-list" role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1.5">
-            {shown.length === 0 && <p className="px-3 py-6 text-center text-[13px] text-ink-2">Nothing matches “{query}”.</p>}
+            {shown.length === 0 && <p className="px-3 py-6 text-center text-ui text-ink-2">Nothing matches “{query}”.</p>}
             {GROUPS.map((group) => {
               const items = shown.flatMap((c, i) => (c.group === group ? [{ c, i }] : []))
               if (!items.length) return null
               return (
                 <div key={group} role="group" aria-label={group}>
-                  <p className="px-2.5 pt-2 pb-1 text-[11.5px] font-medium text-ink-2">{group}</p>
+                  <p className="px-2.5 pt-2 pb-1 text-meta font-medium text-ink-2">{group}</p>
                   {items.map(({ c, i }) => (
                     <div
                       key={c.id}
@@ -129,11 +129,11 @@ export function Palette({ open, onClose, commands }: { open: boolean; onClose: (
                       aria-selected={i === at}
                       onMouseMove={() => i !== at && setIndex(i)}
                       onClick={() => choose(c)}
-                      className={cx("flex h-9 cursor-default items-center gap-3 rounded-[8px] px-2.5 text-[13.5px]", i === at && "bg-wash-2")}
+                      className={cx("flex h-9 cursor-default items-center gap-3 rounded-ctl px-2.5 text-ui", i === at && "bg-wash-2")}
                     >
                       {c.leading}
                       <span className="min-w-0 flex-1 truncate">{c.label}</span>
-                      {c.hint && <span className="shrink-0 text-[12px] text-ink-2 tabular-nums">{c.hint}</span>}
+                      {c.hint && <span className="shrink-0 text-meta text-ink-2 tabular-nums">{c.hint}</span>}
                     </div>
                   ))}
                 </div>

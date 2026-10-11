@@ -28,7 +28,7 @@ export function ScopePicker({ value, onChange, disabled }: { value: Scope[]; onC
   const toggle = (s: Scope) => onChange(SCOPES.filter((x) => (x === s ? !value.includes(s) : value.includes(x))))
   return (
     <div className="grid gap-2">
-      <div role="radiogroup" aria-label="What they can do" className="grid grid-cols-3 gap-1 rounded-[9px] bg-wash p-0.5">
+      <div role="radiogroup" aria-label="What they can do" className="grid grid-cols-3 gap-1 rounded-ctl bg-wash p-0.5">
         {(Object.keys(PRESETS) as Preset[]).reverse().map((p) => (
           <button
             key={p}
@@ -37,13 +37,13 @@ export function ScopePicker({ value, onChange, disabled }: { value: Scope[]; onC
             aria-checked={preset === p}
             disabled={disabled}
             onClick={() => (onChange([...PRESETS[p]]), setCustom(false))}
-            className={cx("rounded-[7px] px-2 py-1.5 text-[12.5px] font-medium transition-colors", preset === p ? "bg-canvas text-ink shadow-[0_0_0_1px_var(--line)]" : "text-ink-2 hover:text-ink")}
+            className={cx("rounded-row px-2 py-1.5 text-ui font-medium transition-colors", preset === p ? "bg-canvas text-ink shadow-[0_0_0_1px_var(--line)]" : "text-ink-2 hover:text-ink")}
           >
             {PRESET_LABEL[p]}
           </button>
         ))}
       </div>
-      <p className="text-[12px] leading-snug text-ink-3">
+      <p className="text-meta leading-snug text-ink-3">
         {preset ? PRESET_NOTE[preset] : "Your own mix."}{" "}
         {!custom && (
           <button type="button" className="font-medium text-ink-2 hover:text-ink" onClick={() => setCustom(true)} disabled={disabled}>
@@ -54,7 +54,7 @@ export function ScopePicker({ value, onChange, disabled }: { value: Scope[]; onC
       {custom && (
         <div className="grid gap-1">
           {SCOPES.map((s) => (
-            <label key={s} className="flex items-center gap-2 text-[13px] text-ink">
+            <label key={s} className="flex items-center gap-2 text-ui text-ink">
               <input type="checkbox" checked={value.includes(s)} onChange={() => toggle(s)} disabled={disabled} className="size-4 accent-[var(--accent)]" />
               {SCOPE_LABELS[s][0]!.toUpperCase() + SCOPE_LABELS[s].slice(1)}
             </label>

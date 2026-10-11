@@ -179,14 +179,14 @@ export function VaultPrompt({
         ? "This vault doesn’t open with that passkey. If you didn’t set it up, or you’ve lost every passkey and the recovery code, reset it."
         : "They’re saved to a passkey. Touch it to bring every channel to this browser."
   return (
-    <div className="mx-3 mt-1 mb-2 rounded-[10px] bg-wash p-3">
-      <p className="flex items-center gap-1.5 text-[13px] font-semibold">
+    <div className="mx-3 mt-1 mb-2 rounded-card bg-wash p-3">
+      <p className="flex items-center gap-1.5 text-ui font-semibold">
         <Icon icon={FingerPrintIcon} size={15} className="text-ink-2" />
         {state === "none" ? "Your channels on every device" : "Unlock your channels"}
       </p>
-      <p className="mt-1 text-[12.5px] leading-normal text-ink-2">{text}</p>
+      <p className="mt-1 text-ui leading-normal text-ink-2">{text}</p>
       {resetAt && (
-        <p className="mt-1.5 text-[12.5px] leading-normal font-medium text-alert">
+        <p className="mt-1.5 text-ui leading-normal font-medium text-alert">
           A reset was asked for. Your vault is erased {formatFull(resetAt)} unless a device that has it opens Channels first.
         </p>
       )}
@@ -220,17 +220,17 @@ export function RecoveryCodeModal({ code, onDone }: { code: string | null; onDon
   return (
     <Modal open={code !== null} onClose={() => saved && onDone()}>
       <div className="p-5">
-        <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Save your recovery code</h2>
-        <p className="mt-1 text-[13px] leading-normal text-ink-2">
+        <h2 className="text-title font-semibold tracking-[-0.01em]">Save your recovery code</h2>
+        <p className="mt-1 text-ui leading-normal text-ink-2">
           If you lose every passkey, this code is the only other way into your vault. It won’t be shown again. Keep it in a password manager or on paper.
         </p>
-        <div className="mt-4 flex items-center gap-2 rounded-[10px] bg-wash px-3 py-2.5">
-          <code className="min-w-0 flex-1 font-mono text-[13.5px] leading-relaxed tracking-wide break-all select-all">{code}</code>
+        <div className="mt-4 flex items-center gap-2 rounded-card bg-wash px-3 py-2.5">
+          <code className="min-w-0 flex-1 font-mono text-ui leading-relaxed tracking-wide break-all select-all">{code}</code>
           <IconButton label="Copy" onClick={() => code && navigator.clipboard.writeText(code).then(() => toast("Copied"))}>
             <Icon icon={Copy01Icon} size={16} />
           </IconButton>
         </div>
-        <label className="mt-4 flex items-center gap-2 text-[13px]">
+        <label className="mt-4 flex items-center gap-2 text-ui">
           <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} className="size-4 accent-[var(--accent)]" />
           I’ve saved it somewhere safe
         </label>
@@ -270,10 +270,10 @@ export function RecoveryEntryModal({ open, onClose, onSubmit }: { open: boolean;
           void submit()
         }}
       >
-        <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Use your recovery code</h2>
-        <p className="mt-1 text-[13px] leading-normal text-ink-2">The code you saved when you set up your passkey. Spaces and dashes don’t matter.</p>
+        <h2 className="text-title font-semibold tracking-[-0.01em]">Use your recovery code</h2>
+        <p className="mt-1 text-ui leading-normal text-ink-2">The code you saved when you set up your passkey. Spaces and dashes don’t matter.</p>
         <TextField autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="XXXX-XXXX-XXXX-…" spellCheck={false} autoComplete="off" className="mt-4 font-mono tracking-wide" />
-        {error && <p className="mt-2 text-[12.5px] text-alert">{error}</p>}
+        {error && <p className="mt-2 text-ui text-alert">{error}</p>}
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             Cancel
@@ -310,9 +310,9 @@ export function PasskeysModal({
     <>
       <Modal open={open && !removing} onClose={onClose} wide>
         <div className="p-5">
-          <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Passkeys</h2>
-          <p className="mt-1 text-[13px] leading-normal text-ink-2">Any of these unlocks your channels on a browser you sign in to. Add one for each phone or computer you use.</p>
-          <ul className="mt-4 divide-y divide-line rounded-[10px] shadow-[inset_0_0_0_1px_var(--line)]">
+          <h2 className="text-title font-semibold tracking-[-0.01em]">Passkeys</h2>
+          <p className="mt-1 text-ui leading-normal text-ink-2">Any of these unlocks your channels on a browser you sign in to. Add one for each phone or computer you use.</p>
+          <ul className="mt-4 divide-y divide-line rounded-card shadow-[inset_0_0_0_1px_var(--line)]">
             {passkeys.map((w) => (
               <Row key={w.id} title={w.label} note={`Added ${formatShort(w.created)}`}>
                 <IconButton label={`Remove ${w.label}`} onClick={() => setRemoving(w)} disabled={busy || passkeys.length === 1}>
@@ -359,8 +359,8 @@ function Row({ title, note, children }: { title: string; note: string; children?
   return (
     <li className={cx("flex items-center gap-3 px-3 py-2.5")}>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-medium">{title}</span>
-        <span className="block text-[12px] text-ink-3">{note}</span>
+        <span className="block truncate text-ui font-medium">{title}</span>
+        <span className="block text-meta text-ink-3">{note}</span>
       </span>
       {children}
     </li>

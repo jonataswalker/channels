@@ -11,7 +11,7 @@ import { Button, Modal, TextField, errorText } from "./kit"
 const MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const
 
 export function ChannelIconTile({ icon, title, size }: { icon: ChannelIcon | null; title: string; size: 20 | 28 }) {
-  const box = size === 28 ? "size-7 rounded-[8px]" : "size-5 rounded-[6px]"
+  const box = size === 28 ? "size-7 rounded-ctl" : "size-5 rounded-row"
   if (icon?.kind === "image") {
     return (
       <span className={cx(box, "block shrink-0 overflow-hidden bg-wash-2")}>
@@ -21,7 +21,7 @@ export function ChannelIconTile({ icon, title, size }: { icon: ChannelIcon | nul
   }
   const glyph = icon?.kind === "emoji" ? icon.emoji : letterOf(title)
   return (
-    <span aria-hidden className={cx(box, "flex shrink-0 items-center justify-center bg-wash-2 font-medium text-ink-2", size === 28 ? "text-[16px]" : "text-[12px]")}>
+    <span aria-hidden className={cx(box, "flex shrink-0 items-center justify-center bg-wash-2 font-medium text-ink-2", size === 28 ? "text-title" : "text-meta")}>
       {glyph}
     </span>
   )
@@ -89,8 +89,8 @@ function IconForm({ icon, onClose, onSave }: { icon: ChannelIcon | null; onClose
       <div className="flex items-center gap-3">
         <ChannelIconTile icon={icon} title="Channel" size={28} />
         <div>
-          <Dialog.Title className="text-[15px] font-semibold tracking-[-0.01em]">Channel icon</Dialog.Title>
-          <Dialog.Description className="mt-1 text-[13px] leading-normal text-ink-2">One emoji, or an image under 32KB. Only you can change it.</Dialog.Description>
+          <Dialog.Title className="text-title font-semibold tracking-[-0.01em]">Channel icon</Dialog.Title>
+          <Dialog.Description className="mt-1 text-ui leading-normal text-ink-2">One emoji, or an image under 32KB. Only you can change it.</Dialog.Description>
         </div>
       </div>
       <TextField className="mt-4" value={emoji} placeholder="Emoji" autoFocus onChange={(e) => setEmoji(e.target.value)} aria-label="Emoji" />
@@ -113,12 +113,12 @@ function IconForm({ icon, onClose, onSave }: { icon: ChannelIcon | null; onClose
           }}
         />
         {icon && (
-          <button type="button" className="text-[13px] text-ink-2 hover:text-ink" disabled={busy} onClick={() => void save(null)}>
+          <button type="button" className="text-ui text-ink-2 hover:text-ink" disabled={busy} onClick={() => void save(null)}>
             Remove icon
           </button>
         )}
       </div>
-      {error && <p className="mt-3 text-[13px] text-alert">{error}</p>}
+      {error && <p className="mt-3 text-ui text-alert">{error}</p>}
     </form>
   )
 }

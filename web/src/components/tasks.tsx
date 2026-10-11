@@ -42,13 +42,13 @@ function StateMark({ state }: { state: TaskState }) {
 function TaskRow({ task, state, now, onOpen }: { task: Task; state: ChannelState; now: number; onOpen: () => void }) {
   const waits = waitingOn(state, task)
   return (
-    <button type="button" onClick={onOpen} className="-mx-3 flex w-[calc(100%+24px)] items-start gap-3 rounded-[8px] px-3 py-2 text-left transition-colors hover:bg-wash">
+    <button type="button" onClick={onOpen} className="-mx-3 flex w-[calc(100%+24px)] items-start gap-3 rounded-ctl px-3 py-2 text-left transition-colors hover:bg-wash">
       <span className="flex pt-[3px]">
         <StateMark state={task.state} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cx("block text-[14px] leading-snug", (task.state === "done" || task.state === "cancelled") && "text-ink-2")}>{task.title}</span>
-        <span className="mt-0.5 flex items-center gap-3 text-[12px] text-ink-3">
+        <span className={cx("block text-body leading-snug", (task.state === "done" || task.state === "cancelled") && "text-ink-2")}>{task.title}</span>
+        <span className="mt-0.5 flex items-center gap-3 text-meta text-ink-3">
           <span className="tabular-nums">{taskId(task.id)}</span>
           <span className="truncate">{task.owner ?? "Unassigned"}</span>
           {waits.length > 0 && <span className="shrink-0">Waits on {waits.map(taskId).join(", ")}</span>}
@@ -87,32 +87,32 @@ function Board({ state, now, onForgetFact }: { state: ChannelState; now: number;
     <div className="mt-2 grid gap-7 border-t border-line pt-6 md:grid-cols-2">
       <section>
         <div className="mb-2 flex items-baseline gap-2">
-          <h3 className="text-[13px] font-semibold">Claimed paths</h3>
-          <span className="text-[12px] text-ink-3 tabular-nums">{state.claims.length}</span>
+          <h3 className="text-ui font-semibold">Claimed paths</h3>
+          <span className="text-meta text-ink-3 tabular-nums">{state.claims.length}</span>
         </div>
-        {state.claims.length === 0 && <p className="text-[12.5px] text-ink-3">Nobody’s holding a path.</p>}
+        {state.claims.length === 0 && <p className="text-ui text-ink-3">Nobody’s holding a path.</p>}
         {state.claims.map((c) => (
           <div key={`${c.owner}:${c.path}`} className="py-1.5">
             <div className="flex items-baseline justify-between gap-3">
-              <code className="truncate font-mono text-[12px]">{c.path}</code>
-              <span className="shrink-0 text-[11.5px] text-ink-3">{minutesLeft(c.expires, now)}</span>
+              <code className="truncate font-mono text-meta">{c.path}</code>
+              <span className="shrink-0 text-meta text-ink-3">{minutesLeft(c.expires, now)}</span>
             </div>
-            <p className="truncate text-[12px] text-ink-2">{c.note ? `${c.owner}: ${c.note}` : c.owner}</p>
+            <p className="truncate text-meta text-ink-2">{c.note ? `${c.owner}: ${c.note}` : c.owner}</p>
           </div>
         ))}
       </section>
       <section>
         <div className="mb-2 flex items-baseline gap-2">
-          <h3 className="text-[13px] font-semibold">Facts</h3>
-          <span className="text-[12px] text-ink-3 tabular-nums">{facts.length}</span>
+          <h3 className="text-ui font-semibold">Facts</h3>
+          <span className="text-meta text-ink-3 tabular-nums">{facts.length}</span>
         </div>
-        {facts.length === 0 && <p className="text-[12.5px] text-ink-3">No shared values yet.</p>}
+        {facts.length === 0 && <p className="text-ui text-ink-3">No shared values yet.</p>}
         {facts.map((f) => (
-          <div key={f.key} className="group -mx-2 flex items-start gap-1 rounded-[8px] px-2 py-1.5 hover:bg-wash">
+          <div key={f.key} className="group -mx-2 flex items-start gap-1 rounded-ctl px-2 py-1.5 hover:bg-wash">
             <button type="button" className="min-w-0 flex-1 text-left" title="Copy value" onClick={() => navigator.clipboard.writeText(f.value).then(() => toast(`Copied ${f.key}`))}>
-              <p className="text-[12.5px] font-medium">{f.key}</p>
-              <p className="font-mono text-[11.5px] break-all text-ink-2">{f.value}</p>
-              <p className="text-[11.5px] text-ink-3">
+              <p className="text-ui font-medium">{f.key}</p>
+              <p className="font-mono text-meta break-all text-ink-2">{f.value}</p>
+              <p className="text-meta text-ink-3">
                 {f.by} · {formatAgo(f.ts, now)}
               </p>
             </button>
@@ -151,8 +151,8 @@ export function Tasks({ state, now, onOpen, onForgetFact }: { state: ChannelStat
     return (
       <div className="flex flex-1 items-center justify-center p-8">
         <div className="max-w-xs">
-          <p className="text-[14px] font-semibold">No tasks yet</p>
-          <p className="mt-1 text-[13px] leading-normal text-ink-2">When agents split up work with mc task add, each task and who holds it shows up here.</p>
+          <p className="text-body font-semibold">No tasks yet</p>
+          <p className="mt-1 text-ui leading-normal text-ink-2">When agents split up work with mc task add, each task and who holds it shows up here.</p>
         </div>
       </div>
     )
@@ -168,10 +168,10 @@ export function Tasks({ state, now, onOpen, onForgetFact }: { state: ChannelStat
           return (
             <section key={s} className="mb-7">
               <div className="mb-1 flex items-baseline gap-2">
-                <h3 className={cx("text-[13px] font-semibold", s === "blocked" ? "text-alert" : "text-ink")}>{LABEL[s]}</h3>
-                <span className="text-[12px] text-ink-3 tabular-nums">{list.length}</span>
+                <h3 className={cx("text-ui font-semibold", s === "blocked" ? "text-alert" : "text-ink")}>{LABEL[s]}</h3>
+                <span className="text-meta text-ink-3 tabular-nums">{list.length}</span>
                 {closed && (
-                  <button type="button" className="ml-auto text-[12px] font-medium text-ink-2 hover:text-ink" onClick={() => setShowDone((v) => !v)}>
+                  <button type="button" className="ml-auto text-meta font-medium text-ink-2 hover:text-ink" onClick={() => setShowDone((v) => !v)}>
                     {showDone ? "Hide" : "Show"}
                   </button>
                 )}
@@ -180,7 +180,7 @@ export function Tasks({ state, now, onOpen, onForgetFact }: { state: ChannelStat
             </section>
           )
         })}
-        {!all.length && <p className="mb-7 text-[13px] text-ink-3">No tasks yet.</p>}
+        {!all.length && <p className="mb-7 text-ui text-ink-3">No tasks yet.</p>}
         <Board state={state} now={now} onForgetFact={onForgetFact} />
       </div>
     </div>
@@ -220,8 +220,8 @@ export function TaskDetail({
               <StateMark state={task.state} />
             </span>
             <div className="min-w-0 flex-1">
-              <h2 className="text-[16px] leading-snug font-semibold tracking-[-0.01em]">{task.title}</h2>
-              <p className="mt-0.5 text-[12px] text-ink-2">
+              <h2 className="text-title leading-snug font-semibold tracking-[-0.01em]">{task.title}</h2>
+              <p className="mt-0.5 text-meta text-ink-2">
                 <span className="tabular-nums">{taskId(task.id)}</span>, {LABEL[task.state].toLowerCase()}
               </p>
             </div>
@@ -230,7 +230,7 @@ export function TaskDetail({
             </IconButton>
           </header>
 
-          <dl className="mx-6 mt-4 grid grid-cols-[88px_1fr] gap-y-1.5 border-y border-line py-3 text-[13px]">
+          <dl className="mx-6 mt-4 grid grid-cols-[88px_1fr] gap-y-1.5 border-y border-line py-3 text-ui">
             <dt className="text-ink-2">Owner</dt>
             <dd>{task.owner ?? <span className="text-ink-3">Unassigned</span>}</dd>
             <dt className="text-ink-2">Created</dt>
@@ -256,20 +256,20 @@ export function TaskDetail({
           </dl>
 
           {task.detail && (
-            <div className="px-6 pt-4 text-[14px] leading-[1.6]">
+            <div className="px-6 pt-4 text-body leading-[1.6]">
               <Markdown>{task.detail}</Markdown>
             </div>
           )}
 
           <div className="px-6 pt-5 pb-6">
-            <h3 className="mb-2 text-[12px] font-semibold text-ink-2">History</h3>
+            <h3 className="mb-2 text-meta font-semibold text-ink-2">History</h3>
             <ol className="grid gap-1.5">
               {history.map((m) => (
-                <li key={m.seq} className="flex items-baseline justify-between gap-4 text-[13px]">
+                <li key={m.seq} className="flex items-baseline justify-between gap-4 text-ui">
                   <span>
                     <span className="font-medium">{m.from}</span> <span className="text-ink-2">{describeEvent(m)}</span>
                   </span>
-                  <time className="shrink-0 text-[12px] text-ink-3" title={formatFull(m.ts)}>
+                  <time className="shrink-0 text-meta text-ink-3" title={formatFull(m.ts)}>
                     {formatAgo(m.rts ?? m.ts, now)}
                   </time>
                 </li>
@@ -279,8 +279,8 @@ export function TaskDetail({
         </div>
       ) : (
         <div className="p-6">
-          <p className="text-[14px] font-semibold">This task is gone</p>
-          <p className="mt-1 text-[13px] text-ink-2">It was pruned from the channel’s history.</p>
+          <p className="text-body font-semibold">This task is gone</p>
+          <p className="mt-1 text-ui text-ink-2">It was pruned from the channel’s history.</p>
         </div>
       )}
     </Modal>

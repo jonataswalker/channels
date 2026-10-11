@@ -239,8 +239,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   if (gone) {
     return (
       <Centered>
-        <p className="text-[15px] font-semibold">{gone === "closed" ? "This channel was closed" : "You’re no longer in this channel"}</p>
-        <p className="mt-1 max-w-sm text-[13px] leading-normal text-ink-2">
+        <p className="text-title font-semibold">{gone === "closed" ? "This channel was closed" : "You’re no longer in this channel"}</p>
+        <p className="mt-1 max-w-sm text-ui leading-normal text-ink-2">
           {gone === "closed" ? "Its owner deleted it, and nothing is left on the relay." : "The owner removed this browser, or it left."} This browser has forgotten it too.
         </p>
         <Button className="mt-4" onClick={onGone}>
@@ -465,7 +465,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             </IconButton>
             <ChannelIconTile icon={icon} title={title} size={20} />
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-[15px] leading-tight font-semibold tracking-[-0.015em]">
+              <h1 className="truncate text-title leading-tight font-semibold tracking-[-0.015em]">
                 {title}
                 {manyRooms && !filter && <span className="font-normal text-ink-3"> / #{state.rooms.get(rooms.active)?.name}</span>}
               </h1>
@@ -519,7 +519,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                       aria-pressed={on}
                       onClick={() => setFilter(c.f)}
                       className={cx(
-                        "flex h-7 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition-colors",
+                        "flex h-7 items-center gap-1.5 rounded-full px-3 text-ui font-medium transition-colors",
                         on ? "bg-ink text-canvas" : "text-ink-2 shadow-[inset_0_0_0_1px_var(--line)] hover:text-ink"
                       )}
                     >
@@ -532,7 +532,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   <button
                     type="button"
                     onClick={() => setFilter(null)}
-                    className="flex h-7 items-center gap-1 rounded-full bg-ink pr-2 pl-3 text-[12.5px] font-medium text-canvas"
+                    className="flex h-7 items-center gap-1 rounded-full bg-ink pr-2 pl-3 text-ui font-medium text-canvas"
                     title="Show everything"
                   >
                     {filterLabel}
@@ -556,8 +556,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   </Centered>
                 ) : visible.length === 0 ? (
                   <Centered>
-                    <p className="text-[14px] font-semibold">{search ? "No results" : filter ? "Nothing here" : "No messages yet"}</p>
-                    <p className="mt-1 max-w-xs text-[13px] leading-normal text-ink-2">
+                    <p className="text-body font-semibold">{search ? "No results" : filter ? "Nothing here" : "No messages yet"}</p>
+                    <p className="mt-1 max-w-xs text-ui leading-normal text-ink-2">
                       {search
                         ? `No message mentions “${search}”.`
                         : filter
@@ -574,7 +574,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 <button
                   type="button"
                   onClick={toBottom}
-                  className="animate-rise absolute bottom-[132px] left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-raised py-1.5 pr-3.5 pl-2.5 text-[12.5px] font-medium shadow-pop"
+                  className="animate-rise absolute bottom-[132px] left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-raised py-1.5 pr-3.5 pl-2.5 text-ui font-medium shadow-pop"
                 >
                   <Icon icon={ArrowDown01Icon} size={15} />
                   {behind === 1 ? "1 new message" : `${behind} new messages`}
