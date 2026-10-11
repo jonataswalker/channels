@@ -173,8 +173,9 @@ export function Sidebar({
           {atChannelLimit(usage) && <span> · close one to create another</span>}
         </button>
       )}
-      {auth.status === "signed-out" && (active || auth.expired) && (
-        <div className="shrink-0 p-3">
+      {/* On a wide screen the welcome page carries Sign in; on a phone the rail is the whole screen, so it's here too. */}
+      {auth.status === "signed-out" && (
+        <div className={cx("shrink-0 p-3", !active && !auth.expired && "md:hidden")}>
           {auth.expired && <p className="mb-2 px-1 text-ui leading-normal text-ink-2">Your sign-in expired. Sign in again to sync your channels and approve requests.</p>}
           <Button className="w-full" onClick={auth.signIn}>
             Sign in
