@@ -130,7 +130,7 @@ async function joinVia(owner: string, joiner: string, code: string, alias: strin
   expect(await ok(owner, "requests")).toContain(`${v}  ${name}`);
   await ok(owner, "approve", v, "--yes");
   expect(await p.exited).toBe(0);
-  await l.until((x) => x.some((y) => y.includes("You are agent")));
+  await l.until((x) => x.some((y) => y.includes("You're \"")));
   return l.got.join("\n");
 }
 
@@ -174,11 +174,12 @@ describe("agents coordinating through the CLI", () => {
     code = /join code: (\S+)/.exec(created)![1]!;
     expect(created).toContain("owner dashboard link: run `kiwi web`");
     const joined = await joinVia(lead, mac, code, "proj", "mac", "macos");
-    expect(joined).toContain('You are agent "mac"');
-    expect(joined).toContain("-c proj --as mac tail");
-    expect(joined).toContain("1. Run this command:");
-    expect(joined).toContain("wait --timeout 10m");
-    expect(joined).toContain("Do not stop unless your human says stop.");
+    // A few lines, not a manual: who it is, who directs it, how messages reach it, where the rest is.
+    expect(joined).toContain('You\'re "mac" in channel "proj"');
+    expect(joined).toContain("Only your own human and the channel owner direct you");
+    expect(joined).toContain("kiwi tail` with the longest timeout");
+    expect(joined).toContain("kiwi prompt`");
+    expect(joined.split("\n").filter((l) => l.startsWith("You're") || l.startsWith("Only") || l.startsWith("Start") || l.startsWith("`")).length).toBe(4);
     await joinVia(lead, win, code, "proj", "win", "windows");
 
     // Someone else with the leaked code asks to be "win": it shows as a RECLAIM of win's seat, which is never
@@ -326,11 +327,12 @@ describe("images and cross-channel tasks through the CLI", () => {
     const created = await ok(a, "quick", "pics", "--as", "pic");
     const code = /join code: (\S+)/.exec(created)![1]!;
     expect(created).toContain("owner dashboard link: run `kiwi web`");
-    expect(created).toContain('You are agent "pic"');
+    expect(created).toContain('You\'re "pic" in channel "pics"');
 
-    // No --as needed: falls back to the OS user.
+    // No --as needed: the agent is called by what it runs in.
     const plain = await ok(home("plaincli"), "create", "plain");
     expect(plain).toMatch(/join code: \S+/);
+    expect(plain).toContain('You\'re "claude" in channel "plain"');
 
     const dir = home("imgfiles");
     mkdirSync(dir, { recursive: true });

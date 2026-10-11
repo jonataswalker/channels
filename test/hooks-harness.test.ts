@@ -337,3 +337,19 @@ test("a corrupt harness file does not fail join", () => {
   expect(existsSync(join(dirs.gemini, "settings.json"))).toBe(true);
   expect(readFileSync(join(dirs.codex, "hooks.json"), "utf8")).toBe("{");
 });
+
+test("the listener: installed from a Claude Code that runs it, kept by an install that can't tell, removed by an older one", () => {
+  hideEnv(["AI_AGENT", "CLAUDE_CODE_EXECPATH", "CLAUDECODE"]);
+  setEnv({ CLAUDE_CONFIG_DIR: scratch("kiwi-listen-claude-") });
+  const has = () => readFileSync(join(process.env.CLAUDE_CONFIG_DIR!, "settings.json"), "utf8").includes(" hook listen # kiwi");
+  setEnv({ CLAUDECODE: "1", AI_AGENT: "claude-code_2-1-296_agent" });
+  installHooks();
+  expect(has()).toBe(true);
+  // kiwi setup / hooks install in a plain terminal: no version to go by, so the listener stays.
+  hideEnv(["AI_AGENT", "CLAUDECODE"]);
+  installHooks();
+  expect(has()).toBe(true);
+  setEnv({ CLAUDECODE: "1", AI_AGENT: "claude-code_2-1-100_agent" });
+  installHooks();
+  expect(has()).toBe(false);
+});

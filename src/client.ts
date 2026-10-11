@@ -890,7 +890,10 @@ export class Channel {
       yield* this.ownerOnly();
       const { requests } = yield* this.request<{ requests: RequestRow[] }>("/requests", {}, { v: 2 });
       const out: JoinRequest[] = [];
-      const seats = requests.length ? (yield* this.fx.members()).filter((m) => m.active && !m.unverified) : [];
+      const everyone = requests.length ? yield* this.fx.members() : [];
+      const seats = everyone.filter((m) => m.active && !m.unverified);
+      // Names already offered to earlier requests in this list count as taken, so two agents that didn't pick one aren't offered the same.
+      const offered: Pick<Member, "name">[] = [...everyone];
       for (const r of requests) {
         if (!(yield* Effect.promise(() => verify({ room: this.roomId, pk: r.pk, xpk: r.xpk, box: r.box, ts: r.ts, commit: r.commit, sig: r.sig })))) continue;
         const raw = yield* Effect.promise(() => openFrom(this.identity.xsk!, r.box, requestInfo(this.roomId)));
@@ -900,7 +903,12 @@ export class Channel {
         } catch {}
         // An agent asking under a name a current member has: approving would move their seat, so a person
         // checks it, never the budget. (A person is admitted under their account's handle, whatever they typed.)
-        const seat = r.kind === "human" ? undefined : seats.find((m) => nameKey(m.name) === nameKey(String(info.name ?? "")));
+        // An agent that didn't pick its name is offered a free one like it instead: never a RECLAIM.
+        const asked = inlineText(info.name, 40);
+        // The base it asked under, without a suffix its own machine added ("claude-2" → "claude"), so the next free one is claude-3, not claude-2-2.
+        const auto = r.kind !== "human" && info.auto === true ? (NAME_RE.test(asked) ? asked.replace(/-\d+$/, "") || asked : "agent") : undefined;
+        if (auto) offered.push({ name: (info.name = freeAgentName(auto, offered)) });
+        const seat = r.kind === "human" || auto ? undefined : seats.find((m) => nameKey(m.name) === nameKey(String(info.name ?? "")));
         const reclaims = seat ? { name: seat.name, pk: seat.pk, kind: seat.kind, owner: seat.owner, ...(seat.sponsor ? { sponsor: seat.sponsor } : {}) } : undefined;
         // A half that doesn't check out means the relay tampered with the request: leave it out.
         const check = yield* this.codeCheck(r, reclaims ? undefined : opts.budget).pipe(Effect.catchCause(() => Effect.succeed(null)));
@@ -920,7 +928,8 @@ export class Channel {
           ...check,
           sponsoredBy: r.sponsorUser ? { user: r.sponsorUser, name: inlineText(r.sponsorName, 80) || r.sponsorUser, email: r.sponsorEmail ?? null } : null,
           ...(reclaims ? { reclaims } : {}),
-          ...(info.reclaim === true ? { reclaim: true } : {}),
+          ...(info.reclaim === true && !auto ? { reclaim: true } : {}),
+          ...(auto ? { askedAs: auto } : {}),
         });
       }
       return out;
@@ -941,6 +950,11 @@ export class Channel {
       // A person is admitted under a handle made from their signed-in account, not one they typed, so
       // nobody can ask to join as "bob-smith". (Their browser adopts it when it learns it's in.)
       if (kind === "human" && req.sponsoredBy && !as?.name) as = { ...as, name: yield* this.freeHandle(handleFor(req.sponsoredBy.name, req.sponsoredBy.email ?? undefined)) };
+      // An agent that didn't pick its name: the one it was offered, or the next free one if that went meanwhile.
+      if (kind === "agent" && req.askedAs && !as?.name) {
+        const members = yield* this.fx.members();
+        as = { ...as, name: freeAgentName(req.name, members) === req.name ? req.name : freeAgentName(req.askedAs, members) };
+      }
       yield* this.assertNamesFree([as?.name ?? req.name]);
       const sponsor = req.sponsoredBy ? { ...req.sponsoredBy, ...(kind === "human" ? { handle: as?.name ?? req.name } : sponsorHandle ? { handle: sponsorHandle } : {}) } : undefined;
       const info: MemberInfo = {

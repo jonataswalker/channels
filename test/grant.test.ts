@@ -4,7 +4,7 @@
 // seat's grant, its link to the owner, and a daily limit.
 
 import { afterAll, afterEach, beforeAll, describe, expect, setDefaultTimeout, setSystemTime, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { signRequest } from "../src/auth.ts";
@@ -421,5 +421,46 @@ describe("kiwi join on a seated computer", () => {
     expect(status).toContain("bot · key");
     expect(status).toContain("via Build box");
     expect(status).not.toContain("linked computer");
+  });
+
+  test("without --as: agents in one checkout are let in as claude, then claude-2, and each acts as itself", async () => {
+    const relay = relayAt();
+    const home = mkdtempSync(join(tmpdir(), "kiwi-grant-auto-"));
+    const claudeDir = mkdtempSync(join(tmpdir(), "kiwi-grant-claude-"));
+    dirs.push(home, claudeDir);
+    const machine = await generateIdentity("machine");
+    writeFileSync(join(home, "machine.json"), JSON.stringify({ identity: machine, label: "Build box", relay }));
+    const owner = await generateIdentity("human");
+    const made = await Channel.create(relay, owner, { name: "human" });
+    await new Channel(made.access, relay, owner).seatComputer({ pk: machine.pk, xpk: machine.xpk!, label: "Build box" });
+
+    // Two live Claude Code sessions (each a running process) in the same folder.
+    const procs = [Bun.spawn(["sleep", "120"]), Bun.spawn(["sleep", "120"])];
+    const session = (i: number) => ({ CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: `s${i}`, CLAUDE_PID: String(procs[i]!.pid) });
+    const kiwi = async (env: Record<string, string>, ...args: string[]) => {
+      const p = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], {
+        cwd: home,
+        env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1", CLAUDE_CONFIG_DIR: claudeDir, ...env },
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+      if ((await p.exited) !== 0) throw new Error(`kiwi ${args.join(" ")}: ${err}`);
+      return out;
+    };
+    try {
+      expect(await kiwi(session(0), "join", made.code)).toContain('You\'re "claude"');
+      const second = await kiwi(session(1), "join", made.code);
+      expect(second).toContain('You\'re "claude-2"');
+      // A name it didn't pick going to the next free one isn't news worth a line.
+      expect(second).not.toContain("is taken here");
+      expect(await kiwi(session(1), "send", "hello from two")).toMatch(/^sent #\d+/);
+      expect(await kiwi(session(0), "log")).toContain("claude-2 → all: hello from two");
+      const room = readdirSync(join(home, "identities"))[0]!;
+      expect(readdirSync(join(home, "identities", room)).sort()).toEqual(["claude-2.json", "claude.json"]);
+    } finally {
+      for (const p of procs) p.kill();
+    }
   });
 });
