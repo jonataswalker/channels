@@ -29,6 +29,7 @@ import { InfoPanel } from "./info-panel"
 import { Button, IconButton, Monogram, Spinner, TextField, errorText, toast } from "./kit"
 import { Bubble, EventGroup, EventRow, TimeMark, isAgent, standsAlone, type ThreadSummary } from "./message"
 import { NeedsYou, type JoinedVia } from "./needs-you"
+import { CoordinatorFocus, FocusButton, loadMainView, saveMainView, type MainView, type TeamPart } from "./hero"
 import { TaskPage } from "./task-page"
 import { Notes, StateMark, TaskCard, Tasks } from "./tasks"
 import { ThreadPanel } from "./thread"
@@ -122,6 +123,9 @@ const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Dat
 const STAMP_GAP = 15 * 60_000
 
 /** The places a task's own events go, summed up in main as one line each: made, and a change of state. */
+/** Up close with a coordinator nobody has spoken to yet: a few ways to begin, a tap from the field. */
+const STARTERS = ["What's everyone working on?", "Plan the next release with the team", "Review the open pull requests"]
+
 const summarised = (m: Message) => m.ev?.op === "task.add" || (m.ev?.op === "task.update" && !!m.ev.state)
 
 export function Conversation({ member, onBack, onGone }: { member: StoredMember; onBack: () => void; onGone: () => void }) {
@@ -246,6 +250,31 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     setReplyTo(null)
     setSearch(null)
   }, [])
+
+  // ---------- coordinator mode, up close: Main opens on the coordinator's face and its last words ----------
+  const [mainView, setMainViewState] = useState<MainView>(() => loadMainView(roomId))
+  const setMainView = useCallback(
+    (v: MainView) => {
+      setMainViewState(v)
+      saveMainView(roomId, v)
+    },
+    [roomId]
+  )
+  // Its last words to you, and yours to it, in Main (replies included: up close there are no threads).
+  const dialogue = useMemo(() => {
+    if (!coordinator) return { theirs: undefined, mine: undefined }
+    let theirs: Message | undefined
+    let mine: Message | undefined
+    for (const m of messages) {
+      if (m.kind === "event" || ignored(state.trust.get(m.seq)) || placeKey(placeOf.get(m.seq) ?? MAIN) !== "main") continue
+      if (m.from === coordinator && (!m.to?.length || m.to.includes(me) || m.to.includes("*"))) theirs = m
+      else if (m.from === me) mine = m
+    }
+    return { theirs, mine }
+  }, [coordinator, messages, state.trust, placeOf, me])
+  const waiting = !!dialogue.mine && (!dialogue.theirs || dialogue.mine.seq > dialogue.theirs.seq)
+  const [needsSignal, setNeedsSignal] = useState(0)
+  const [starter, setStarter] = useState<{ text: string; n: number } | undefined>(undefined)
 
   // What's new where: the newest message seen in each place, kept by this browser.
   const seen = useSeen(roomId)
@@ -517,11 +546,13 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         ? "Reconnecting…"
         : (online.size ? `${memberCount} members, ${online.size} online` : `${memberCount} ${memberCount === 1 ? "member" : "members"}`) +
           (state.mode.coordinatorOnly ? (state.coordinator ? " · coordinator mode" : " · coordinator mode, no coordinator yet") : "")
+  // Up close, the coordinator's own line says what's going on; the header just names the channel.
+  const focusView = !!coordinator && mainView === "focus" && search === null && !board && openTask === null
   // What's going on, in one live line under the name: who coordinates, who's working, what needs you.
   const working = active.filter((m) => isAgent(m) && memberLoad(state, m.name, now).current.length > 0).length
   const needsMe = escalations.length + reviews.length + (isOwner ? requests.length : 0)
   const headline =
-    connection === "connecting" || connection === "reconnecting"
+    connection === "connecting" || connection === "reconnecting" || (focusView && place.kind === "main")
       ? subtitle
       : place.kind === "task"
         ? task
@@ -548,10 +579,46 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       }
     : undefined
 
+  // Up close, in one quiet line: who it coordinates, what's in progress, what needs you. Each part opens it.
+  const focus = !!coordinator && hereKey === "main" && mainView === "focus" && search === null && !board && openTask === null
+  const doing = [...state.tasks.values()].filter((t) => t.state === "doing")
+  const agentsHere = active.filter((m) => isAgent(m) && m.name !== coordinator).length
+  const team: TeamPart[] = [
+    {
+      key: "agents",
+      label: agentsHere ? `Coordinating ${agentsHere === 1 ? "1 agent" : `${agentsHere} agents`}` : "No agents yet",
+      onClick: () => (setInfo(true), setThreadRoot(null)),
+    },
+    ...(doing.length === 1
+      ? [{ key: "doing", label: `${taskId(doing[0]!.id)} in progress`, onClick: () => go({ kind: "task", task: doing[0]!.id }) }]
+      : doing.length > 1
+        ? [{ key: "doing", label: `${doing.length} tasks in progress`, onClick: () => setBoard(true) }]
+        : []),
+    ...(needsMe ? [{ key: "needs", label: `${needsMe} ${needsMe === 1 ? "needs" : "need"} you`, tone: "decide" as const, onClick: () => setNeedsSignal((n) => n + 1) }] : []),
+  ]
+  const needsYou = (variant: "banner" | "stack") => (
+    <NeedsYou
+      variant={variant}
+      openSignal={variant === "stack" ? needsSignal : 0}
+      now={now}
+      roomId={roomId}
+      escalations={escalations}
+      reviews={reviews}
+      joinedVia={joinedVia}
+      onDismissJoined={() => setJoinedVia(new Map())}
+      nameOf={nameOf}
+      onReply={async (m, text) => void (await send(text, { to: [m.from], re: [m.seq], kind: "msg" }))}
+      onApproveTask={async (t: Task) => void (await send(`${taskId(t.id)} done`, { kind: "event", ev: { op: "task.update", task: t.id, state: "done", note: "approved" }, ...(t.owner ? { to: [t.owner] } : {}) }))}
+      onSendBack={async (t: Task, why: string) => void (await send(`${taskId(t.id)} doing`, { kind: "event", ev: { op: "task.update", task: t.id, state: "doing", note: why }, ...(t.owner ? { to: [t.owner] } : {}) }))}
+      onOpenTask={(id) => go({ kind: "task", task: id })}
+      onJump={(seq) => (setMainView("conversation"), jump(seq))}
+    />
+  )
+
   // The face beside the name: the coordinator for Main, the task's state for a task, the other one for a direct conversation.
   const placeFace =
     place.kind === "main" ? (
-      coord ? (
+      coord && !focus ? (
         <CoordinatorAvatar size={32} mood={mood} live seed={0.7} />
       ) : (
         <ChannelIconTile icon={icon} title={title} size={32} />
@@ -695,6 +762,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 </span>
               </button>
               <span className="flex-1" />
+              {/* The whole conversation, and back to the coordinator up close. */}
+              {coordinator && hereKey === "main" && !focus && !board && openTask === null && <FocusButton name={nameOf(coordinator)} onClick={() => (setMainView("focus"), setSearch(null))} />}
               {/* The owner's stop button: every agent, at once. */}
               {hold &&
                 (!quiet || state.hold) &&
@@ -737,78 +806,81 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             <Tasks state={state} now={now} onOpen={(id) => go({ kind: "task", task: id })} />
           ) : (
             <>
-              {search !== null && (
-                <div className="mx-auto w-full max-w-[792px] shrink-0 px-4 pt-1">
-                  <TextField
-                    autoFocus
-                    value={search}
-                    placeholder={place.kind === "main" ? "Search this channel" : `Search ${placeTitle}`}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onKeyDown={(e) => e.key === "Escape" && setSearch(null)}
-                    className="rounded-full"
-                  />
-                </div>
-              )}
-
-              <div
-                ref={scroller}
-                className="flex-1 overflow-y-auto"
-                onScroll={(e) => {
-                  const el = e.currentTarget
-                  atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-                  if (atBottom.current && behind) setBehind(0)
-                }}
-              >
-                <div className="relative mx-auto w-full max-w-[792px] px-4 pb-6">
-                  {/* What needs a person: at the top of the main conversation, as system cards. */}
-                  {hereKey === "main" && (
-                    <NeedsYou
-                      now={now}
-                      roomId={roomId}
-                      escalations={escalations}
-                      reviews={reviews}
-                      joinedVia={joinedVia}
-                      onDismissJoined={() => setJoinedVia(new Map())}
-                      nameOf={nameOf}
-                      onReply={async (m, text) => void (await send(text, { to: [m.from], re: [m.seq], kind: "msg" }))}
-                      onApproveTask={async (t: Task) => void (await send(`${taskId(t.id)} done`, { kind: "event", ev: { op: "task.update", task: t.id, state: "done", note: "approved" }, ...(t.owner ? { to: [t.owner] } : {}) }))}
-                      onSendBack={async (t: Task, why: string) => void (await send(`${taskId(t.id)} doing`, { kind: "event", ev: { op: "task.update", task: t.id, state: "doing", note: why }, ...(t.owner ? { to: [t.owner] } : {}) }))}
-                      onOpenTask={(id) => go({ kind: "task", task: id })}
-                      onJump={jump}
+              {focus && coordinator ? (
+                <CoordinatorFocus
+                  name={nameOf(coordinator)}
+                  mood={mood}
+                  coordinatorSaid={dialogue.theirs}
+                  youSaid={dialogue.mine}
+                  waiting={waiting}
+                  team={team}
+                  needs={needsMe || joinedVia.size ? needsYou("stack") : null}
+                  starters={STARTERS}
+                  onStarter={(text) => setStarter((was) => ({ text, n: (was?.n ?? 0) + 1 }))}
+                  onShowConversation={() => setMainView("conversation")}
+                  now={now}
+                />
+              ) : (
+                <>
+                {search !== null && (
+                  <div className="mx-auto w-full max-w-[792px] shrink-0 px-4 pt-1">
+                    <TextField
+                      autoFocus
+                      value={search}
+                      placeholder={place.kind === "main" ? "Search this channel" : `Search ${placeTitle}`}
+                      onChange={(e) => setSearch(e.target.value)}
+                      onKeyDown={(e) => e.key === "Escape" && setSearch(null)}
+                      className="rounded-full"
                     />
-                  )}
-                  {connection === "connecting" && messages.length === 0 ? (
-                    <Centered>
-                      <Spinner />
-                    </Centered>
-                  ) : hereKey === "main" && noAgents && !search ? (
-                    <>
-                      <AddAgent code={member.code} isOwner={isOwner} />
-                      {/* A brand-new channel's own setup lines (coordinator mode on) aren't worth reading yet. */}
-                      {!quiet && rows}
-                    </>
-                  ) : visible.length === 0 && !task ? (
-                    <Centered>
-                      <p className="text-body font-semibold">{search ? "No results" : "No messages yet"}</p>
-                      <p className="mt-1 max-w-xs text-ui leading-normal text-ink-2">
-                        {search ? `No message here mentions “${search}”.` : place.kind === "dm" ? "What these two say to each other shows up here." : "What’s said here shows up the moment it’s sent."}
-                      </p>
-                    </Centered>
-                  ) : (
-                    rows
-                  )}
-                </div>
-              </div>
+                  </div>
+                )}
 
-              {behind > 0 && (
-                <button
-                  type="button"
-                  onClick={toBottom}
-                  className="animate-rise absolute bottom-20 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-raised py-1.5 pr-3.5 pl-2.5 text-ui font-medium text-accent-text shadow-pop"
+                <div
+                  ref={scroller}
+                  className="flex-1 overflow-y-auto"
+                  onScroll={(e) => {
+                    const el = e.currentTarget
+                    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+                    if (atBottom.current && behind) setBehind(0)
+                  }}
                 >
-                  <Icon icon={ArrowDown01Icon} size={15} />
-                  {behind === 1 ? "1 new message" : `${behind} new messages`}
-                </button>
+                  <div className="relative mx-auto w-full max-w-[792px] px-4 pb-6">
+                    {/* What needs a person: at the top of the main conversation, as system cards. */}
+                    {hereKey === "main" && needsYou("banner")}
+                    {connection === "connecting" && messages.length === 0 ? (
+                      <Centered>
+                        <Spinner />
+                      </Centered>
+                    ) : hereKey === "main" && noAgents && !search ? (
+                      <>
+                        <AddAgent code={member.code} isOwner={isOwner} />
+                        {/* A brand-new channel's own setup lines (coordinator mode on) aren't worth reading yet. */}
+                        {!quiet && rows}
+                      </>
+                    ) : visible.length === 0 && !task ? (
+                      <Centered>
+                        <p className="text-body font-semibold">{search ? "No results" : "No messages yet"}</p>
+                        <p className="mt-1 max-w-xs text-ui leading-normal text-ink-2">
+                          {search ? `No message here mentions “${search}”.` : place.kind === "dm" ? "What these two say to each other shows up here." : "What’s said here shows up the moment it’s sent."}
+                        </p>
+                      </Centered>
+                    ) : (
+                      rows
+                    )}
+                  </div>
+                </div>
+
+                {behind > 0 && (
+                  <button
+                    type="button"
+                    onClick={toBottom}
+                    className="animate-rise absolute bottom-20 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-raised py-1.5 pr-3.5 pl-2.5 text-ui font-medium text-accent-text shadow-pop"
+                  >
+                    <Icon icon={ArrowDown01Icon} size={15} />
+                    {behind === 1 ? "1 new message" : `${behind} new messages`}
+                  </button>
+                )}
+                </>
               )}
 
               {mayWrite ? (
@@ -822,6 +894,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   disabled={connection === "connecting"}
                   route={coordinator && place.kind === "main" ? { coordinator, label: nameOf(coordinator), view: "coordinator" } : undefined}
                   extra={extra}
+                  seed={focus ? starter : undefined}
+                  onEmptyUp={focus ? () => setMainView("conversation") : undefined}
                   placeholder={
                     place.kind === "main"
                       ? state.coordinator && state.coordinator !== me

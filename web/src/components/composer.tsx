@@ -44,6 +44,10 @@ interface Props {
   extra?: Pick<SendOptions, "to" | "task" | "dm">
   /** Placeholder for this conversation ("Message T12", "Message win"). */
   placeholder?: string
+  /** Text to put in the field (a suggested first message); a new `n` puts it in again. */
+  seed?: { text: string; n: number }
+  /** ↑ in an empty field, when nothing else wants it (the coordinator's focus view: back to the conversation). */
+  onEmptyUp?: () => void
 }
 
 /** Who a message is for: the people @mentioned at its start. */
@@ -52,7 +56,7 @@ function recipients(body: string, names: Set<string>): string[] {
   return [...lead.matchAll(/@([\p{L}\p{N}_.-]+)/gu)].map((m) => m[1]!).filter((n) => names.has(n))
 }
 
-export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route, extra, placeholder }: Props) {
+export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route, extra, placeholder, seed, onEmptyUp }: Props) {
   const [body, setBody] = useState("")
   const [files, setFiles] = useState<{ name: string; mime: string; data: string }[]>([])
   const [dropping, setDropping] = useState(false)
@@ -63,6 +67,20 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
   } | null>(null)
   const area = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
+  // A suggestion lands in the field as you'd typed it (set while rendering, as React keeps state in step with a prop).
+  const [placed, setPlaced] = useState(seed)
+  if (seed !== placed) {
+    setPlaced(seed)
+    if (seed) setBody(seed.text)
+  }
+  useEffect(() => {
+    if (!seed) return
+    requestAnimationFrame(() => {
+      const el = area.current
+      el?.focus()
+      el?.setSelectionRange(seed.text.length, seed.text.length)
+    })
+  }, [seed])
 
   const others = useMemo(() => people.filter((p) => p.name !== me), [people, me])
   const names = useMemo(() => new Set(others.map((p) => p.name)), [others])
@@ -320,6 +338,10 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
                     e.stopPropagation()
                     return setMention(null)
                   }
+                }
+                if (e.key === "ArrowUp" && onEmptyUp && !body && !files.length) {
+                  e.preventDefault()
+                  return onEmptyUp()
                 }
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault()

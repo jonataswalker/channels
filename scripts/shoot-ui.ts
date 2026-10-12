@@ -155,6 +155,8 @@ try {
     await joining
   }
   await admit(["kiwi", "--as", "atlas", "--role", "backend"])
+  // atlas listens, as a coordinator does: online, so its face is awake.
+  void bot("tail").catch(() => {})
   // atlas coordinates: people talk with it, and the channel is in coordinator mode from the start.
   const details = () => owner.getByRole("button", { name: /^Details:/ })
   await details().click()
@@ -165,6 +167,10 @@ try {
     await owner.getByText(/People talk with/).first().waitFor({ timeout: 15000 })
   })
   await owner.getByRole("button", { name: "Close details" }).click()
+  // With a coordinator, Main opens on it up close; seed in the whole conversation (shot up close below).
+  const showConversation = owner.getByRole("button", { name: "Show conversation" })
+  const focusOn = owner.getByRole("button", { name: "Focus" })
+  await showConversation.click({ timeout: 10000 })
   await admit(["kiwi-w", "--as", "win", "--role", "frontend"])
   // The passkey offer waits for an agent's first card; save the channels to it, so the list stays quiet.
   const offer = owner.getByRole("button", { name: "Save channels to a passkey" })
@@ -204,6 +210,26 @@ try {
   await owner.keyboard.press("Enter")
   await owner.waitForTimeout(400)
   await owner.getByRole("button", { name: "Close thread" }).click()
+  await bot("send", "Shipping 0.8.12 now. win is running the cold runs on the canary first; I'll post the release notes here when it's out, and flag anything that needs your call.")
+  // Up close, while nothing needs you: the coordinator's face and its last words.
+  if (wanted("17-hero")) {
+    await focusOn.click()
+    await owner.getByText(/Shipping 0\.8\.12 now/).first().waitFor({ timeout: 15000 })
+    // Its listener is on by now: awake, not away.
+    await owner.getByText(/\d+ online/).first().waitFor({ timeout: 60000 }).catch(() => {})
+    for (const theme of (["dark", "light"] as const).filter((t) => !themeOnly || t === themeOnly))
+      for (const [vp, size] of ([["narrow", NARROW], ["wide", WIDE]] as const).filter(([v]) => !wideOnly || v === "wide")) {
+        await owner.setViewportSize(size)
+        await setTheme(owner, theme)
+        await owner.getByRole("region", { name: /^Up close with/ }).waitFor({ timeout: 10000 })
+        // Who's listening arrives a moment after a reload: wait for atlas to be awake.
+        await owner.getByText(/\d+ online/).first().waitFor({ timeout: 20000 }).catch(() => console.log("atlas still away"))
+        await owner.waitForTimeout(1600)
+        await shoot(owner, `${theme}-${vp}`, "17-hero")
+      }
+    await owner.setViewportSize(WIDE)
+    await showConversation.click()
+  }
   // Work waiting on a person's review, and a decision an agent hands to its person: both under Needs you.
   const reviewed = /T\d+/.exec(await win("task", "add", "Cache sealed history in the browser", "--owner", "win", "--review", "any"))?.[0] ?? "T0"
   await win("task", "review", reviewed, "reload fetches only what is new")
@@ -302,6 +328,12 @@ try {
       }, async () => {
         if (narrow) await owner.goto(channel)
       })
+      // Up close, with things that need you under its words.
+      await shoot(owner, tag, "18-hero-needs", async () => {
+        await focusOn.click()
+        await owner.getByRole("region", { name: /^Up close with/ }).waitFor()
+        await owner.waitForTimeout(1600)
+      }, () => showConversation.click())
       await owner.goto(fresh)
       await owner.getByRole("region", { name: "Add an agent" }).waitFor({ timeout: 10000 }).catch(() => {})
       await shoot(owner, tag, "16-add-agent")

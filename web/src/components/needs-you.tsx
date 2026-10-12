@@ -33,6 +33,8 @@ export function NeedsYou({
   onSendBack,
   onOpenTask,
   onJump,
+  variant = "banner",
+  openSignal = 0,
 }: {
   now: number
   roomId: string
@@ -48,14 +50,26 @@ export function NeedsYou({
   onSendBack: (t: Task, why: string) => Promise<void>
   onOpenTask: (id: number) => void
   onJump: (seq: number) => void
+  /**
+   * banner: a slim line at the top of the conversation that opens a popover. stack: the first two as
+   * cards, the rest one tap away (the coordinator's focus view, under its words).
+   */
+  variant?: "banner" | "stack"
+  /** A new value opens it (the focus view's "needs you" link). */
+  openSignal?: number
 }) {
   const { p } = useControls()
   const [open, setOpen] = useState(false)
+  const [signal, setSignal] = useState(openSignal)
+  if (openSignal !== signal) {
+    setSignal(openSignal)
+    if (openSignal) setOpen(true)
+  }
   const box = useRef<HTMLElement>(null)
   const requests = p.isOwner ? p.requests : []
   // Closes on a click elsewhere, or Escape, like any popover.
   useEffect(() => {
-    if (!open) return
+    if (!open || variant === "stack") return
     const away = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false)
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false)
     document.addEventListener("pointerdown", away)
@@ -64,7 +78,7 @@ export function NeedsYou({
       document.removeEventListener("pointerdown", away)
       document.removeEventListener("keydown", esc)
     }
-  }, [open])
+  }, [open, variant])
   const items: { key: string; summary: string; node: ReactNode }[] = [
     ...requests.map((r) => ({ key: `r${r.id}`, summary: `${r.name} wants to join`, node: <RequestItem r={r} roomId={roomId} now={now} /> })),
     ...escalations.map((m) => ({ key: `e${m.seq}`, summary: `${nameOf(m.from)} needs a decision`, node: <EscalationItem m={m} now={now} nameOf={nameOf} onReply={onReply} onJump={(seq) => (setOpen(false), onJump(seq))} /> })),
@@ -87,6 +101,24 @@ export function NeedsYou({
   ]
   if (!items.length) return null
   const n = items.length
+  if (variant === "stack") {
+    const shown = open ? items : items.slice(0, 2)
+    return (
+      <section ref={box} aria-label="Needs you" className="flex flex-col gap-2">
+        {requests.some((r) => r.check === "unchecked") && <p className="text-meta leading-normal text-ink-3">{TOO_MANY_REQUESTS}</p>}
+        {shown.map((i) => (
+          <div key={i.key} className="animate-rise rounded-card bg-field px-4 py-3">
+            {i.node}
+          </div>
+        ))}
+        {n > shown.length && (
+          <button type="button" onClick={() => setOpen(true)} className="self-start rounded-full px-2 py-1 text-meta font-medium text-ink-2 transition-colors hover:bg-wash hover:text-ink">
+            and {n - shown.length} more
+          </button>
+        )}
+      </section>
+    )
+  }
   return (
     <section ref={box} aria-label="Needs you" className="sticky top-0 z-20 bg-canvas pt-3 pb-2">
       <button

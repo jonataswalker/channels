@@ -387,6 +387,11 @@ try {
       })
     )
 
+  // With a coordinator, Main opens on it up close; the whole conversation is one control away.
+  const upClose = page.getByRole("region", { name: /^Up close with/ })
+  const showConversation = page.getByRole("button", { name: "Show conversation" })
+  if (await showConversation.isVisible().catch(() => false)) await showConversation.click()
+
   // A new channel starts in coordinator mode; one click makes bot the coordinator, another takes it back.
   at = "Make coordinator"
   // An event line says it in a few words; its tooltip has the whole of it.
@@ -396,6 +401,30 @@ try {
     await page.getByRole("menuitem", { name: "Make coordinator" }).click()
   })
   await panel.getByText(/People talk with .*, the coordinator/).waitFor({ timeout: 15000 })
+  console.log(`ok  ${at}`)
+
+  // Up close: the coordinator's face and its last words; what you say shows as "You", then its answer.
+  at = "coordinator up close"
+  await panel.getByRole("button", { name: "Close details" }).click()
+  await page.getByRole("button", { name: "Focus" }).click()
+  await upClose.waitFor({ timeout: 10000 })
+  await page.getByRole("textbox", { name: "Message" }).fill("smoke, up close")
+  await page.keyboard.press("Enter")
+  await upClose.getByText("smoke, up close").waitFor({ timeout: 10000 })
+  await upClose.getByText(/is on it/).first().waitFor({ timeout: 10000 })
+  await kiwi(["-c", "smoke", "--as", "bot", "send", "On it: the smoke run is green, and nothing needs you right now."])
+  await upClose.getByText(/nothing needs you right now/).waitFor({ timeout: 15000 })
+  // Back to the whole conversation, and up close again, from where each says so.
+  await showConversation.click()
+  await upClose.waitFor({ state: "hidden" })
+  await page.getByText("smoke, up close", { exact: true }).first().waitFor()
+  await page.getByRole("button", { name: "Focus" }).click()
+  await upClose.waitFor()
+  await showConversation.click()
+  console.log(`ok  ${at}`)
+
+  at = "No longer coordinator"
+  await inDetails(async () => {})
   await panel.getByRole("button", { name: "More for bot" }).click()
   await page.getByRole("menuitem", { name: "No longer coordinator" }).click()
   // The mode goes off first (so nobody re-appoints in between), then the role: the role is the newest line.
