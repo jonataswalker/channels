@@ -319,7 +319,8 @@ try {
   await page.getByRole("button", { name: "Channel menu" }).click()
   await page.getByRole("menuitem", { name: "Use in a terminal…" }).click()
   const pairDialog = page.getByRole("dialog").filter({ hasText: "Use in a terminal" })
-  const pairCmd = (await pairDialog.getByText(/^kiwi tui mc2-/).innerText()).trim()
+  // The whole command: the box splits it into one span per flag.
+  const pairCmd = (await pairDialog.locator("code").filter({ hasText: /^kiwi tui mc2-/ }).innerText({ timeout: 10000 })).replace(/\s+/g, " ").trim()
   const termHome = join(data, "terminal")
   let termOut = ""
   // KIWI_RELAY too: whatever the command says, this never reaches a relay but the local one.

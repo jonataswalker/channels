@@ -26,6 +26,7 @@ import {
   admitsNow,
   answerPair,
   askPair,
+  openPairSlot,
   pairNonceFromBrowser,
   pairStatus,
   pendingPairs,
@@ -307,7 +308,7 @@ const routes: RoomRoute[] = [
     guard: "requester", // the terminal's one-time key, which isn't a member
     run: ({ me: pk }) =>
       Effect.gen(function* () {
-        const { id, fresh } = yield* askPair(pk, yield* json<{ xpk?: unknown; commit?: unknown; label?: unknown }>());
+        const { id, fresh } = yield* askPair(pk, yield* json<{ xpk?: unknown; commit?: unknown; label?: unknown; slot?: unknown }>());
         return { data: { id }, fx: fresh ? { broadcast: [frame({ t: "request" })] } : undefined };
       }),
   },
@@ -334,15 +335,25 @@ const routes: RoomRoute[] = [
     guard: "requester", // signed by the requester's key, which isn't a member yet
     run: ({ me: pk }, m) => Effect.map(requestStatus(m[1]!, pk), (data) => ({ data })),
   },
-  { method: "GET", path: "/pairs", guard: "member", run: () => Effect.map(pendingPairs(), (pairs) => ({ data: { pairs } })) },
+  { method: "POST", path: "/pairs/slots", guard: "member", run: ({ me }) => Effect.map(openPairSlot(me), (data) => ({ data })) },
+  {
+    method: "GET",
+    path: "/pairs",
+    guard: "member", // with the slot only the opening browser knows
+    run: () =>
+      Effect.gen(function* () {
+        const { url } = yield* Request_;
+        return { data: { pairs: yield* pendingPairs(url.searchParams.get("slot")) } };
+      }),
+  },
   {
     method: "POST",
     path: new RegExp(`^/pairs/${ID}/nonce$`),
     guard: "member", // a person's browser, opening the pairing
     run: (_, m) =>
       Effect.gen(function* () {
-        const { nonce } = yield* json<{ nonce?: unknown }>();
-        return { data: yield* pairNonceFromBrowser(m[1]!, nonce) };
+        const { nonce, slot } = yield* json<{ nonce?: unknown; slot?: unknown }>();
+        return { data: yield* pairNonceFromBrowser(m[1]!, nonce, slot) };
       }),
   },
   {
@@ -351,8 +362,8 @@ const routes: RoomRoute[] = [
     guard: "member", // the person approved: their seat, sealed to the terminal
     run: (_, m) =>
       Effect.gen(function* () {
-        const { box } = yield* json<{ box?: unknown }>();
-        return { data: yield* answerPair(m[1]!, box), fx: { broadcast: [frame({ t: "request" })] } };
+        const { box, slot } = yield* json<{ box?: unknown; slot?: unknown }>();
+        return { data: yield* answerPair(m[1]!, box, slot), fx: { broadcast: [frame({ t: "request" })] } };
       }),
   },
   { method: "GET", path: "/", guard: "member", run: () => withRoom((db) => ({ data: { head: db.head() } })) },

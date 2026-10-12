@@ -587,7 +587,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         forgetChannel(member.code)
         onGone()
       }}
-      pairing={{ code: member.code, list: () => ch.pairs(), open: (id, nonce) => ch.pairOpen(id, nonce), answer: (p) => ch.pairAnswer(p, member.identity) }}
+      pairing={{ code: member.code, slot: () => ch.pairSlot(), list: (slot) => ch.pairs(slot), open: (id, nonce, slot) => ch.pairOpen(id, nonce, slot), answer: (p, slot) => ch.pairAnswer(p, member.identity, slot) }}
     >
       <div className="flex h-full min-w-0 flex-1">
         <div className={cx("relative flex min-w-0 flex-1 flex-col", root && "hidden md:flex")}>

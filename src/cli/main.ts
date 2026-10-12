@@ -129,6 +129,7 @@ const { values: opt, positionals: args } = parseArgs({
     needs: { type: "string" },
     review: { type: "string" },
     once: { type: "boolean" },
+    pair: { type: "string" },
     now: { type: "boolean" },
     ask: { type: "boolean" },
     escalate: { type: "boolean" },
@@ -465,7 +466,7 @@ const importSeat = Effect.fn("kiwi.importSeat")(function* (code: string, relay: 
  * Pair this terminal with a person's seat (pair.ts): ask under a one-time key, show the code once the
  * person's browser opens the pairing, and take the seat when they approve it there. No key is ever copied.
  */
-const pairSeat = Effect.fn("kiwi.pairSeat")(function* (code: string) {
+const pairSeat = Effect.fn("kiwi.pairSeat")(function* (code: string, slot: string) {
   // The seat can act as the person (the owner, maybe): never into a file an agent running this could read.
   if (inAgentHarness()) return yield* die("your seat carries your key: run kiwi tui in a terminal of your own, outside Claude Code (not with !) or any agent's harness");
   const relay = relayUrl();
@@ -473,8 +474,8 @@ const pairSeat = Effect.fn("kiwi.pairSeat")(function* (code: string) {
   const nonce = pairNonce();
   // What the person sees next to the code, to tell this terminal from another (the relay could change it; the code is what counts).
   const label = `${userInfo().username}@${hostname()}`.slice(0, 64);
-  const { pairId } = yield* Channel.fx.pairAsk(relay, code, eph, nonce, label);
-  out(`Pairing this terminal (${label}) with your seat. In your browser, open the channel's menu → Use in a terminal…, and choose this terminal.`);
+  const { pairId } = yield* Channel.fx.pairAsk(relay, code, eph, nonce, slot, label);
+  out(`Pairing this terminal (${label}) with your seat. In the browser that showed you this command, choose this terminal.`);
   const deadline = Date.now() + PAIR_TTL_MS;
   let pinned: string | null = null;
   for (;;) {
@@ -1652,7 +1653,8 @@ const commands: Record<string, Command> = {
         }
       }
       if (!tty && !pairing) return yield* die("kiwi tui needs a terminal (stdin and stdout a TTY)");
-      const alias = link ? yield* importPerson(link) : pairing ? yield* pairSeat(pairing) : yield* personAlias();
+      if (pairing && !opt.pair) return yield* die("copy the whole command from your browser: the channel's menu → Use in a terminal… (it ends with --pair …)");
+      const alias = link ? yield* importPerson(link) : pairing ? yield* pairSeat(pairing, opt.pair!) : yield* personAlias();
       // Paired from something that isn't a terminal: the seat is here now, for the next kiwi tui.
       if (!tty) return out(`Your seat is on this computer now. Open it in a terminal with: kiwi tui${Object.keys((yield* keys.config).channels).length > 1 ? ` -c ${alias}` : ""}`);
       const c = (yield* keys.config).channels[alias]!;

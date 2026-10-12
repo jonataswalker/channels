@@ -14,6 +14,7 @@ test("every route declares its check", () => {
     "GET /^\\/pairs\\/([0-9a-f-]{36})$/ requester",
     "POST /^\\/pairs\\/([0-9a-f-]{36})\\/reveal$/ requester",
     "GET /^\\/requests\\/([0-9a-f-]{36})$/ requester",
+    "POST /pairs/slots member",
     "GET /pairs member",
     "POST /^\\/pairs\\/([0-9a-f-]{36})\\/nonce$/ member",
     "PUT /^\\/pairs\\/([0-9a-f-]{36})$/ member",

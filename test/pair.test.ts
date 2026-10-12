@@ -103,10 +103,10 @@ function grindingProxy(target: string) {
   return { url: server.url.origin, stop: () => server.stop(true) };
 }
 
-async function terminal(code: string, relayUrl: string, env: Record<string, string> = {}) {
+async function terminal(code: string, relayUrl: string, slot: string, env: Record<string, string> = {}) {
   const term = mkdtempSync(join(tmpdir(), "kiwi-pair-term-"));
   made.push(term);
-  const p = Bun.spawn([...MC, "tui", code], { cwd: term, env: { ...process.env, KIWI_HOME: term, KIWI_RELAY: relayUrl, KIWI_NO_HOOKS: "1", ...env }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn([...MC, "tui", code, "--pair", slot], { cwd: term, env: { ...process.env, KIWI_HOME: term, KIWI_RELAY: relayUrl, KIWI_NO_HOOKS: "1", ...env }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
   let out = "";
   const read = async (s: ReadableStream<Uint8Array>) => {
     const r = s.getReader();
@@ -121,11 +121,11 @@ async function terminal(code: string, relayUrl: string, env: Record<string, stri
 }
 
 /** The person's browser: choose the only waiting terminal, wait for its reveal, and return the code it shows. */
-async function chooseAndCode(browser: Channel, room: string) {
-  const row = await until(async () => (await runIt(browser.fx.pairs()))[0], "a pairing to show up");
+async function chooseAndCode(browser: Channel, room: string, slot: string) {
+  const row = await until(async () => (await runIt(browser.fx.pairs(slot)))[0], "a pairing to show up");
   const c: Chosen = { nonce: pairNonce(), pk: row.pk, xpk: row.xpk, commit: row.commit, kept: null };
-  c.kept = await runIt(browser.fx.pairOpen(row.id, c.nonce));
-  const revealed = await until(async () => (await runIt(browser.fx.pairs())).find((x) => x.id === row.id && x.tnonce), "the terminal's reveal");
+  c.kept = await runIt(browser.fx.pairOpen(row.id, c.nonce, slot));
+  const revealed = await until(async () => (await runIt(browser.fx.pairs(slot))).find((x) => x.id === row.id && x.tnonce), "the terminal's reveal");
   return { row: revealed, c, code: await browserCode(room, c, revealed) };
 }
 
@@ -134,23 +134,24 @@ describe("kiwi tui <join code>", () => {
     const owner = await generateIdentity("human");
     const made_ = await Channel.create(relay, owner, { name: "human" });
     const browser = new Channel(made_.access, relay, owner);
-    const t = await terminal(made_.code, relay);
-    const pending = await until(async () => (await runIt(browser.fx.pairs()))[0], "a pairing to show up");
+    const slot = await runIt(browser.fx.pairSlot());
+    const t = await terminal(made_.code, relay, slot);
+    const pending = await until(async () => (await runIt(browser.fx.pairs(slot)))[0], "a pairing to show up");
     // It says what it is, for the person to tell terminals apart.
     expect(pending.label).toContain("@");
     // Answering before the terminal shows a code is refused.
-    await expect(runIt(browser.fx.pairAnswer(pending, owner))).rejects.toThrow("hasn't shown a code");
-    const { row, c, code } = await chooseAndCode(browser, made_.access.roomId);
+    await expect(runIt(browser.fx.pairAnswer(pending, owner, slot))).rejects.toThrow("hasn't shown a code");
+    const { row, c, code } = await chooseAndCode(browser, made_.access.roomId, slot);
     expect(code).toMatch(/^\d{3}-\d{3}$/);
     await until(async () => t.output().includes(`code ${code}`), "the same code in the terminal");
-    await runIt(browser.fx.pairAnswer(sealedTo(c, row), owner));
+    await runIt(browser.fx.pairAnswer(sealedTo(c, row), owner, slot));
     const out = await t.done();
     expect(t.p.exitCode).toBe(0);
     expect(out).toContain("approved.");
     const room = readdirSync(join(t.term, "identities"))[0]!;
     const kept = JSON.parse(readFileSync(join(t.term, "identities", room, "human.json"), "utf8")) as Identity;
     expect(kept.pk).toBe(owner.pk);
-    expect(await runIt(browser.fx.pairs())).toEqual([]);
+    expect(await runIt(browser.fx.pairs(slot))).toEqual([]);
   });
 
   test("a relay that shows the terminal another browser nonce after it revealed is caught", async () => {
@@ -159,8 +160,9 @@ describe("kiwi tui <join code>", () => {
     const browser = new Channel(made_.access, relay, owner);
     const proxy = grindingProxy(relay);
     try {
-      const t = await terminal(made_.code, proxy.url);
-      await chooseAndCode(browser, made_.access.roomId);
+      const slot = await runIt(browser.fx.pairSlot());
+      const t = await terminal(made_.code, proxy.url, slot);
+      await chooseAndCode(browser, made_.access.roomId, slot);
       const out = await t.done();
       expect(t.p.exitCode).not.toBe(0);
       expect(out).toContain("changed after this terminal showed its code");
@@ -173,11 +175,32 @@ describe("kiwi tui <join code>", () => {
   test("never inside an agent's harness: the seat would land where the agent can read it", async () => {
     const owner = await generateIdentity("human");
     const made_ = await Channel.create(relay, owner, { name: "human" });
-    const t = await terminal(made_.code, relay, { CLAUDECODE: "1" });
+    const browser = new Channel(made_.access, relay, owner);
+    const slot = await runIt(browser.fx.pairSlot());
+    const t = await terminal(made_.code, relay, slot, { CLAUDECODE: "1" });
     const out = await t.done();
     expect(t.p.exitCode).toBe(1);
     expect(out).toContain("run kiwi tui in a terminal of your own");
-    expect(await runIt(new Channel(made_.access, relay, owner).fx.pairs())).toEqual([]);
+    expect(await runIt(browser.fx.pairs(slot))).toEqual([]);
+  });
+
+  test("only a terminal given the person's slot can ask; someone with the join code can't fill or open it", async () => {
+    const owner = await generateIdentity("human");
+    const made_ = await Channel.create(relay, owner, { name: "human" });
+    const browser = new Channel(made_.access, relay, owner);
+    const slot = await runIt(browser.fx.pairSlot());
+    // No slot, or a made-up one: refused, and nothing waits.
+    const intruder = await generateIdentity("pair");
+    await expect(runIt(Channel.fx.pairAsk(relay, made_.code, intruder, pairNonce(), "AAAAAAAAAAAAAAAAAAAAAA"))).rejects.toThrow("slot is gone");
+    // The person's terminal asks through the slot; a second ask through it is refused.
+    const mine = await generateIdentity("pair");
+    await runIt(Channel.fx.pairAsk(relay, made_.code, mine, pairNonce(), slot, "me@here"));
+    await expect(runIt(Channel.fx.pairAsk(relay, made_.code, intruder, pairNonce(), slot))).rejects.toThrow("already asked through that slot");
+    expect((await runIt(browser.fx.pairs(slot))).map((r) => r.label)).toEqual(["me@here"]);
+    // A reveal that isn't the committed nonce is refused by the relay too.
+    const row = (await runIt(browser.fx.pairs(slot)))[0]!;
+    await runIt(browser.fx.pairOpen(row.id, pairNonce(), slot));
+    await expect(runIt(Channel.fx.pairCheck(relay, made_.code, mine, row.id, pairNonce(), null))).rejects.toThrow("committed to");
   });
 });
 

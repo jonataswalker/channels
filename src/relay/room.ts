@@ -51,7 +51,7 @@ import {
 } from "./failures.ts";
 import { verify, verifyText } from "../identity.ts";
 import { commitTo, NONCE_RE, ownerNonceStatement } from "../sas.ts";
-import { PAIR_NONCE_RE, PAIR_TTL_MS, type PairRow } from "../pair.ts";
+import { PAIR_NONCE_RE, PAIR_TTL_MS, pairCommit, type PairRow } from "../pair.ts";
 import {
   CLOSE_CLOSED,
   CLOSE_REMOVED,
@@ -716,80 +716,103 @@ export const admit = Effect.fn("Room.admit")(function* (admitter: string, body: 
 
 // ---------- pairing a terminal with a person's seat (pair.ts) ----------
 
-/** Pairings waiting at once per channel: enough for a person, too few to fill storage. */
-const PAIRS_PENDING = 5;
-/** Pairings asked per channel per day: someone holding the join code can't keep the slots full forever. */
-export const PAIRS_PER_DAY = 30;
+/**
+ * Pairing slots a member's browser opens per day. A slot is the only way a terminal can ask, so nobody
+ * holding the join code can fill someone else's pairing, or use up anyone's share but their own.
+ */
+export const PAIR_SLOTS_PER_DAY = 50;
 
 function pairsTable(db: RoomDb): void {
   db.sql.run(
-    "CREATE TABLE IF NOT EXISTS pairs (id TEXT PRIMARY KEY, pk TEXT NOT NULL UNIQUE, xpk TEXT NOT NULL, commit_to TEXT NOT NULL, wnonce TEXT, tnonce TEXT, box TEXT, ts INTEGER NOT NULL, label TEXT)",
+    "CREATE TABLE IF NOT EXISTS pairs (id TEXT PRIMARY KEY, pk TEXT NOT NULL UNIQUE, xpk TEXT NOT NULL, commit_to TEXT NOT NULL, wnonce TEXT, tnonce TEXT, box TEXT, ts INTEGER NOT NULL, label TEXT, slot TEXT NOT NULL UNIQUE)",
   );
-  db.sql.run("CREATE TABLE IF NOT EXISTS pair_log (ts INTEGER NOT NULL)");
+  db.sql.run("CREATE TABLE IF NOT EXISTS pair_slots (slot TEXT PRIMARY KEY, pk TEXT NOT NULL, ts INTEGER NOT NULL)");
   db.sql.run("DELETE FROM pairs WHERE ts < ?", Date.now() - PAIR_TTL_MS);
-  db.sql.run("DELETE FROM pair_log WHERE ts < ?", Date.now() - 86_400_000);
+  db.sql.run("DELETE FROM pair_slots WHERE ts < ?", Date.now() - 86_400_000);
 }
 
 const KEY_RE = /^[A-Za-z0-9_-]{43}$/;
+const SLOT_RE = /^[A-Za-z0-9_-]{22}$/;
 
-/** A terminal asks to pair: its one-time key (it signed the request with `pk`) and its commit. Asking again resumes. */
-export const askPair = Effect.fn("Room.askPair")(function* (pk: string, body: { xpk?: unknown; commit?: unknown; label?: unknown }) {
+/** A member's browser opens a slot for one terminal to pair through (it goes in the command it shows). */
+export const openPairSlot = Effect.fn("Room.openPairSlot")(function* (pk: string) {
+  const db = yield* RoomStore;
+  pairsTable(db);
+  const today = db.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM pair_slots WHERE pk = ?", pk)[0]?.n ?? 0;
+  if (today >= PAIR_SLOTS_PER_DAY) return yield* new TooMany({ message: `you opened ${PAIR_SLOTS_PER_DAY} pairings today, the most a day; try again tomorrow` });
+  const slot = b64urlBytes(crypto.getRandomValues(new Uint8Array(16)));
+  db.sql.run("INSERT INTO pair_slots (slot, pk, ts) VALUES (?, ?, ?)", slot, pk, Date.now());
+  return { slot };
+});
+
+function b64urlBytes(b: Uint8Array): string {
+  return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** A terminal asks to pair through a slot: its one-time key (it signed the request with `pk`) and its commit. Asking again resumes. */
+export const askPair = Effect.fn("Room.askPair")(function* (pk: string, body: { xpk?: unknown; commit?: unknown; label?: unknown; slot?: unknown }) {
   const db = yield* RoomStore;
   yield* readMeta;
-  const { xpk, commit } = body ?? {};
+  const { xpk, commit, slot } = body ?? {};
   // What the terminal says it is (user@host), for the person to tell terminals apart; never trusted for more.
   const label = typeof body?.label === "string" ? body.label.replace(/[^\x20-\x7e]/g, "").slice(0, 64) || null : null;
   if (typeof xpk !== "string" || !KEY_RE.test(xpk) || typeof commit !== "string" || !PAIR_NONCE_RE.test(commit)) return yield* new BadRequest({ message: "send the terminal's key and its commit" });
+  if (typeof slot !== "string" || !SLOT_RE.test(slot)) return yield* new BadRequest({ message: "pair with the command from the channel's menu → Use in a terminal (it carries a pairing slot)" });
   pairsTable(db);
-  const had = db.sql.all<{ id: string }>("SELECT id FROM pairs WHERE pk = ?", pk)[0];
-  if (had) return { id: had.id, fresh: false };
-  const waiting = db.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM pairs WHERE box IS NULL")[0]?.n ?? 0;
-  if (waiting >= PAIRS_PENDING) return yield* new TooMany({ message: `${PAIRS_PENDING} terminals are already waiting to pair with this channel; try again in a few minutes` });
-  const today = db.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM pair_log")[0]?.n ?? 0;
-  if (today >= PAIRS_PER_DAY) return yield* new TooMany({ message: `this channel had ${PAIRS_PER_DAY} pairings asked today, the most it takes; try again tomorrow` });
+  const had = db.sql.all<{ id: string; slot: string }>("SELECT id, slot FROM pairs WHERE pk = ?", pk)[0];
+  if (had) return had.slot === slot ? { id: had.id, fresh: false } : yield* new Conflict({ message: "this terminal key already asked through another slot" });
+  const open = db.sql.all<{ ts: number }>("SELECT ts FROM pair_slots WHERE slot = ?", slot)[0];
+  if (!open || open.ts < Date.now() - PAIR_TTL_MS) return yield* new NotFound({ message: "that pairing slot is gone (it lasts 10 minutes): open Use in a terminal again" });
+  if (db.sql.all("SELECT 1 FROM pairs WHERE slot = ?", slot).length) return yield* new Conflict({ message: "another terminal already asked through that slot: open Use in a terminal again" });
   const id = crypto.randomUUID();
-  db.sql.run("INSERT INTO pairs (id, pk, xpk, commit_to, ts, label) VALUES (?, ?, ?, ?, ?, ?)", id, pk, xpk, commit, Date.now(), label);
-  db.sql.run("INSERT INTO pair_log (ts) VALUES (?)", Date.now());
+  db.sql.run("INSERT INTO pairs (id, pk, xpk, commit_to, ts, label, slot) VALUES (?, ?, ?, ?, ?, ?, ?)", id, pk, xpk, commit, Date.now(), label, slot);
   return { id, fresh: true };
 });
 
-/** Pairings still waiting for a person, for members' browsers to show. */
-export const pendingPairs = Effect.fn("Room.pendingPairs")(function* () {
+/** The pairing waiting in a slot, for the browser that opened it. */
+export const pendingPairs = Effect.fn("Room.pendingPairs")(function* (slot: string | null) {
   const db = yield* RoomStore;
+  if (!slot || !SLOT_RE.test(slot)) return yield* new BadRequest({ message: "say which pairing slot" });
   pairsTable(db);
-  return db.sql.all<PairRow>("SELECT id, pk, xpk, commit_to AS \"commit\", wnonce, tnonce, ts, label FROM pairs WHERE box IS NULL ORDER BY ts");
+  return db.sql.all<PairRow>("SELECT id, pk, xpk, commit_to AS \"commit\", wnonce, tnonce, ts, label FROM pairs WHERE slot = ? AND box IS NULL", slot);
 });
 
+/** The row with this id in this slot: knowing the slot is what lets a browser act on it. */
+function inSlot(db: RoomDb, id: string, slot: unknown): boolean {
+  return typeof slot === "string" && SLOT_RE.test(slot) && db.sql.all("SELECT 1 FROM pairs WHERE id = ? AND slot = ?", id, slot).length > 0;
+}
+
 /** A browser's half of the code: once, before the terminal reveals its own. */
-export const pairNonceFromBrowser = Effect.fn("Room.pairNonce")(function* (id: string, nonce: unknown) {
+export const pairNonceFromBrowser = Effect.fn("Room.pairNonce")(function* (id: string, nonce: unknown, slot: unknown) {
   const db = yield* RoomStore;
   if (typeof nonce !== "string" || !PAIR_NONCE_RE.test(nonce)) return yield* new BadRequest({ message: "bad nonce" });
   pairsTable(db);
-  if (!db.sql.all("SELECT 1 FROM pairs WHERE id = ?", id).length) return yield* new NotFound({ message: "no such pairing" });
+  if (!inSlot(db, id, slot)) return yield* new NotFound({ message: "no such pairing" });
   db.sql.run("UPDATE pairs SET wnonce = ? WHERE id = ? AND wnonce IS NULL", nonce, id);
   return { wnonce: db.sql.all<{ w: string }>("SELECT wnonce AS w FROM pairs WHERE id = ?", id)[0]!.w };
 });
 
-/** The terminal reveals its nonce, once the browser's is in. */
+/** The terminal reveals its nonce, once the browser's is in. It has to match its commit. */
 export const revealPair = Effect.fn("Room.revealPair")(function* (id: string, pk: string, nonce: unknown) {
   const db = yield* RoomStore;
   if (typeof nonce !== "string" || !PAIR_NONCE_RE.test(nonce)) return yield* new BadRequest({ message: "bad nonce" });
   pairsTable(db);
-  const r = db.sql.all<{ pk: string; wnonce: string | null; tnonce: string | null }>("SELECT pk, wnonce, tnonce FROM pairs WHERE id = ?", id)[0];
+  const r = db.sql.all<{ pk: string; xpk: string; commit: string; wnonce: string | null; tnonce: string | null }>("SELECT pk, xpk, commit_to AS \"commit\", wnonce, tnonce FROM pairs WHERE id = ?", id)[0];
   if (!r || r.pk !== pk) return yield* new NotFound({ message: "no such pairing" });
   if (!r.wnonce) return yield* new Conflict({ message: "nobody has opened this pairing yet" });
+  if ((yield* Effect.promise(() => pairCommit(db.roomId, r.pk, r.xpk, nonce))) !== r.commit) return yield* new BadRequest({ message: "that nonce isn't the one this terminal committed to" });
   if (!r.tnonce) db.sql.run("UPDATE pairs SET tnonce = ? WHERE id = ?", nonce, id);
   return { revealed: true };
 });
 
-/** A person approved: the seat, sealed to the terminal's one-time key. */
-export const answerPair = Effect.fn("Room.answerPair")(function* (id: string, box: unknown) {
+/** The person approved: the seat, sealed to the terminal's one-time key. */
+export const answerPair = Effect.fn("Room.answerPair")(function* (id: string, box: unknown, slot: unknown) {
   const db = yield* RoomStore;
   if (typeof box !== "string" || !box) return yield* new BadRequest({ message: "send the sealed seat" });
   if (box.length > 8_192) return yield* new TooLarge({ message: "sealed seat too large" });
   pairsTable(db);
-  const r = db.sql.all<{ tnonce: string | null; box: string | null }>("SELECT tnonce, box FROM pairs WHERE id = ?", id)[0];
-  if (!r) return yield* new NotFound({ message: "no such pairing (it waits 10 minutes)" });
+  if (!inSlot(db, id, slot)) return yield* new NotFound({ message: "no such pairing (it waits 10 minutes)" });
+  const r = db.sql.all<{ tnonce: string | null; box: string | null }>("SELECT tnonce, box FROM pairs WHERE id = ?", id)[0]!;
   if (!r.tnonce) return yield* new Conflict({ message: "the terminal hasn't shown its code yet" });
   if (r.box) return yield* new Conflict({ message: "this pairing was already answered" });
   db.sql.run("UPDATE pairs SET box = ? WHERE id = ?", box, id);

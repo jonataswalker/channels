@@ -1,6 +1,6 @@
 import { Dialog } from "@base-ui/react/dialog"
 import { Add01Icon, BookOpen01Icon, ComputerTerminal01Icon, Copy01Icon, Delete02Icon, Link01Icon, Logout01Icon, MoreHorizontalIcon, PauseIcon, PencilEdit01Icon, UserAdd01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons"
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 
 import { loadLine, memberLoad, showsLoad, type Load } from "@mc/load.ts"
 import { cardLine } from "@mc/format.ts"
@@ -66,7 +66,14 @@ export interface ControlsProps {
   onCloseChannel: () => Promise<void>
   onLeaveChannel: () => Promise<void>
   /** This seat in a terminal: `kiwi tui <code>` there, then the person approves the code it shows (pair.ts). No key is copied. */
-  pairing?: { code: string; list: () => Promise<PairRow[]>; open: (id: string, nonce: string) => Promise<string>; answer: (p: PairRow) => Promise<void> }
+  pairing?: {
+    code: string
+    /** A one-time slot: only a terminal given it (in the command) can ask, so nobody else can fill or open this pairing. */
+    slot: () => Promise<string>
+    list: (slot: string) => Promise<PairRow[]>
+    open: (id: string, nonce: string, slot: string) => Promise<string>
+    answer: (p: PairRow, slot: string) => Promise<void>
+  }
   /** Unused: channel icons left the UI (T1389). Still accepted until conversation.tsx stops passing it. */
   onSetIcon?: (icon: ChannelIcon | null) => Promise<void>
   /** Owner: rename the channel (a title signed by the owner). Absent for everyone else. */
@@ -952,13 +959,29 @@ function TerminalDialog({ pairing, onClose }: { pairing: NonNullable<ControlsPro
   const now = useClock(5_000)
   const [busy, setBusy] = useState(false)
   const room = decodeJoinCode(pairing.code).roomId
-  const command = `kiwi tui ${pairing.code}${location.origin !== PUBLIC_RELAY ? ` --relay ${location.origin}` : ""}`
+  const [slot, setSlot] = useState<string | null>(null)
+  // The pairing's functions come new with every render of the conversation: read them as events, so
+  // the slot is opened once per dialog and the polling isn't restarted.
+  const openSlot = useEffectEvent(() => pairing.slot())
+  const listSlot = useEffectEvent((s: string) => pairing.list(s))
+  useEffect(() => {
+    let gone = false
+    openSlot().then(
+      (s) => !gone && setSlot(s),
+      (err) => toast(errorText(err), "error"),
+    )
+    return () => {
+      gone = true
+    }
+  }, [])
+  const command = slot ? `kiwi tui ${pairing.code}${location.origin !== PUBLIC_RELAY ? ` --relay ${location.origin}` : ""} --pair ${slot}` : null
 
   useEffect(() => {
+    if (!slot) return
     let stop = false
     const tick = async () => {
       try {
-        const list = await pairing.list()
+        const list = await listSlot(slot)
         const next = new Map<string, string | null>()
         for (const r of list) {
           const c = chosen.current.get(r.id)
@@ -978,13 +1001,14 @@ function TerminalDialog({ pairing, onClose }: { pairing: NonNullable<ControlsPro
       stop = true
       window.clearInterval(t)
     }
-  }, [pairing, room])
+  }, [room, slot])
 
   const choose = async (r: PairRow) => {
+    if (!slot) return
     const c: Chosen = { nonce: pairNonce(), pk: r.pk, xpk: r.xpk, commit: r.commit, kept: null }
     chosen.current.set(r.id, c)
     try {
-      c.kept = await pairing.open(r.id, c.nonce)
+      c.kept = await pairing.open(r.id, c.nonce, slot)
     } catch (err) {
       toast(errorText(err), "error")
     }
@@ -995,11 +1019,11 @@ function TerminalDialog({ pairing, onClose }: { pairing: NonNullable<ControlsPro
   const shownCodes = [...codes.values()].filter((c): c is string => !!c)
   const approve = async (r: PairRow, code: string) => {
     const c = chosen.current.get(r.id)
-    if (!c || shownCodes.filter((x) => x === code).length > 1) return
+    if (!c || !slot || shownCodes.filter((x) => x === code).length > 1) return
     setBusy(true)
     try {
       // Sealed to the key this browser saw when it was chosen, with the code computed from its own nonce.
-      await pairing.answer(sealedTo(c, r))
+      await pairing.answer(sealedTo(c, r), slot)
       toast("That terminal has your seat now")
       onClose()
     } catch (err) {
@@ -1016,9 +1040,7 @@ function TerminalDialog({ pairing, onClose }: { pairing: NonNullable<ControlsPro
         <Dialog.Description className="mt-1 text-ui leading-normal text-ink-2">
           Run this in a terminal on your computer, then choose it below. Let it in only when it shows the same code as here.
         </Dialog.Description>
-        <div className="mt-4">
-          <CopyBox text={command} label="Copy command" done="Command copied" />
-        </div>
+        <div className="mt-4">{command ? <CopyBox text={command} label="Copy command" done="Command copied" /> : <p className="text-meta text-ink-2">Opening a pairing…</p>}</div>
         <div className="mt-4 grid gap-2" aria-live="polite">
           {rows.length === 0 && <p className="text-meta text-ink-2">Waiting for a terminal…</p>}
           {rows.map((r) => {
