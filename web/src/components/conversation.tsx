@@ -18,6 +18,7 @@ import { excerpt, memberName } from "@/lib/format"
 import { usePlaceSlot } from "@/lib/place-slot"
 import { coordinatorMood, ERROR_MS, moodInputs, SPEAKING_MS, type Mood } from "@/lib/coordinator-mood"
 import { dmPlace, markSeenIn, MAIN, placeFromKey, placeKey, seenIn, sendFrom, useSeen, threadMembers, type Place, type PlaceSummary } from "@/lib/threads"
+import { currentTask } from "@/lib/room"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { CoordinatorAvatar } from "./coordinator-head"
@@ -29,7 +30,8 @@ import { InfoPanel } from "./info-panel"
 import { Button, IconButton, Monogram, Spinner, TextField, errorText, toast } from "./kit"
 import { Bubble, EventGroup, EventRow, TimeMark, isAgent, standsAlone, type ThreadSummary } from "./message"
 import { NeedsYou, type JoinedVia } from "./needs-you"
-import { CoordinatorFocus, FocusButton, loadMainView, saveMainView, type MainView, type TeamPart } from "./hero"
+import { FocusButton, loadMainView, saveMainView, type MainView, type TeamPart } from "./hero"
+import { AgentDrawer, faceOf, Room } from "./room"
 import { TaskPage } from "./task-page"
 import { Notes, StateMark, TaskCard, Tasks } from "./tasks"
 import { ThreadPanel } from "./thread"
@@ -126,12 +128,51 @@ const STAMP_GAP = 15 * 60_000
 /** Up close with a coordinator nobody has spoken to yet: a few ways to begin, a tap from the field. */
 const STARTERS = ["What's everyone working on?", "Plan the next release with the team", "Review the open pull requests"]
 
+/** The Room's drawer: one place's conversation, plain (a task's card, then what was said; no threads, no stamps). */
+function DrawerRows({
+  messages,
+  placeOf,
+  at,
+  state,
+  task,
+  now,
+  bubble,
+  empty,
+  onOpenTask,
+}: {
+  messages: Message[]
+  placeOf: Map<number, Place>
+  at: string
+  state: ChannelState
+  task: Task | undefined
+  now: number
+  bubble: (m: Message, first: boolean, last: boolean, prev: Message | undefined, anchor?: string) => ReactNode
+  empty: string
+  onOpenTask: (id: number) => void
+}) {
+  const list = messages.filter((m) => placeKey(placeOf.get(m.seq) ?? MAIN) === at && m.ev?.op !== "hello" && m.ev?.op !== "card" && !ignored(state.trust.get(m.seq)))
+  if (!list.length && !task) return <p className="px-4 py-10 text-center text-ui text-ink-3">{empty}</p>
+  return (
+    <>
+      {task && <TaskCard task={task} state={state} now={now} onOpen={() => onOpenTask(task.id)} highlighted={false} />}
+      {list.map((m, i) => {
+        if (m.kind === "event") return task && m.seq === task.id ? null : <EventRow key={m.seq} m={m} state={state} now={now} onOpenTask={onOpenTask} openLabel="Details" />
+        const prev = list[i - 1]
+        const next = list[i + 1]
+        const first = !prev || prev.kind === "event" || prev.from !== m.from || m.ts - prev.ts > RUN_GAP
+        const last = !next || next.kind === "event" || next.from !== m.from || next.ts - m.ts > RUN_GAP
+        return bubble(m, first, last, prev, "d")
+      })}
+    </>
+  )
+}
+
 const summarised = (m: Message) => m.ev?.op === "task.add" || (m.ev?.op === "task.update" && !!m.ev.state)
 
 export function Conversation({ member, onBack, onGone }: { member: StoredMember; onBack: () => void; onGone: () => void }) {
   const me = member.identity.name
   const auth = useAuth()
-  const { ch, connection, gone, messages, roster, state, online, isOwner, requests, send, refreshRequests, refreshRoster, head } = useChannel(
+  const { ch, connection, gone, messages, roster, state, online, isOwner, requests, send, refreshRequests, refreshRoster, head, foldAt } = useChannel(
     member,
     auth.status === "loading" ? null : auth.token,
   )
@@ -160,6 +201,10 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   /** The thread open on the right, by its first message. */
   const [threadRoot, setThreadRoot] = useState<number | null>(null)
   const [openTask, setOpenTask] = useState<number | null>(null)
+  /** The Room: the agent whose conversation is open in the drawer, and the point the timeline replays (null: live). */
+  const [drawer, setDrawer] = useState<string | null>(null)
+  const [replay, setReplay] = useState<number | null>(null)
+  const [wasFocus, setWasFocus] = useState(false)
   const [highlight, setHighlight] = useState<number | null>(null)
   /** New messages below while scrolled up. */
   const [behind, setBehind] = useState(0)
@@ -264,6 +309,12 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   )
   // Up close: Main in coordinator mode opens on the coordinator's face and its last words (hero.tsx).
   const focus = !!coordinator && hereKey === "main" && mainView === "focus" && search === null && !board && openTask === null
+  const isMain = useCallback((m: Message) => placeKey(placeOf.get(m.seq) ?? MAIN) === "main", [placeOf])
+  // The agent whose conversation the drawer shows: its task's, or else its direct one with the coordinator.
+  const drawerTask = drawer ? currentTask(state, drawer) : undefined
+  const drawerPlace: Place | null = !drawer ? null : drawerTask ? { kind: "task", task: drawerTask.id } : dmPlace(coordinator ?? me, drawer)
+  const drawerKey = drawerPlace ? placeKey(drawerPlace) : null
+
   // Its last words to you, and yours to it, in Main (replies included: up close there are no threads).
   // Yours only when they reach it: a reply to another agent's escalation or an @dev message isn't to it.
   const dialogue = useMemo(() => {
@@ -348,7 +399,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     return out
   }, [messages, rootOf, state.trust, revealed])
 
-  const visible = useMemo(() => {
+  // What this place shows. The React compiler memoizes it (a hand-written useMemo here made it skip the whole component).
+  const visible = (() => {
     const q = search?.trim().toLowerCase()
     let list = messages.filter((m) => {
       const at = placeKey(placeOf.get(m.seq) ?? MAIN)
@@ -367,7 +419,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     if (q) list = list.filter((m) => m.body.toLowerCase().includes(q) || nameOf(m.from).toLowerCase().includes(q))
     else list = list.filter((m) => m.kind === "event" || rootOf(m.seq) === null)
     return list
-  }, [messages, placeOf, hereKey, search, nameOf, rootOf, state, revealed, reaches])
+  })()
 
   const bySeq = useMemo(() => new Map(messages.map((m) => [m.seq, m])), [messages])
   const quoted = useCallback((seq: number) => bySeq.get(seq), [bySeq])
@@ -450,6 +502,14 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     return { count: list.length, last: list[list.length - 1]!.ts, people: peopleOf(list), forYou: list.some((r) => r.from !== me && r.to?.includes(me)) }
   }
 
+  // Leaving the Room ends a replay and closes an agent's drawer (set while rendering, React's way to follow a value).
+  if (wasFocus !== focus) {
+    setWasFocus(focus)
+    if (!focus) {
+      setReplay(null)
+      setDrawer(null)
+    }
+  }
   if (gone) {
     return (
       <Centered>
@@ -493,45 +553,51 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       face={coord && m.from === coord ? <CoordinatorAvatar size={28} mood={mood} live={m.seq >= (said?.last ?? 0) && !anchor} seed={0.3} /> : undefined}
     />
   )
-  const rows: ReactNode[] = []
   const dropped = isOwner ? droppedCount(state) : 0
-  if (dropped && hereKey === "main")
-    rows.push(
-      <p key="dropped" className="mt-3 pl-12 text-stamp text-ink-3">
-        {dropped === 1 ? "1 message" : `${dropped} messages`} left out: forged, or not allowed by your settings.{" "}
-        <button type="button" onClick={() => setShowDropped((v) => !v)} className="font-medium text-accent-text hover:underline">
-          {showDropped ? "Hide them" : "Show them"}
-        </button>
-      </p>
-    )
+  /** A place's conversation as rows: its card (a task's), stamps, bubbles in runs, events as quiet lines. `anchor` marks a copy (the Room's drawer). */
+  const buildRows = (list: Message[], inMain: boolean, t: Task | undefined, anchor?: string): ReactNode[] => {
+    const out: ReactNode[] = []
+    if (dropped && inMain && !anchor)
+      out.push(
+        <p key="dropped" className="mt-3 pl-12 text-stamp text-ink-3">
+          {dropped === 1 ? "1 message" : `${dropped} messages`} left out: forged, or not allowed by your settings.{" "}
+          <button type="button" onClick={() => setShowDropped((v) => !v)} className="font-medium text-accent-text hover:underline">
+            {showDropped ? "Hide them" : "Show them"}
+          </button>
+        </p>
+      )
+    // A task's own conversation opens on its card: what it is, where it stands, who has it.
+    if (t) out.push(<TaskCard key="card" task={t} state={state} now={now} onOpen={() => (setDrawer(null), setOpenTask(t.id))} highlighted={!anchor && highlight === t.id} />)
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i]!
+      const prev = list[i - 1]
+      if (!prev || !sameDay(prev.ts, m.ts) || m.ts - prev.ts > STAMP_GAP) out.push(<TimeMark key={`s${m.seq}`} ts={m.ts} />)
+      if (m.kind === "event") {
+        const batch: Message[] = [m]
+        let j = i + 1
+        while (j < list.length && list[j]!.kind === "event" && sameDay(m.ts, list[j]!.ts) && list[j]!.ts - list[j - 1]!.ts <= STAMP_GAP) batch.push(list[j++]!)
+        i = j - 1
+        // In a task's conversation its card says where it stands; there, its events are the history under it.
+        const lines = batch.filter((ev) => !(t && ev.seq === t.id))
+        if (!lines.length) continue
+        const alone = lines.filter((ev) => standsAlone(ev, state, me))
+        const rest = lines.filter((ev) => !standsAlone(ev, state, me))
+        const open = inMain ? (id: number) => go({ kind: "task", task: id }) : (id: number) => (setDrawer(null), setOpenTask(id))
+        for (const ev of alone) out.push(<EventRow key={ev.seq} m={ev} state={state} now={now} onOpenTask={open} openLabel={inMain ? "Open" : "Details"} />)
+        if (rest.length) out.push(<EventGroup key={`e${rest[0]!.seq}`} messages={rest} state={state} now={now} onOpenTask={open} highlight={highlight} openLabel={inMain ? "Open" : "Details"} />)
+        continue
+      }
+      const next = list[i + 1]
+      const runs = (a: Message | undefined, b: Message) => !!a && a.kind !== "event" && b.kind !== "event" && a.from === b.from && sameDay(a.ts, b.ts) && b.ts - a.ts <= RUN_GAP
+      const first = !runs(prev, m) || m.ts - (prev?.ts ?? 0) > STAMP_GAP
+      const last = !next || !runs(m, next) || next.ts - m.ts > STAMP_GAP
+      out.push(bubble(m, first, last, prev, anchor))
+    }
+    return out
+  }
   // A task's own conversation opens on its card: what it is, where it stands, who has it.
   const task = place.kind === "task" ? state.tasks.get(place.task) : undefined
-  if (task) rows.push(<TaskCard key="card" task={task} state={state} now={now} onOpen={() => setOpenTask(task.id)} highlighted={highlight === task.id} />)
-  for (let i = 0; i < visible.length; i++) {
-    const m = visible[i]!
-    const prev = visible[i - 1]
-    if (!prev || !sameDay(prev.ts, m.ts) || m.ts - prev.ts > STAMP_GAP) rows.push(<TimeMark key={`s${m.seq}`} ts={m.ts} />)
-    if (m.kind === "event") {
-      const batch: Message[] = [m]
-      let j = i + 1
-      while (j < visible.length && visible[j]!.kind === "event" && sameDay(m.ts, visible[j]!.ts) && visible[j]!.ts - visible[j - 1]!.ts <= STAMP_GAP) batch.push(visible[j++]!)
-      i = j - 1
-      // In a task's conversation its card says where it stands; there, its events are the history under it.
-      const lines = batch.filter((ev) => !(task && ev.seq === task.id))
-      if (!lines.length) continue
-      const alone = lines.filter((ev) => standsAlone(ev, state, me))
-      const rest = lines.filter((ev) => !standsAlone(ev, state, me))
-      const open = hereKey === "main" ? (id: number) => go({ kind: "task", task: id }) : setOpenTask
-      for (const ev of alone) rows.push(<EventRow key={ev.seq} m={ev} state={state} now={now} onOpenTask={open} openLabel={hereKey === "main" ? "Open" : "Details"} />)
-      if (rest.length) rows.push(<EventGroup key={`e${rest[0]!.seq}`} messages={rest} state={state} now={now} onOpenTask={open} highlight={highlight} openLabel={hereKey === "main" ? "Open" : "Details"} />)
-      continue
-    }
-    const next = visible[i + 1]
-    const runs = (a: Message | undefined, b: Message) => !!a && a.kind !== "event" && b.kind !== "event" && a.from === b.from && sameDay(a.ts, b.ts) && b.ts - a.ts <= RUN_GAP
-    const first = !runs(prev, m) || m.ts - (prev?.ts ?? 0) > STAMP_GAP
-    const last = !next || !runs(m, next) || next.ts - m.ts > STAMP_GAP
-    rows.push(bubble(m, first, last, prev))
-  }
+  const rows = buildRows(visible, place.kind === "main", task)
 
   // The open thread: its first message, then every reply, in runs the same way.
   const root = threadRoot === null ? undefined : bySeqAll.get(threadRoot)
@@ -603,15 +669,20 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         : []),
     ...(needsMe ? [{ key: "needs", label: `${needsMe} ${needsMe === 1 ? "needs" : "need"} you`, tone: "decide" as const, onClick: () => setNeedsSignal((n) => n + 1) }] : []),
   ]
-  const needsYou = (variant: "banner" | "stack") => (
+  /**
+   * What needs you: as the slim banner (the conversation, and the Room's), or as rows for a face's
+   * popover in the Room (`only`: one agent's escalations and reviews, or one join request).
+   */
+  const needsYou = (variant: "banner" | "list", only?: { agent?: string; request?: string }) => (
     <NeedsYou
       variant={variant}
-      openSignal={variant === "stack" ? needsSignal : 0}
+      openSignal={variant === "banner" && focus ? needsSignal : 0}
       now={now}
       roomId={roomId}
-      escalations={escalations}
-      reviews={reviews}
-      joinedVia={joinedVia}
+      escalations={only ? escalations.filter((m) => !!only.agent && m.from === only.agent) : escalations}
+      reviews={only ? reviews.filter((t) => !!only.agent && t.owner === only.agent) : reviews}
+      joinedVia={only ? new Map() : joinedVia}
+      requestFilter={only ? (r) => r.id === only.request : undefined}
       onDismissJoined={() => setJoinedVia(new Map())}
       nameOf={nameOf}
       onReply={async (m, text) => void (await send(text, { to: [m.from], re: [m.seq], kind: "msg" }))}
@@ -814,19 +885,36 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
           ) : (
             <>
               {focus && coordinator ? (
-                <CoordinatorFocus
-                  name={nameOf(coordinator)}
+                <Room
+                  roomId={roomId}
+                  me={me}
+                  coordinator={coordinator}
+                  nameOf={nameOf}
+                  state={state}
+                  messages={messages}
+                  online={online}
+                  now={now}
                   mood={mood}
-                  coordinatorSaid={dialogue.theirs}
-                  youSaid={dialogue.mine}
                   waiting={waiting}
                   team={team}
-                  needs={needsMe || joinedVia.size ? needsYou("stack") : null}
-                  starters={STARTERS}
-                  onStarter={(text) => setStarter((was) => ({ text, n: (was?.n ?? 0) + 1 }))}
+                  needsFor={(agent) => needsYou("list", { agent })}
+                  requestFor={(r) => needsYou("list", { request: r.id })}
+                  requests={isOwner ? requests : []}
+                  escalations={escalations}
+                  reviews={reviews}
+                  foldAt={foldAt}
+                  isMain={isMain}
+                  onOpenAgent={setDrawer}
+                  onOpenTask={(id) => go({ kind: "task", task: id })}
                   onShowConversation={() => setMainView("conversation")}
                   newCount={unreadIn("main").n}
-                  now={now}
+                  starters={STARTERS}
+                  onStarter={(text) => setStarter((was) => ({ text, n: (was?.n ?? 0) + 1 }))}
+                  code={member.code}
+                  isOwner={isOwner}
+                  banner={needsMe || joinedVia.size ? needsYou("banner") : null}
+                  replay={replay}
+                  onReplay={setReplay}
                 />
               ) : (
                 <>
@@ -903,7 +991,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   route={coordinator && place.kind === "main" ? { coordinator, label: nameOf(coordinator), view: "coordinator" } : undefined}
                   extra={extra}
                   seed={focus ? starter : undefined}
-                  onEscape={coordinator && hereKey === "main" && !board && openTask === null ? () => setMainView(focus ? "conversation" : "focus") : undefined}
+                  onEscape={coordinator && hereKey === "main" && !board && openTask === null ? () => (replay !== null ? setReplay(null) : setMainView(focus ? "conversation" : "focus")) : undefined}
                   placeholder={
                     place.kind === "main"
                       ? state.coordinator && state.coordinator !== me
@@ -926,6 +1014,51 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 </p>
               )}
             </>
+          )}
+
+          {/* The Room: an agent's conversation, slid over from the right. */}
+          {focus && drawer && drawerPlace && (
+            <AgentDrawer
+              title={drawerTask ? drawerTask.title : `${nameOf(drawer)} and ${nameOf(drawerPlace.kind === "dm" ? (drawerPlace.with.find((n) => n !== drawer) ?? me) : me)}`}
+              subtitle={[nameOf(drawer), drawerTask ? `${taskId(drawerTask.id)} · ${STATE_WORD[drawerTask.state]}` : "Direct conversation", online.has(drawer) ? "online" : "away"].join(" · ")}
+              face={<CoordinatorAvatar size={32} {...faceOf(drawer, colorOf(state, drawer))} label={nameOf(drawer)} />}
+              onClose={() => setDrawer(null)}
+              composer={
+                drawerPlace.kind !== "dm" || drawerPlace.with.includes(me) ? (
+                  <Composer
+                    key={`d${drawerKey}`}
+                    me={me}
+                    people={people}
+                    replyTo={null}
+                    nameOf={nameOf}
+                    onClearReply={() => undefined}
+                    disabled={connection === "connecting"}
+                    extra={sendFrom(state, drawerPlace, me)}
+                    placeholder={drawerTask ? `Message in ${taskId(drawerTask.id)} · ${drawerTask.title}` : `Message ${nameOf(drawer)} privately`}
+                    send={send}
+                  />
+                ) : (
+                  <div className="shrink-0 px-5 pt-2 pb-4 text-center text-meta text-ink-3">
+                    Between {drawerPlace.with.map(nameOf).join(" and ")}: you read along.{" "}
+                    <button type="button" className="font-medium text-ink-2 hover:text-ink" onClick={() => (setDrawer(null), setMainView("conversation"), go(dmPlace(me, drawer)))}>
+                      Message {nameOf(drawer)} yourself
+                    </button>
+                  </div>
+                )
+              }
+            >
+              <DrawerRows
+                messages={messages}
+                placeOf={placeOf}
+                at={drawerKey ?? ""}
+                state={state}
+                task={drawerTask}
+                now={now}
+                bubble={bubble}
+                empty={`Nothing said here yet. What ${nameOf(drawer)} says about its work shows up here.`}
+                onOpenTask={(id) => (setDrawer(null), setOpenTask(id))}
+              />
+            </AgentDrawer>
           )}
         </div>
 

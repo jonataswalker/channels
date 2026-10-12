@@ -46,6 +46,9 @@ function useTones(): Tones {
   return tones
 }
 
+/** The outline an agent's head has: never the coordinator's wide TV, so the one voice stands apart. */
+export type FaceShape = "rectangle" | "square" | "circle" | "hexagon"
+
 export function CoordinatorHead({
   size,
   mood,
@@ -54,6 +57,9 @@ export function CoordinatorHead({
   seed,
   className,
   label,
+  shape,
+  shell,
+  hop,
 }: {
   size: number
   mood?: Mood
@@ -64,8 +70,14 @@ export function CoordinatorHead({
   seed?: number
   className?: string
   label?: string
+  /** Another agent's head: its own outline and shell colour (the coordinator keeps the kiwi green TV). */
+  shape?: FaceShape
+  shell?: string
+  /** Just handed something: a happy little hop, then back to its face. */
+  hop?: boolean
 }) {
-  const tones = useTones()
+  const own = useTones()
+  const tones = shell ? { ...own, shell, screen: "#eef4ff" } : own
   // A still head first plays its entrance and settles on its resting face, then stops: frozen on its
   // first frame it would be caught mid-entrance, cut off or squashed.
   const [settled, setSettled] = useState(false)
@@ -81,8 +93,9 @@ export function CoordinatorHead({
       <span className={cx("inline-flex shrink-0 items-center justify-center", className)} style={{ width: size, height: size }}>
       <RobotHead
         size={inner}
-        state={live ? (mood?.state ?? "idle") : mood?.state === "sleeping" ? "sleeping" : "idle"}
-        paused={(!live && settled) || !!mood?.paused}
+        shape={shape}
+        state={hop ? "happy" : live ? (mood?.state ?? "idle") : mood?.state === "sleeping" ? "sleeping" : "idle"}
+        paused={!hop && ((!live && settled) || !!mood?.paused)}
         interactive={interactive}
         antenna={size > 40}
         floorShadow={size > 64}
@@ -104,13 +117,13 @@ export function CoordinatorHead({
  * face is in a list, a bubble's foot or a header, a head on its own reads as a blob; in a circle it
  * reads as someone. Still unless `live`.
  */
-export function CoordinatorAvatar({ size, mood, live = false, seed, className, label }: { size: number; mood?: Mood; live?: boolean; seed?: number; className?: string; label?: string }) {
+export function CoordinatorAvatar({ size, mood, live = false, seed, className, label, shape, shell }: { size: number; mood?: Mood; live?: boolean; seed?: number; className?: string; label?: string; shape?: FaceShape; shell?: string }) {
   return (
     <span
-      className={cx("relative inline-flex shrink-0 items-end justify-center overflow-hidden rounded-full bg-[linear-gradient(180deg,var(--head-bg-top),var(--head-bg-bottom))]", className)}
+      className={cx("relative inline-flex shrink-0 items-end justify-center overflow-hidden rounded-full", shell ? "bg-field" : "bg-[linear-gradient(180deg,var(--head-bg-top),var(--head-bg-bottom))]", className)}
       style={{ width: size, height: size }}
     >
-      <CoordinatorHead size={Math.round(size * 0.86)} mood={mood} live={live} seed={seed} label={label} className="translate-y-[6%]" />
+      <CoordinatorHead size={Math.round(size * 0.86)} mood={mood} live={live} seed={seed} label={label} shape={shape} shell={shell} className="translate-y-[6%]" />
     </span>
   )
 }
