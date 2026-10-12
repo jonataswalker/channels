@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react"
 import { freeAgentName, nameKey, type JoinRequest } from "@mc/membership.ts"
 import type { Message } from "@mc/protocol.ts"
 import { TOO_MANY_REQUESTS } from "@mc/sas.ts"
-import { taskId, type ChannelState, type Task } from "@mc/state.ts"
+import { taskId, type Task } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
 import { excerpt, formatAgo } from "@/lib/format"
 import { cx } from "@/lib/utils"
@@ -18,11 +18,9 @@ export type JoinedVia = Map<string, number>
 
 /**
  * The one place a person acts: who wants in, what agents escalated to them, work waiting on their
- * review, roles asked for, and agents their computers let in. Everything else the channel just says.
+ * review, and agents their computers let in. Everything else the channel just says.
  */
 export function NeedsYou({
-  state,
-  me,
   now,
   roomId,
   escalations,
@@ -36,8 +34,6 @@ export function NeedsYou({
   onOpenTask,
   onJump,
 }: {
-  state: ChannelState
-  me: string
   now: number
   roomId: string
   /** Escalations to this person nobody has answered yet. */
@@ -57,12 +53,10 @@ export function NeedsYou({
   const [all, setAll] = useState(false)
   const [open, setOpen] = useState(true)
   const requests = p.isOwner ? p.requests : []
-  const roles = p.isOwner ? [...state.members.values()].filter((m) => m.active && m.roleRequest && m.name !== me) : []
   const items: { key: string; node: ReactNode }[] = [
     ...requests.map((r) => ({ key: `r${r.id}`, node: <RequestItem r={r} roomId={roomId} now={now} /> })),
     ...escalations.map((m) => ({ key: `e${m.seq}`, node: <EscalationItem m={m} now={now} nameOf={nameOf} onReply={onReply} onJump={onJump} /> })),
     ...reviews.map((t) => ({ key: `t${t.id}`, node: <ReviewItem t={t} nameOf={nameOf} onApprove={onApproveTask} onSendBack={onSendBack} onOpen={onOpenTask} /> })),
-    ...roles.map((m) => ({ key: `o${m.name}`, node: <RoleItem name={m.name} label={nameOf(m.name)} asked={m.roleRequest!} /> })),
     ...(joinedVia.size
       ? [
           {
@@ -92,7 +86,7 @@ export function NeedsYou({
           <Icon icon={ArrowDown01Icon} size={14} className={cx("ml-auto shrink-0 self-center text-ink-3 transition-transform", open && "rotate-180")} />
         </button>
       </h2>
-      {open && requests.some((r) => r.check === "unchecked" && !r.reclaims) && <p className="mx-4 mb-1 text-meta leading-normal text-ink-3">{TOO_MANY_REQUESTS}</p>}
+      {open && requests.some((r) => r.check === "unchecked") && <p className="mx-4 mb-1 text-meta leading-normal text-ink-3">{TOO_MANY_REQUESTS}</p>}
       {open && (
       <ul className="max-h-[40vh] divide-y divide-line overflow-y-auto">
         {shown.map((i) => (
@@ -124,12 +118,12 @@ function Row({ lead, title, detail, children }: { lead: ReactNode; title: ReactN
   )
 }
 
-/** Someone asking to join: compare the code, then one click. What they may do is the default; "Choose each…" for more. */
+/** Someone asking to join: compare the code, then one click. Whether it can only read is the default this browser keeps; "Choose…" to change it. */
 function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: number }) {
-  const { p, busy, run, ask, onlineNow } = useControls()
+  const { p, busy, run, ask } = useControls()
   const auth = useAuth()
-  // A name someone here already has (a race: a taken name usually comes as a reclaim, or auto-named): let it in under another.
-  const taken = r.kind !== "human" && !r.reclaims && p.roster.some((m) => m.active && nameKey(m.name) === nameKey(r.name))
+  // A name someone here took since the request was listed (a race: a taken name usually comes offered as a free one): let it in under another.
+  const taken = r.kind !== "human" && p.roster.some((m) => m.active && nameKey(m.name) === nameKey(r.name))
   const [rename, setRename] = useState(() => (taken ? freeAgentName(r.name, p.roster) : ""))
   const who = r.kind === "human" ? `Signed in as ${r.sponsoredBy?.name ?? "someone"}` : r.sponsoredBy ? `Agent for ${r.sponsoredBy.name}, from their computer` : "An agent"
   const lead = <Monogram name={r.name} agent={r.kind !== "human"} size={24} />
@@ -138,26 +132,6 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
       <Row lead={lead} title={<><span className="font-medium">{r.name}</span> wants to join</>} detail={who}>
         <Button size="sm" onClick={auth.signIn}>
           Sign in to review
-        </Button>
-      </Row>
-    )
-  }
-  if (r.reclaims) {
-    return (
-      <Row lead={lead} title={<>A new key wants to take back <span className="font-medium">{r.reclaims.name}</span>’s seat</>} detail={`${who} · asked ${formatAgo(r.ts, now)}`}>
-        {r.check === "ready" ? (
-          <Button size="sm" onClick={() => ask({ kind: "reclaim", req: r, online: onlineNow(r.reclaims!.name) })}>
-            Review
-          </Button>
-        ) : r.check === "unchecked" ? (
-          <Button size="sm" disabled={busy} onClick={() => run(() => p.onCheck(r), `Asked for ${r.name}’s code`)}>
-            Show code
-          </Button>
-        ) : (
-          <span className="text-meta text-ink-3">Waiting for its code…</span>
-        )}
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => run(() => p.onDeny(r), `Declined ${r.name}`)}>
-          Decline
         </Button>
       </Row>
     )
@@ -327,29 +301,6 @@ function ReviewItem({ t, nameOf, onApprove, onSendBack, onOpen }: { t: Task; nam
           </Button>
         </form>
       )}
-    </Row>
-  )
-}
-
-/** A member asked for a role; the owner allows it or keeps theirs. */
-function RoleItem({ name, label, asked }: { name: string; label: string; asked: { role?: string; about?: string } }) {
-  const { p, busy, run } = useControls()
-  return (
-    <Row
-      lead={<Monogram name={name} agent size={24} />}
-      title={
-        <>
-          <span className="font-medium">{label}</span> asks to be <span className="font-medium">{asked.role ?? "unassigned"}</span>
-        </>
-      }
-      detail={asked.about}
-    >
-      <Button size="sm" disabled={busy} onClick={() => void run(() => p.onRole({ op: "role.set", member: name, role: asked.role ?? null, about: asked.about ?? null }), `${label} is now ${asked.role ?? "unassigned"}`)}>
-        Allow
-      </Button>
-      <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => p.onRole({ op: "role.refuse", member: name }), `Kept ${label}’s role`)}>
-        Refuse
-      </Button>
     </Row>
   )
 }

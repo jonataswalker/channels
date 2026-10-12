@@ -185,18 +185,16 @@ describe("agents coordinating through the CLI", () => {
     expect(joined.split("\n").filter((l) => l.startsWith("You're") || l.startsWith("Only") || l.startsWith("Start") || l.startsWith("`")).length).toBe(4);
     await joinVia(lead, win, code, "proj", "win", "windows");
 
-    // Someone else with the leaked code asks to be "win": it shows as a RECLAIM of win's seat, which is never
-    // checked on its own, so it has no code to approve; the owner denies it by key.
+    // Someone else with the leaked code asks to be "win": nobody's seat ever moves to a new key, so it's a
+    // plain request under the next free name, which the owner sees as such and turns down by key.
     const evil = mc(home("evil"), "join", code, "proj", "--as", "win", "--timeout", "20s");
     let listed = "";
     await untilTrue(async () => {
       listed = await ok(lead, "--as", "human", "requests");
-      return /RECLAIMS win's seat/.test(listed);
-    }, "reclaim listed");
-    expect(listed).toMatch(/unchecked RECLAIMS win's seat · old key \S+, last seen .* · new key (\S+)/);
-    const evilKey = /new key (\S+)/.exec(listed)![1]!;
-    // Under another name it would be a plain join, but without --yes (and no terminal), approval refuses.
-    expect((await run(lead, "--as", "human", "check", evilKey)).err).toContain("needs your human's go-ahead");
+      return /win-2 \(asked as win, which is taken\)/.test(listed);
+    }, "the request listed under a free name");
+    expect(listed).not.toContain("RECLAIM");
+    const evilKey = /win-2 \(asked as win, which is taken\).* key (\S+)/.exec(listed)![1]!;
     await ok(lead, "--as", "human", "deny", evilKey);
     expect(await evil.exited).toBe(1);
 

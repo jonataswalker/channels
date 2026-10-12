@@ -125,7 +125,6 @@ const { values: opt, positionals: args } = parseArgs({
     link: { type: "string" },
     name: { type: "string" },
     push: { type: "boolean" },
-    reclaim: { type: "boolean" },
     clear: { type: "boolean" },
     force: { type: "boolean" },
     scopes: { type: "string" },
@@ -304,7 +303,7 @@ const findRequest = Effect.fn("kiwi.findRequest")(function* (s: AgentSession, ne
 /**
  * The channel's owner key is on this machine (`kiwi create` made the channel here): let this request in
  * with it. Whoever can run kiwi here can already read that key, so comparing codes would only be this
- * machine checking itself. Never for a RECLAIM of someone's seat. Returns whether it let them in.
+ * machine checking itself. Returns whether it let them in.
  */
 const admitLocally = Effect.fn("kiwi.admitLocally")(function* (code: string, relay: string, id: Identity, requestId: string, as: { name?: string; role?: string; about?: string }) {
   const keys = yield* Keystore;
@@ -312,7 +311,7 @@ const admitLocally = Effect.fn("kiwi.admitLocally")(function* (code: string, rel
   const local = Object.values((yield* keys.config).channels).find((c) => c.roomId === roomId && c.owner && c.relay === relay);
   if (!local?.owner || !(yield* keys.identitiesIn(roomId)).includes(local.owner)) return false;
   const owner = new Channel(local, relay, yield* keys.identity(local.owner, roomId));
-  const find = Effect.map(owner.fx.requests(), (reqs) => reqs.find((r) => r.id === requestId && r.pk === id.pk && !r.reclaims));
+  const find = Effect.map(owner.fx.requests(), (reqs) => reqs.find((r) => r.id === requestId && r.pk === id.pk));
   let r = yield* find;
   if (!r) return false;
   if (r.check === "unchecked") yield* owner.fx.checkRequest(r);
@@ -320,7 +319,9 @@ const admitLocally = Effect.fn("kiwi.admitLocally")(function* (code: string, rel
   yield* Channel.fx.joinStatus(relay, code, id, requestId);
   r = yield* find;
   if (r?.check !== "ready") return false;
-  yield* owner.fx.approve(r, { ...(as.name ? { name: as.name } : {}), ...(as.role ? { role: as.role } : {}), ...(as.about ? { about: as.about } : {}) });
+  // A name someone holds is offered a free one like it (askedAs): let it in under that, not the typed one.
+  const name = r.askedAs ? undefined : as.name;
+  yield* owner.fx.approve(r, { ...(name ? { name } : {}), ...(as.role ? { role: as.role } : {}), ...(as.about ? { about: as.about } : {}) });
   return true;
 });
 
@@ -384,21 +385,6 @@ const signInOn = (relay: string) =>
  */
 const outForGood = (err: unknown) =>
   err instanceof RelayError && (err.tag === "Removed" || err.tag === "Denied" || (!err.tagged && err.status === 403 && /removed|denied/.test(err.message)));
-
-/** `kiwi approve` for a RECLAIM: the seat moves to the new key, with every guard the client enforces. */
-const reclaimSeat = Effect.fn("kiwi.reclaimSeat")(function* (s: AgentSession, r: JoinRequest) {
-  const target = r.reclaims!;
-  // Seen in the last ten minutes, or listening right now: the old key may still be in use.
-  const { state } = yield* s.state();
-  const seen = state.members.get(target.name)?.lastSeen ?? 0;
-  const online = Date.now() - seen < 10 * 60_000 || (yield* s.who()).has(target.name);
-  if (online) process.stderr.write(`kiwi: ${target.name} IS ONLINE NOW with its current key (${fingerprint(target.pk)}): this may be someone else taking its seat\n`);
-  const question = `Move ${target.name}'s seat from key ${fingerprint(target.pk)} to ${fingerprint(r.pk)}? Verification code ${r.code}. The old key is out for good.`;
-  if (!(yield* confirm(question))) return yield* die(`reclaiming needs your human's go-ahead: once they confirm the joining agent shows ${r.code}, re-run with --yes${online ? " --force" : ""}`);
-  if (online && !opt.force) return yield* die(`${target.name} is online: only if your human is sure the old key is lost, re-run with --force`);
-  yield* (yield* s.adminCh("move a seat to a new key")).fx.reclaim(r, { online, force: opt.force, scopes: state.members.get(target.name)?.scopes ?? [] });
-  out(`moved ${target.name}'s seat to key ${fingerprint(r.pk)} (${r.code}); the old key is out and the channel key rotated`);
-});
 
 /** The channel `kiwi tui` opens: as flags or this folder say, else the only one with a person's seat here. */
 const personAlias = Effect.fn("kiwi.personAlias")(function* () {
@@ -590,7 +576,7 @@ const commands: Record<string, Command> = {
       if (name === OWNER_NAME) return yield* die(`"${OWNER_NAME}" is reserved for the channel owner; pick an agent name with --as`);
       const hadKey = local.includes(name);
       let id = yield* keys.identity(name, roomId);
-      const info = { name, ...(opt.role ? { role: opt.role } : {}), ...(opt.about ? { about: opt.about } : {}), ...(opt.reclaim ? { reclaim: true } : {}), ...(auto && !opt.reclaim ? { auto: true } : {}) };
+      const info = { name, ...(opt.role ? { role: opt.role } : {}), ...(opt.about ? { about: opt.about } : {}), ...(auto ? { auto: true } : {}) };
 
       // Agents join from a computer its person linked with `kiwi setup`; the computer vouches for them.
       const signIn = yield* signInOn(relay);
@@ -649,11 +635,6 @@ const commands: Record<string, Command> = {
             // Nothing new was granted: pick up where this agent left off.
             if ((yield* cursor.read(alias, name)) === null) yield* cursor.write(alias, name, yield* s.ch.fx.head());
             if (opt.role || opt.about) yield* hello(opt.role, opt.about);
-          } else if (opt.reclaim) {
-            // A reclaimed seat: what reached this name after its old key last spoke is unread for the new one.
-            const { messages, state } = yield* s.state();
-            const last = messages.filter((m) => m.from === name && m.kind !== "event" && state.trust.get(m.seq) === "verified").at(-1)?.seq;
-            yield* cursor.write(alias, name, last ?? state.head);
           } else {
             yield* cursor.write(alias, name, yield* s.ch.fx.head());
             yield* hello(opt.role, opt.about);
@@ -681,7 +662,7 @@ const commands: Record<string, Command> = {
         if (access && (access.keys[String(access.epoch)] ?? local?.keys[String(access.epoch)])) return yield* settle(access, "resumed");
       }
       // This computer's own seat in the channel lets it in at once, with no request and no code.
-      if (seatedHere && !opt.reclaim) {
+      if (seatedHere) {
         const admitted = yield* admitHere(code, relay, seatedHere, id, name, opt.about);
         if (admitted) {
           if (admitted.name !== name) {
@@ -711,9 +692,9 @@ const commands: Record<string, Command> = {
           }),
         ),
       );
-      out(opt.reclaim ? `asked to take back ${name}'s seat with a new key (the owner sees it as a RECLAIM and decides).` : `asked to join as ${name}.`);
+      out(`asked to join as ${name}.`);
       if (linked) out(`Vouched for by this computer${linked.linked?.name ? `, linked to ${linked.linked.name}` : ""}.`);
-      if (!opt.reclaim && (yield* admitLocally(code, relay, id, req.requestId, { ...(auto ? {} : { name }), role: opt.role, about: opt.about }))) {
+      if ((yield* admitLocally(code, relay, id, req.requestId, { ...(auto ? {} : { name }), role: opt.role, about: opt.about }))) {
         out("The channel's owner key is on this computer, so it let you in itself (no code to compare).");
       } else out(`waiting for the owner to open your request…`);
       const deadline = Date.now() + parseDuration(opt.timeout ?? "30m") * 1000;
@@ -893,18 +874,15 @@ const commands: Record<string, Command> = {
       const s = yield* session();
       const reqs = yield* s.requests();
       if (!reqs.length) return out("no pending join requests");
-      const { state } = reqs.some((r) => r.reclaims) ? yield* s.state() : { state: null };
       for (const r of reqs) {
         const who = r.kind === "human" ? `person, signed in as ${r.sponsoredBy?.name ?? "?"}` : r.sponsoredBy ? `agent of ${r.sponsoredBy.name}` : "agent";
         const code = r.code ?? (r.check === "waiting" ? "waiting" : "unchecked");
-        if (r.reclaims) {
-          const seen = state?.members.get(r.reclaims.name)?.lastSeen;
-          out(`${code.padEnd(8)} RECLAIMS ${r.reclaims.name}'s seat · old key ${fingerprint(r.reclaims.pk)}${seen ? `, last seen ${ago(seen)}` : ""} · new key ${fingerprint(r.pk)} · ${who} · ${ago(r.ts)}`);
-        } else out(`${code.padEnd(8)} ${r.name}${r.role ? ` (${r.role})` : ""} · ${who} · key ${fingerprint(r.pk)} · ${ago(r.ts)}`);
+        // A name someone here already holds comes as the next free one: asked for X, it joins as X-2.
+        const asked = r.askedAs && r.askedAs !== r.name ? ` (asked as ${r.askedAs}, which is taken)` : "";
+        out(`${code.padEnd(8)} ${r.name}${asked}${r.role ? ` (${r.role})` : ""} · ${who} · key ${fingerprint(r.pk)} · ${ago(r.ts)}`);
       }
       if (reqs.some((r) => r.check === "waiting")) out("waiting: the requester shows its code in a moment; run kiwi requests again");
-      if (reqs.some((r) => r.reclaims && r.check === "unchecked")) out("unchecked RECLAIM: a seat moves only at your human's word; once they confirm, run kiwi check <new key>");
-      if (reqs.some((r) => !r.reclaims && r.check === "unchecked")) out(`unchecked: ${TOO_MANY_REQUESTS}`);
+      if (reqs.some((r) => r.check === "unchecked")) out(`unchecked: ${TOO_MANY_REQUESTS}`);
     }),
 
   check: () =>
@@ -914,7 +892,7 @@ const commands: Record<string, Command> = {
       const key = (args[1] ?? (yield* die("usage: kiwi check KEY (the request's key, from kiwi requests)"))).trim();
       const r = (yield* s.requests()).find((x) => x.check === "unchecked" && fingerprint(x.pk).startsWith(key));
       if (!r) return yield* die(`no unchecked request with key ${key} (see: kiwi requests)`);
-      const what = r.reclaims ? `${r.reclaims.name}'s seat (RECLAIM, new key ${fingerprint(r.pk)})` : `${r.name} (key ${fingerprint(r.pk)})`;
+      const what = `${r.name} (key ${fingerprint(r.pk)})`;
       if (!(yield* confirm(`Start the code check for ${what}?`))) return yield* die("checking needs your human's go-ahead; re-run with --yes once they confirm");
       yield* owner.fx.checkRequest(r);
       out(`checking ${what}: the requester shows its 6-digit code in a moment (kiwi requests)`);
@@ -923,12 +901,8 @@ const commands: Record<string, Command> = {
   approve: () =>
     Effect.gen(function* () {
       const s = yield* session();
-      const r = yield* findRequest(s, args[1] ?? (yield* die("usage: kiwi approve CODE [--name NEWNAME] [--role ROLE] [--scopes S] [--yes] [--force]")));
-      const scopes = opt.scopes === undefined ? undefined : (parseScopes(opt.scopes) ?? (yield* die(`"${opt.scopes}" isn't scopes: say read-only, contributor, full, or a list of ${SCOPES.join(",")}`)));
-      if (r.reclaims && !opt.name) {
-        if (scopes) return yield* die("a reclaimed seat keeps what it may do; change that after with: kiwi scope NAME SCOPES");
-        return yield* reclaimSeat(s, r);
-      }
+      const r = yield* findRequest(s, args[1] ?? (yield* die("usage: kiwi approve CODE [--name NEWNAME] [--role ROLE] [--scopes member|read-only] [--yes]")));
+      const scopes = opt.scopes === undefined ? undefined : (parseScopes(opt.scopes) ?? (yield* die(`"${opt.scopes}" isn't a level: say member or read-only`)));
       const name = opt.name ?? r.name;
       if (!NAME_RE.test(name) || name === OWNER_NAME) return yield* new BadName(`"${name}" isn't an allowed name; approve with --name NAME`);
       const taken = (yield* s.members(true)).find((m) => m.name === name && m.active);
@@ -949,7 +923,7 @@ const commands: Record<string, Command> = {
       const s = yield* session();
       const r = yield* findRequest(s, args[1] ?? (yield* die("usage: kiwi deny CODE|KEY")), { byKey: true });
       yield* (yield* s.adminCh("turn a request down")).fx.deny(r.id);
-      out(`denied ${r.reclaims ? `the RECLAIM of ${r.reclaims.name}'s seat` : r.name} (${r.code ?? `key ${fingerprint(r.pk)}`})`);
+      out(`denied ${r.name} (${r.code ?? `key ${fingerprint(r.pk)}`})`);
     }),
 
   members: () =>
@@ -1005,8 +979,7 @@ const commands: Record<string, Command> = {
       }
       yield* s.adminCh("set what members may do");
       const scopes =
-        parseScopes(given ?? (yield* die("usage: kiwi scope NAME read-only|contributor|full|post,ask,tasks,claims,facts [--yes]"))) ??
-        (yield* die(`"${given}" isn't scopes: say read-only, contributor, full, or a list of ${SCOPES.join(",")}`));
+        parseScopes(given ?? (yield* die("usage: kiwi scope NAME member|read-only [--yes]"))) ?? (yield* die(`"${given}" isn't a level: say member or read-only`));
       if (!(yield* confirm(`Let ${name} ${mayDo(scopes)}?`))) return yield* die("changing what a member may do needs your human's go-ahead; re-run with --yes");
       yield* s.setScopes(name, scopes);
       out(`${name} may now ${mayDo(scopes)}`);
@@ -1525,35 +1498,24 @@ const commands: Record<string, Command> = {
   hello: () =>
     Effect.gen(function* () {
       const s = yield* session();
-      yield* s.hello(opt.role, opt.about);
+      // Roles aren't asked for: the owner sets them (kiwi role NAME ROLE, or People on the web).
+      if (opt.role || opt.about) return yield* die("the owner sets roles and rules: ask them in a message (kiwi send --to human \"…\")");
+      yield* s.hello();
       const me = (yield* s.state()).state.members.get(s.me);
-      if (me?.roleRequest) out(`asked the owner to make you ${me.roleRequest.role ?? "unassigned"}${me.roleRequest.about ? ` (${me.roleRequest.about})` : ""}; your role stays ${me.role ?? "unset"} until they decide`);
-      else out(`announced ${s.me}${me?.role ? ` as ${me.role}` : ""}`);
+      out(`announced ${s.me}${me?.role ? ` as ${me.role}` : ""}`);
     }),
 
-  /** Roles are the owner's to give: list requests, set one, allow or refuse what someone asked for. */
+  /** Roles are the owner's to give: kiwi role NAME ROLE sets one (kiwi status shows everyone's). */
   role: () =>
     Effect.gen(function* () {
       const s = yield* session();
-      const [sub, a] = args.slice(1);
-      if (!sub) {
-        const { state } = yield* s.state();
-        const asks = [...state.members.values()].filter((m) => m.active && m.roleRequest);
-        if (!asks.length) return out("no role requests");
-        for (const m of asks) out(`${m.name}: ${m.role ?? "no role"} → ${m.roleRequest!.role ?? "no role"}${m.roleRequest!.about ? ` (${m.roleRequest!.about})` : ""}`);
-        return out(s.ownerCh ? "decide with: kiwi role allow NAME, or kiwi role refuse NAME" : "the owner decides these, in the web dashboard or with kiwi tui");
-      }
-      yield* s.adminCh("decide roles");
-      if (sub === "refuse") {
-        yield* s.decideRole(a ?? (yield* die("usage: kiwi role refuse NAME")), "refuse");
-        return out(`kept ${a}'s role`);
-      }
-      const allowing = sub === "allow";
-      const member = allowing ? (a ?? (yield* die("usage: kiwi role allow NAME [--yes]"))) : sub;
-      const role = allowing ? undefined : (a ?? (yield* die('usage: kiwi role NAME ROLE [--about "rules"] [--yes]')));
-      if (!(yield* confirm(allowing ? `Give ${member} the role they asked for?` : `Make ${member} ${role}?`))) return yield* die("changing a role needs your human's go-ahead; re-run with --yes");
-      yield* s.decideRole(member, allowing ? "allow" : { role: role!, ...(opt.about !== undefined ? { about: opt.about } : {}) });
-      out(allowing ? `${member} has the role they asked for` : `made ${member} ${role}`);
+      const [member, role] = args.slice(1);
+      if (!member || !role) return yield* die('usage: kiwi role NAME ROLE [--about "rules"] [--yes] (the owner sets roles; "none" clears one)');
+      yield* s.adminCh("set roles");
+      const clear = role.toLowerCase() === "none";
+      if (!(yield* confirm(clear ? `Clear ${member}'s role?` : `Make ${member} ${role}?`))) return yield* die("changing a role needs your human's go-ahead; re-run with --yes");
+      yield* s.decideRole(member, { role: clear ? null : role, ...(opt.about !== undefined ? { about: opt.about } : {}) });
+      out(clear ? `cleared ${member}'s role` : `made ${member} ${role}`);
     }),
 
   web: () =>

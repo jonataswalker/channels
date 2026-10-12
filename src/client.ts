@@ -547,7 +547,6 @@ export interface ChannelFx {
   requests(opts?: { budget?: SigningBudget }): Effect.Effect<JoinRequest[], Refused, Relay>;
   checkRequest(req: Pick<JoinRequest, "id" | "pk" | "commit">): Effect.Effect<void, Refused, Relay>;
   approve(req: JoinRequest, as?: Partial<MemberInfo>): Effect.Effect<Member, Refused, Relay>;
-  reclaim(req: JoinRequest, opts: { online: boolean; force?: boolean; scopes?: Scope[] }): Effect.Effect<Member, Refused, Relay>;
   deny(requestId: string): Effect.Effect<void, Refused, Relay>;
   setCanPost(pk: string, post: boolean): Effect.Effect<void, Refused, Relay>;
   updateScopes(m: Member, scopes: readonly Scope[], since: number): Effect.Effect<void, Refused, Relay>;
@@ -945,17 +944,21 @@ export class Channel {
         try {
           info = JSON.parse(raw ?? "{}") as typeof info;
         } catch {}
-        // An agent asking under a name a current member has: approving would move their seat, so a person
-        // checks it, never the budget. (A person is admitted under their account's handle, whatever they typed.)
-        // An agent that didn't pick its name is offered a free one like it instead: never a RECLAIM.
+        // (A person is admitted under their account's handle, whatever they typed.)
+        // An agent whose name is taken is offered a free one like it: a seat never moves to a new key
+        // (a lost key means the owner removes the old seat and the agent joins again). One that didn't
+        // pick its name asks under its base ("claude-2" → "claude"), so the next free one is claude-3.
+        // A name that isn't allowed at all (invalid, reserved) isn't swapped for one like it: approving refuses it.
         const asked = inlineText(info.name, 40);
-        // The base it asked under, without a suffix its own machine added ("claude-2" → "claude"), so the next free one is claude-3, not claude-2-2.
-        const auto = r.kind !== "human" && info.auto === true ? (NAME_RE.test(asked) ? asked.replace(/-\d+$/, "") || asked : "agent") : undefined;
+        const allowed = NAME_RE.test(asked) && !RESERVED_NAMES.has(nameKey(asked));
+        const holder = allowed ? seats.find((m) => nameKey(m.name) === nameKey(asked)) : undefined;
+        // A person's or the owner's name isn't a base for an agent's: "alice-2" would read as alice's.
+        const personName = !!holder && (holder.kind === "human" || holder.owner);
+        const base = info.auto === true ? (allowed ? asked.replace(/-\d+$/, "") || asked : "agent") : asked;
+        const auto = r.kind !== "human" && (info.auto === true || !!holder) ? (personName ? "agent" : base) : undefined;
         if (auto) offered.push({ name: (info.name = freeAgentName(auto, offered)) });
-        const seat = r.kind === "human" || auto ? undefined : seats.find((m) => nameKey(m.name) === nameKey(String(info.name ?? "")));
-        const reclaims = seat ? { name: seat.name, pk: seat.pk, kind: seat.kind, owner: seat.owner, ...(seat.sponsor ? { sponsor: seat.sponsor } : {}) } : undefined;
         // A half that doesn't check out means the relay tampered with the request: leave it out.
-        const check = yield* this.codeCheck(r, reclaims ? undefined : opts.budget).pipe(Effect.catchCause(() => Effect.succeed(null)));
+        const check = yield* this.codeCheck(r, opts.budget).pipe(Effect.catchCause(() => Effect.succeed(null)));
         if (!check) continue;
         // Whoever holds the join code chose these: keep them to one safe line each.
         out.push({
@@ -971,8 +974,6 @@ export class Channel {
           commit: r.commit,
           ...check,
           sponsoredBy: r.sponsorUser ? { user: r.sponsorUser, name: inlineText(r.sponsorName, 80) || r.sponsorUser, email: r.sponsorEmail ?? null } : null,
-          ...(reclaims ? { reclaims } : {}),
-          ...(info.reclaim === true && !auto ? { reclaim: true } : {}),
           ...(auto ? { askedAs: auto } : {}),
         });
       }
@@ -1018,43 +1019,6 @@ export class Channel {
       const post = canPost(scopesOf(info));
       const sealed = yield* Effect.promise(() => sealRecord(current, rec));
       yield* this.request("/members", { method: "POST", body: JSON.stringify({ pk: req.pk, xpk: req.xpk, rec: sealed, keys, request: req.id, ...(post ? {} : { post }) }) });
-      const member: Member = { pk: req.pk, xpk: req.xpk, ...info, owner: false, at: rec.at, active: true };
-      return member;
-    }),
-
-    reclaim: Effect.fn("Channel.reclaim")({ self: this }, function* (this: Channel, req: JoinRequest, opts: { online: boolean; force?: boolean; scopes?: Scope[] }) {
-      yield* this.ownerOnly();
-      const target = req.reclaims;
-      if (!target) return yield* new Rejected(`${req.name} isn't anyone's seat yet: approve it as a new member`);
-      if (req.check !== "ready" || !req.code) return yield* new Rejected(`${req.name} hasn't shown its code yet: approve once you've both seen the same 6 digits`);
-      const seat = (yield* this.fx.members()).find((m) => m.active && m.pk === target.pk && !m.unverified);
-      if (!seat) return yield* new Rejected(`${target.name}'s seat changed since this request was read: read the requests again`);
-      if (seat.owner) return yield* new Rejected("the owner's seat can't be reclaimed");
-      if (seat.kind === "human") return yield* new Rejected(`${seat.name} is a person's own seat: they sign in again from their browser instead`);
-      if ((req.kind ?? "agent") !== "agent") return yield* new Rejected("only an agent can reclaim an agent's seat");
-      if ((req.sponsoredBy?.user ?? null) !== (seat.sponsor?.user ?? null)) {
-        return yield* new Rejected(`this request comes from ${req.sponsoredBy ? `${req.sponsoredBy.name}'s computer` : "a computer nobody vouched for"}, but ${seat.name} acts for ${seat.sponsor?.name ?? "nobody"}: refused`);
-      }
-      if (opts.online && !opts.force) return yield* new Rejected(`${seat.name} IS ONLINE NOW with its current key: this may be someone else taking its seat. Only go on if you're sure, with force`);
-      const info: MemberInfo = {
-        name: seat.name,
-        ...(seat.role ? { role: seat.role } : {}),
-        ...(seat.about ? { about: seat.about } : {}),
-        kind: "agent",
-        ...(seat.sponsor ? { sponsor: seat.sponsor } : {}),
-        ...(wireScopes(opts.scopes ?? seat.scopes) ? { scopes: wireScopes(opts.scopes ?? seat.scopes)! } : {}),
-      };
-      const current = this.access.keys[String(this.access.epoch)]!;
-      const rec = yield* Effect.promise(() => makeRecord(this.identity, this.roomId, { ...info, pk: req.pk, xpk: req.xpk }));
-      const keys = yield* Effect.promise(() => wrapAllFor(this.identity, this.roomId, this.access.keys, req.pk, req.xpk));
-      const post = canPost(scopesOf(info));
-      const sealed = yield* Effect.promise(() => sealRecord(current, rec));
-      yield* this.request("/members", {
-        method: "POST",
-        body: JSON.stringify({ pk: req.pk, xpk: req.xpk, rec: sealed, keys, request: req.id, replaces: seat.pk, ...(post ? {} : { post }) }),
-      });
-      yield* this.fx.rotate();
-      yield* this.fx.send(`moved ${seat.name}'s seat to a new key`, { ev: { op: "seat.reclaim", member: seat.name, from: seat.pk.slice(0, 8), to: req.pk.slice(0, 8) } });
       const member: Member = { pk: req.pk, xpk: req.xpk, ...info, owner: false, at: rec.at, active: true };
       return member;
     }),
@@ -1792,21 +1756,6 @@ export class Channel {
   /** Admit a requester: sign its record, and wrap every epoch key to it. */
   approve(req: JoinRequest, as?: Partial<MemberInfo>): Promise<Member> {
     return run(this.fx.approve(req, as));
-  }
-
-  /**
-   * Move a member's seat to the key in `req` (a reclaim): the same name, role,
-   * rules and person, so their tasks, claims and facts carry over. One relay step
-   * removes the old key and admits the new one; then the channel key rotates, and
-   * the owner signs a record of it. Refused unless the person behind the request
-   * is the one behind the seat, and never for the owner's or a person's own seat.
-   * `online` says the old key was active in the last minutes: that takes `force`. Pass `scopes`, what
-   * the seat may do now, from the fold: the owner's scope.set events name the old key, so the new
-   * key's record must carry them, or a reclaim would hand back whatever the old record said.
-   * Without them, the old record's scopes carry over.
-   */
-  reclaim(req: JoinRequest, opts: { online: boolean; force?: boolean; scopes?: Scope[] }): Promise<Member> {
-    return run(this.fx.reclaim(req, opts));
   }
 
   deny(requestId: string): Promise<void> {

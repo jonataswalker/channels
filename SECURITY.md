@@ -211,7 +211,7 @@ QR code, and channels joined later reach their other devices on their own.
   recovery code open the new vault; other passkeys are added again. Lost a
   device? Rotate the vault, then close or leave its channels as below. The
   vault doesn't change what a lost device already had.
-- A seat taken over under a new key (a rejoin, a reclaim) leaves a tombstone
+- A seat taken over under a new key (a rejoin, or a reclaim from an older client) leaves a tombstone
   for the old key, so no device brings it back. One join code never holds two
   live keys.
 
@@ -233,11 +233,15 @@ checks it against the owner-signed member list:
 
 Roles are the owner's to give, the same way: the role in the member record the
 owner signs at approval, or a later role event signed by the owner key. A
-member announcing a different role only *asks* for it; every client ignores
-role changes from anyone but the owner.
+member can't ask for one (an older client's hello asking for a role is ignored):
+every client ignores role changes from anyone but the owner.
 
-What a member may do besides read (their **scopes**: write messages, ask,
-tasks, facts) is the owner's to give too: signed into the member record
+Whether a member may do more than read is the owner's to give too: a
+**member** may write, ask, work on tasks and set notes; a **read-only** one may
+only read. On the wire this is still the list of scopes it always was (write
+messages, ask, tasks, claims, facts), so a grant from before the two levels
+(some scopes, not all) keeps reading and binding as it was; it's just not
+offered any more. It's signed into the member record
 at approval, or changed later by a `scope.set` event signed by the owner key.
 It names the member's key, so it never carries over to whoever is admitted
 under that name next. Every client checks each message against its sender's
@@ -381,27 +385,16 @@ Channel keys are random (256-bit), not derived from the code.
 - **Same key** (the config was lost, or `kiwi join` ran again): the key is
   still a member, so it just fetches its keys again. Nothing new is granted,
   and a removed or denied key still can't come back.
-- **New key** (a wiped machine, a new computer): `kiwi join CODE --as NAME
-  --reclaim` files an ordinary join request. Any request whose name a current
-  member has is shown to the owner as a **RECLAIM of that seat**, never as a
-  join, and its code check is never signed from the day's automatic share: a
-  person starts it (`kiwi check`, or the dashboard). The client refuses a
-  reclaim when the request comes from a different person than the one the
-  seat acts for, when the seat is the owner's or a person's own, and, unless
-  forced, while the old key was active in the last ten minutes (it may be
-  someone else taking the seat). Agents can't approve it (the MCP tools refuse).
-- Two limits of those guards. On a relay without sign-in nobody is vouched
-  for, so the same-person check passes trivially: there the code check and the
-  owner's click are the whole guard. And "online" comes from relay presence and
-  the old key's last message, which a malicious relay can hide: it's a speed
-  bump, not a guarantee.
-- Approving is one relay step: the old key is removed and the new one admitted
-  under the same name, role, rules and person, with no moment when both are
-  members. Then the channel key rotates, as after any removal, and the owner
-  signs a record of the move. The old key is out for good, like a removed one.
-- Tasks and facts belong to the name, so they carry over; the old key's
-  messages still verify. A stolen join code plus a guessed name gets nothing
-  without the owner's code check, approval and a matching person.
+- **New key** (a wiped machine, a new computer): a seat never moves to a new
+  key. The owner removes the old seat (the channel key rotates, as after any
+  removal) and the agent joins again like anyone else, under the same name if
+  the owner lets it. Until the old seat is removed, a request under a name a
+  current member holds is offered the next free one ("win-2"), never that
+  member's seat, so a stolen join code plus a guessed name gets a plain request
+  the owner sees for what it is. An older client's `--reclaim` is just such a
+  request.
+- Tasks and notes belong to the name: an agent that rejoins under its old name
+  picks them up; the old key's messages still verify.
 
 ## What the relay (and its operator) still learns
 

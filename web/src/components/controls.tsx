@@ -32,7 +32,6 @@ export type Filter = { kind: "from"; name: string } | { kind: "open" } | { kind:
 
 type Confirm =
   | { kind: "approve"; req: JoinRequest }
-  | { kind: "reclaim"; req: JoinRequest; online: boolean }
   | { kind: "remove"; member: RosterMember }
   | { kind: "role"; member: RosterMember }
   | { kind: "scopes"; member: RosterMember }
@@ -53,15 +52,13 @@ export interface ControlsProps {
   onFilter: (f: Filter) => void
   /** `scopes`: what they may do besides read; left out, everything. */
   onApprove: (r: JoinRequest, scopes?: Scope[]) => Promise<void>
-  /** Owner: move a member's seat to the key in a RECLAIM request. `force` is the second confirm when the old key is online. */
-  onReclaim: (r: JoinRequest, opts: { online: boolean; force?: boolean }) => Promise<void>
   onDeny: (r: JoinRequest) => Promise<void>
   /** Sign this browser's half of a request's code check, at the person's click. */
   onCheck: (r: JoinRequest) => Promise<void>
   onRemove: (m: RosterMember) => Promise<void>
   /** Owner: change what a member may do besides read (a signed scope.set, then the relay's bit). */
   onScopes?: (m: RosterMember, scopes: Scope[]) => Promise<void>
-  /** Owner: set a member's role, or allow or refuse the one they asked for (a signed event). */
+  /** Owner: set a member's role (a signed event). role.refuse is an older owner's; nothing sends it now. */
   onRole: (ev: Extract<Event, { op: "role.set" | "role.refuse" }>) => Promise<void>
   onCloseChannel: () => Promise<void>
   onLeaveChannel: () => Promise<void>
@@ -151,7 +148,6 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
   const [confirm, setConfirm] = useState<Confirm>(null)
   const [sheet, setSheet] = useState<"requests" | "invite" | null>(null)
   const [busy, setBusy] = useState(false)
-  const [sure, setSure] = useState(false)
   const [roleDraft, setRoleDraft] = useState({ role: "", about: "" })
   const [scopeDraft, setScopeDraft] = useState<Scope[]>([...SCOPES])
   const active = p.roster.filter((m) => m.active)
@@ -227,7 +223,9 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
       setConfirm({ kind: "role", member: m })
     },
     editScopes: (m) => {
-      setScopeDraft(p.state.members.get(m.name)?.scopes ?? [...SCOPES])
+      // Two levels: read-only stays read-only; a member, or an older limited grant, starts at everything.
+      const now = p.state.members.get(m.name)?.scopes
+      setScopeDraft(now && now.length === 0 ? [] : [...SCOPES])
       setConfirm({ kind: "scopes", member: m })
     },
     lastSeenOf,
@@ -308,11 +306,11 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
       <Alert
         open={confirm?.kind === "scopes"}
         onClose={() => setConfirm(null)}
-        title={confirm?.kind === "scopes" ? `What ${confirm.member.name} can do` : ""}
+        title={confirm?.kind === "scopes" ? `Can ${confirm.member.name} only read?` : ""}
         message={
           confirm?.kind === "scopes" && (
             <>
-              <span className="mb-3 block">Everyone can read. Every member’s client holds them to this from now on; what they sent before stands.</span>
+              <span className="mb-3 block">Every member’s client holds them to this from now on; what they sent before stands.</span>
               <ScopePicker value={scopeDraft} onChange={setScopeDraft} disabled={busy} />
             </>
           )
@@ -328,45 +326,6 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
         )}
       </Alert>
 
-      <Alert
-        open={confirm?.kind === "reclaim"}
-        onClose={() => (setConfirm(null), setSure(false))}
-        title={confirm?.kind === "reclaim" ? `Move ${confirm.req.reclaims!.name}’s seat to the new key?` : ""}
-        message={
-          confirm?.kind === "reclaim" && (
-            <>
-              Approve only if its terminal shows this exact code.
-              <span className="mt-4 mb-3 block text-[34px] leading-none font-semibold tracking-[0.04em] text-ink tabular-nums">{confirm.req.code}</span>
-              The old key {confirm.req.reclaims!.pk.slice(0, 8)} is out for good and the channel key changes. {confirm.req.reclaims!.name} keeps its name, role, tasks and claims.
-              {confirm.online && (
-                <span className="mt-3 block rounded-card bg-[color-mix(in_srgb,var(--alert)_10%,transparent)] p-3 text-alert">
-                  <span className="block font-semibold">{confirm.req.reclaims!.name} is online now with its current key.</span>
-                  This may be someone else taking its seat. Go on only if you know the old key is lost.
-                  <label className="mt-2 flex items-center gap-2 font-medium">
-                    <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} className="size-4 accent-[var(--alert)]" />
-                    I’m sure the old key is lost
-                  </label>
-                </span>
-              )}
-            </>
-          )
-        }
-      >
-        <Button variant="secondary" onClick={() => (setConfirm(null), setSure(false))}>
-          Cancel
-        </Button>
-        {confirm?.kind === "reclaim" && (
-          <Button
-            variant={confirm.online ? "danger" : "primary"}
-            disabled={busy || (confirm.online && !sure)}
-            onClick={() =>
-              run(() => p.onReclaim(confirm.req, { online: confirm.online, force: confirm.online && sure }), `${confirm.req.reclaims!.name}’s seat moved to the new key`).then(() => setSure(false))
-            }
-          >
-            Move seat
-          </Button>
-        )}
-      </Alert>
 
       <Alert
         open={confirm?.kind === "remove"}
@@ -413,7 +372,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
 
 /** The faces in the header and, behind them, everyone in the channel: role, load, and what the owner can do. */
 export function People({ here, subtitle, live }: { here: Member[]; subtitle: string; live: boolean }) {
-  const { p, busy, run, ask, editRole, editScopes, setCoordinator, setRole } = useControls()
+  const { p, busy, run, ask, editRole, editScopes, setCoordinator } = useControls()
   const [open, setOpen] = useState(false)
   const coordinator = p.state.coordinator
   const active = p.roster.filter((m) => m.active).sort((a, b) => Number(b.owner) - Number(a.owner) || Number(p.online.has(b.name)) - Number(p.online.has(a.name)))
@@ -467,7 +426,6 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
           const showLoad = showsLoad(m, load)
           // Roles as the owner last set them: role events fold on top of the signed record.
           const now = p.state.members.get(m.name)
-          const asked = now?.roleRequest
           return (
             <div key={m.pk} className="rounded-ctl px-2 py-1.5 hover:bg-wash">
               <div className="flex items-center gap-2.5">
@@ -510,7 +468,11 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
                     ) : (
                       m.kind !== "human" && <MenuItem onClick={act(() => void setCoordinator(m, true))}>Make coordinator</MenuItem>
                     )}
-                    {p.onScopes && <MenuItem onClick={act(() => editScopes(m))}>What they can do…</MenuItem>}
+                    {p.onScopes && (
+                      <MenuItem onClick={act(() => editScopes(m))}>
+                        {now && scopesLine(now.scopes) === "read only" ? "Let them write…" : now && scopesLine(now.scopes) ? "Let them do everything…" : "Make read-only…"}
+                      </MenuItem>
+                    )}
                     <MenuSeparator />
                     <MenuItem tone="danger" onClick={act(() => ask({ kind: "remove", member: m }))}>
                       Remove from channel…
@@ -518,36 +480,15 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
                   </Menu>
                 )}
               </div>
-              {asked && (
-                <div className="mt-1 ml-[36px] flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
-                  <span className="min-w-0 text-ink-2">
-                    Asks to be <span className="font-medium text-ink">{asked.role ?? "unassigned"}</span>
-                    {asked.about && <span> · {asked.about}</span>}
-                  </span>
-                  {p.isOwner ? (
-                    <span className="flex gap-1">
-                      <Button
-                        size="sm"
-                        disabled={busy}
-                        onClick={() =>
-                          void run(() => setRole({ op: "role.set", member: m.name, role: asked.role ?? null, about: asked.about ?? null }), `${m.name} is now ${asked.role ?? "unassigned"}`)
-                        }
-                      >
-                        Allow
-                      </Button>
-                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(() => setRole({ op: "role.refuse", member: m.name }), `Kept ${m.name}'s role`)}>
-                        Refuse
-                      </Button>
-                    </span>
-                  ) : (
-                    <span className="text-ink-2">The owner decides.</span>
-                  )}
-                </div>
-              )}
             </div>
           )
         })}
-        {former.length > 0 && <p className="px-2 pt-1.5 pb-1 text-meta text-ink-2">Left: {former.map((m) => m.name).join(", ")}</p>}
+        {/* A name in use again (a lost key: removed, then joined anew) reads as the earlier key, never as a second one of them. */}
+        {former.length > 0 && (
+          <p className="px-2 pt-1.5 pb-1 text-meta text-ink-2">
+            Left: {[...new Set(former.map((m) => (active.some((a) => a.name === m.name) ? `${m.name} (an earlier key)` : m.name)))].join(", ")}
+          </p>
+        )}
       </div>
       <div className="mt-1 border-t border-line px-2 pt-2 pb-1 text-meta text-ink-2">Choose a name to see only their messages.</div>
     </Popover>
@@ -673,10 +614,6 @@ export function RequestsBanner() {
       <span className="min-w-0 flex-1 truncate">
         {p.requests.length > 1 ? (
           `${p.requests.length} people and agents want to join this channel.`
-        ) : first.reclaims ? (
-          <>
-            A new key wants to take back <span className="font-medium">{first.reclaims.name}</span>’s seat.
-          </>
         ) : (
           <>
             <span className="font-medium">{first.name}</span> wants to join this channel.
@@ -697,7 +634,7 @@ export function RequestsBanner() {
 }
 
 function Requests({ onDone }: { onDone: () => void }) {
-  const { p, busy, run, ask, lastSeenOf, onlineNow } = useControls()
+  const { p, busy, run, ask } = useControls()
   const requests = p.requests
   // Close once the last request is handled, rather than leave "Nobody's waiting" up.
   const empty = requests.length === 0
@@ -708,28 +645,19 @@ function Requests({ onDone }: { onDone: () => void }) {
     <div className="p-5">
       <h2 className="text-title font-semibold tracking-[-0.01em]">{requests.length > 1 ? `${requests.length} want to join` : "Wants to join"}</h2>
       <p className="mt-1 text-ui leading-normal text-ink-2">Show the code, compare it with theirs, then approve.</p>
-      {/* 'unchecked' on a plain join means this device's daily signing budget is spent: say so even for one. Reclaims are never checked on their own. */}
-      {requests.some((r) => r.check === "unchecked" && !r.reclaims) && <p className="mt-3 rounded-card bg-wash p-3 text-ui leading-normal text-ink-2">{TOO_MANY_REQUESTS}</p>}
-      {requests.some((r) => r.check === "unchecked" && r.reclaims) && <p className="mt-3 text-ui leading-normal text-ink-3">A reclaim’s code is shown only when you ask for it.</p>}
+      {/* 'unchecked' means this device's daily signing budget is spent: say so even for one. */}
+      {requests.some((r) => r.check === "unchecked") && <p className="mt-3 rounded-card bg-wash p-3 text-ui leading-normal text-ink-2">{TOO_MANY_REQUESTS}</p>}
       <div className="mt-4 grid gap-4">
         {requests.length === 0 && <p className="text-ui text-ink-3">Nobody’s waiting.</p>}
         {requests.map((r) => (
           <div key={r.id} className="flex items-start gap-3">
             <Monogram name={r.name} agent={r.kind !== "human"} size={28} />
             <div className="min-w-0 flex-1">
-              {r.reclaims ? (
-                <>
-                  <p className="truncate text-ui font-medium">Takes back {r.reclaims.name}’s seat</p>
-                  <p className="text-meta leading-snug text-ink-2">
-                    Old key {r.reclaims.pk.slice(0, 8)}
-                    {lastSeenOf(r.reclaims.name) ? `, last seen ${formatAgo(lastSeenOf(r.reclaims.name)!, p.now)}` : ""} · new key {r.pk.slice(0, 8)}
-                  </p>
-                  {onlineNow(r.reclaims.name) && <p className="text-meta leading-snug font-medium text-alert">{r.reclaims.name} is online now with its current key</p>}
-                </>
-              ) : (
+              {(
                 <p className="truncate text-ui font-medium">
                   {r.name}
                   {r.role && <span className="font-normal text-ink-2">, {r.role}</span>}
+                  {r.askedAs && r.askedAs !== r.name && <span className="font-normal text-ink-2"> (asked as {r.askedAs}, which is taken)</span>}
                 </p>
               )}
               <p className="text-meta leading-snug text-ink-2">
@@ -741,7 +669,7 @@ function Requests({ onDone }: { onDone: () => void }) {
                   Decline
                 </Button>
                 {r.check === "ready" ? (
-                  <Button size="sm" onClick={() => ask(r.reclaims ? { kind: "reclaim", req: r, online: onlineNow(r.reclaims.name) } : { kind: "approve", req: r })}>
+                  <Button size="sm" onClick={() => ask({ kind: "approve", req: r })}>
                     Review and approve
                   </Button>
                 ) : r.check === "unchecked" ? (

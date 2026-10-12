@@ -22,7 +22,6 @@ export interface Member {
   role?: string;
   about?: string;
   /** A role (or rules) they asked for and the owner hasn't decided on yet. */
-  roleRequest?: { role?: string; about?: string; seq: number; at: number };
   /** A person's colour; agents wear their person's (colorOf). */
   color?: Color;
   /** What they may do besides read, after every scope.set so far (see scopes.ts). */
@@ -474,16 +473,12 @@ export function fold(
 
       switch (ev.op) {
         case "hello": {
-          // Roles are the owner's to give: the owner sets its own, anyone else's hello asks for one.
+          // Roles are the owner's to give: the owner sets its own; anyone else's hello is only an
+          // announcement (it doesn't ask for a role any more, and an older one's ask is ignored).
           if (member.owner) {
             if (ev.role !== undefined) member.role = ev.role || undefined;
             if (ev.about !== undefined) member.about = ev.about || undefined;
-            break;
           }
-          const role = ev.role === undefined ? member.role : ev.role || undefined;
-          const about = ev.about === undefined ? member.about : ev.about || undefined;
-          if (role === member.role && about === member.about) member.roleRequest = undefined;
-          else member.roleRequest = { ...(role !== undefined ? { role } : {}), ...(about !== undefined ? { about } : {}), seq: m.seq, at };
           break;
         }
 
@@ -562,11 +557,11 @@ export function fold(
             reject(`no member named ${ev.member}`);
             break;
           }
+          // role.refuse is an older owner turning down a role asked for; there's nothing to ask now.
           if (ev.op === "role.set") {
             setRole(target, ev.role, ev.about);
             roleSets.set(target.name, { seq: m.seq, role: ev.role, ...(ev.about !== undefined ? { about: ev.about } : {}) });
           }
-          target.roleRequest = undefined;
           break;
         }
 

@@ -823,9 +823,7 @@ class App {
       this.noticed.add(key);
       const who = r.kind === "human" ? `a person, signed in as ${inlineText(r.sponsoredBy?.name ?? "?", 60)}` : r.sponsoredBy ? `an agent of ${inlineText(r.sponsoredBy.name, 60)}` : "an agent";
       const name = inlineText(r.name, 40);
-      if (r.reclaims) {
-        this.push({ type: "out", lines: (c) => noticeLines(`${inlineText(r.reclaims!.name, 40)} wants its seat back with a new key`, `Approve a RECLAIM with kiwi approve ${r.code ?? ""} in a terminal, only once you're sure the old key is lost.`, c) });
-      } else if (r.check === "ready" && r.code) {
+      if (r.check === "ready" && r.code) {
         const digits = r.code.replace(/\D/g, "");
         this.push({
           type: "out",
@@ -1002,7 +1000,7 @@ class App {
           if (!reqs.length) return this.out("no pending join requests");
           this.out(
             reqs
-              .map((r) => `${(r.code ?? r.check).padEnd(8)} ${r.reclaims ? `RECLAIMS ${r.reclaims.name}'s seat` : r.name}${r.role ? ` (${r.role})` : ""} · ${r.kind === "human" ? "person" : r.sponsoredBy ? `agent of ${r.sponsoredBy.name}` : "agent"} · key ${fingerprint(r.pk)}`)
+              .map((r) => `${(r.code ?? r.check).padEnd(8)} ${r.name}${r.askedAs && r.askedAs !== r.name ? ` (asked as ${r.askedAs}, taken)` : ""}${r.role ? ` (${r.role})` : ""} · ${r.kind === "human" ? "person" : r.sponsoredBy ? `agent of ${r.sponsoredBy.name}` : "agent"} · key ${fingerprint(r.pk)}`)
               .join("\n"),
           );
         },
@@ -1034,7 +1032,7 @@ class App {
         args: "KEY",
         about: "start the code check for a request past today's share",
         run: async (arg) => {
-          const r = (await this.s.requests()).find((x) => x.check === "unchecked" && !x.reclaims && arg && fingerprint(x.pk).startsWith(arg));
+          const r = (await this.s.requests()).find((x) => x.check === "unchecked" && arg && fingerprint(x.pk).startsWith(arg));
           if (!r) return this.out(`no unchecked request with key ${arg}`, bad);
           await this.busyWith("Checking", () => this.s.ownerCh!.checkRequest(r));
           this.out(`checking ${inlineText(r.name, 40)}: its code shows in a moment`);
@@ -1152,7 +1150,6 @@ class App {
   private async approve(arg: string): Promise<void> {
     await this.refreshRequests();
     const r = this.findRequest(arg);
-    if (r.reclaims) return this.out(`a RECLAIM moves ${r.reclaims.name}'s seat to a new key: do it with kiwi approve ${r.code} in a terminal, where it checks the old key isn't online`, warn);
     const as = /\bas\s+(\S+)/.exec(arg)?.[1];
     const roleArg = /\brole\s+(.+)$/.exec(arg)?.[1]?.trim();
     const name = as ?? r.name;
