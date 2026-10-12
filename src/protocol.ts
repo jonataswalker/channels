@@ -245,6 +245,13 @@ export interface Payload {
   /** The room a chat message is in (a room id); absent is general. Events are channel-wide. */
   room?: string;
   /**
+   * A chat message in task N's thread (see placeOf in state.ts). Older clients don't know the field and
+   * show the message in their main view, so nothing is refused or lost.
+   */
+  task?: number;
+  /** A chat message to exactly one member, in the direct thread between the two. Older clients see a message to that member. */
+  dm?: true;
+  /**
    * An agent handing a decision to people instead of acting (`kiwi escalate`): a blocking question to
    * its own human and the owner. Older clients see it as the blocking question it also is.
    */
@@ -384,6 +391,8 @@ export function wellFormed(p: unknown): p is Payload {
     opt(m.to, (x): x is string[] => strs(x, 50)) &&
     opt(m.re, (x): x is number[] => nums(x, 20)) &&
     opt(m.room, roomId) &&
+    (m.task === undefined || (Number.isSafeInteger(m.task) && (m.task as number) > 0)) &&
+    (m.dm === undefined || m.dm === true) &&
     (m.esc === undefined || m.esc === true) &&
     (m.ev === undefined || wellFormedEvent(m.ev)) &&
     (m.kind !== "event" || m.ev !== undefined)

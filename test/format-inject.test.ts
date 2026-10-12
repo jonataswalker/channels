@@ -22,7 +22,7 @@ function blank(): ChannelState {
     coordinator: null,
     direct: new Set(),
     rooms: new Map([["general", { id: "general", name: "general", createdBy: null, at: 0 }]]),
-    roomOf: new Map(),
+    roomOf: new Map(), placeOf: new Map(), places: new Map(),
     charter: null,
     hold: null,
     roleSets: new Map(),
