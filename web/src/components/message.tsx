@@ -16,11 +16,14 @@ export const isAgent = (m: Pick<Member, "kind"> | undefined) => m?.kind !== "hum
 /** Who wrote a message, as far as the transcript needs to know. */
 export type Author = Pick<Member, "name" | "kind" | "display" | "sponsor">
 
-/** Time passing in the conversation: a small centred stamp between bubbles, the day set a little heavier. */
+/**
+ * Time passing in the conversation: a small stamp between bubbles, the day set a little heavier. It
+ * sits on the bubbles' text edge, with names, event lines and "1 Reply", so the column reads as one.
+ */
 export function TimeMark({ ts }: { ts: number }) {
   const [day, time] = splitStamp(formatStamp(ts))
   return (
-    <div className="mt-6 mb-2 text-center select-none">
+    <div className="mt-6 mb-2 pl-12 select-none">
       <time className="text-stamp text-ink-3" dateTime={new Date(ts).toISOString()} title={formatFull(ts)}>
         <span className="font-semibold text-ink-2">{day}</span>
         {time && <span className="tabular-nums"> {time}</span>}
@@ -65,7 +68,7 @@ export function EventRow({ m, state, now, onOpenTask, openLabel = "Open", more }
   const forged = ignored(state.trust.get(m.seq))
   const full = `${memberName(state.members.get(m.from), m.from)} ${describeEvent(m, state)} · ${formatFull(m.ts)} (${formatAgo(m.rts ?? m.ts, now)})`
   return (
-    <p id={`m${m.seq}`} title={full} className={cx("flex min-w-0 items-baseline gap-1.5 py-[3px] pl-9 text-stamp text-ink-3", forged && "line-through opacity-60")}>
+    <p id={`m${m.seq}`} title={full} className={cx("flex min-w-0 items-baseline gap-1.5 py-[3px] pl-12 text-stamp text-ink-3", forged && "line-through opacity-60")}>
       <span className="min-w-0 truncate">{shortEvent(m, state)}</span>
       {taskRef !== null && onOpenTask && (
         <button type="button" onClick={() => onOpenTask(taskRef)} className="shrink-0 font-medium text-ink-2 hover:text-ink hover:underline">

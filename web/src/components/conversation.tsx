@@ -457,7 +457,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   const dropped = isOwner ? droppedCount(state) : 0
   if (dropped && hereKey === "main")
     rows.push(
-      <p key="dropped" className="mt-3 pl-9 text-stamp text-ink-3">
+      <p key="dropped" className="mt-3 pl-12 text-stamp text-ink-3">
         {dropped === 1 ? "1 message" : `${dropped} messages`} left out: forged, or not allowed by your settings.{" "}
         <button type="button" onClick={() => setShowDropped((v) => !v)} className="font-medium text-accent-text hover:underline">
           {showDropped ? "Hide them" : "Show them"}
@@ -505,7 +505,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       const first = !prev || prev.from !== m.from || m.ts - prev.ts > RUN_GAP
       const last = !next || next.from !== m.from || next.ts - m.ts > RUN_GAP
       threadRows.push(bubble(m, first, last, prev, "t"))
-      if (i === 0 && replies.length) threadRows.push(<div key="split" className="my-3 pl-9 text-stamp text-ink-3">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</div>)
+      if (i === 0 && replies.length) threadRows.push(<div key="split" className="my-3 pl-12 text-stamp text-ink-3">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</div>)
     })
   }
 
@@ -904,7 +904,8 @@ function PlaceList({
   unreadIn,
   onPick,
   onBoard,
-  className = "mt-0.5 mb-2 ml-[56px] mr-1",
+  // Rows' text sits on the channel name's edge; the dot or face hangs in the gutter to its left.
+  className = "mt-0.5 mb-2 ml-[38px] mr-1",
   me,
 }: {
   className?: string
@@ -923,7 +924,7 @@ function PlaceList({
   const done = all.filter(([, i]) => i.place.kind === "task" && i.done).sort((a, b) => b[1].last - a[1].last)
   const dms = all.filter(([, i]) => i.place.kind === "dm").sort((a, b) => b[1].last - a[1].last)
   const rowClass = (on: boolean, strong: boolean) =>
-    cx("flex h-7 w-full items-center gap-2 rounded-ctl pr-2 pl-1.5 text-left text-ui transition-colors", on ? "bg-pick font-semibold text-ink" : strong ? "font-semibold text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink")
+    cx("flex h-7 w-full items-center gap-2 rounded-ctl pr-2 pl-0 text-left text-ui transition-colors", on ? "bg-pick font-semibold text-ink" : strong ? "font-semibold text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink")
   const row = (key: string, info: PlaceSummary) => {
     const p = info.place
     const t = p.kind === "task" ? state.tasks.get(p.task) : undefined
@@ -969,7 +970,7 @@ function PlaceList({
       </button>
     )
   }
-  const head = (text: string) => <p className="px-1.5 pt-2.5 pb-1 text-stamp font-semibold tracking-[0.04em] text-ink-3 uppercase">{text}</p>
+  const head = (text: string) => <p className="pt-2.5 pr-2 pb-1 pl-6 text-stamp font-semibold tracking-[0.04em] text-ink-3 uppercase">{text}</p>
   return (
     <nav aria-label="Conversations" className={cx("space-y-px", className)}>
       {row("main", places.get("main") ?? { place: MAIN, last: 0, count: 0 })}
@@ -977,7 +978,7 @@ function PlaceList({
       {tasks.map(([k, i]) => row(k, i))}
       {done.length > 0 && (
         <>
-          <button type="button" aria-expanded={earlier} onClick={() => setEarlier(!earlier)} className="flex h-7 w-full items-center gap-2 rounded-ctl pr-2 pl-1.5 text-left text-ui text-ink-3 hover:bg-wash hover:text-ink-2">
+          <button type="button" aria-expanded={earlier} onClick={() => setEarlier(!earlier)} className="flex h-7 w-full items-center gap-2 rounded-ctl pr-2 pl-0 text-left text-ui text-ink-3 hover:bg-wash hover:text-ink-2">
             <span className="flex w-4 shrink-0 justify-center">
               <Icon icon={ArrowDown01Icon} size={12} className={cx("transition-transform", !earlier && "-rotate-90")} />
             </span>
