@@ -40,7 +40,7 @@ async function ok(home: string, ...args: string[]): Promise<string> {
   return out;
 }
 
-test("a new channel starts coordinated, and kicking the coordinator hands the role on", async () => {
+test("a new channel starts coordinated; kicking the coordinator leaves the choice to the owner here (nobody is signed in)", async () => {
   const owner = scratch();
   const agent = scratch();
   const code = /join code: (\S+)/.exec(await ok(owner, "create", "cf", "--as", "lead"))![1]!;
@@ -56,7 +56,8 @@ test("a new channel starts coordinated, and kicking the coordinator hands the ro
   }
   await ok(owner, "--as", "human", "approve", /(\d{3}-\d{3})/.exec(listed)![1]!, "--yes");
   expect(await p.exited).toBe(0);
+  // dev isn't provably the owner's own agent on a relay without sign-in: it isn't made coordinator by itself.
   const kicked = await ok(owner, "--as", "human", "kick", "lead", "--yes");
-  expect(kicked).toContain("dev is the coordinator now");
-  expect(await ok(owner, "--as", "human", "log", "--all")).toContain("made dev coordinator");
+  expect(kicked).toContain("nobody coordinates now");
+  expect(await ok(owner, "--as", "human", "log", "--all")).not.toContain("made dev coordinator");
 });

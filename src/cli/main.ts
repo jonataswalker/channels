@@ -1017,7 +1017,7 @@ const commands: Record<string, Command> = {
       // The coordinator gone: the next agent in coordinates (with none, delivery is as usual until one arrives).
       if (state.coordinator === name && state.mode.coordinatorOnly) {
         const next = yield* s.ensureCoordinator().pipe(Effect.catchCause(() => Effect.succeed(null)));
-        out(next ? `${next} is the coordinator now` : "nobody coordinates now: people talk with everyone until an agent joins");
+        out(next ? `${next} is the coordinator now` : "nobody coordinates now: make one with kiwi role NAME coordinator (meanwhile people talk with everyone)");
       }
     }),
 

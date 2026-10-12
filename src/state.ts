@@ -295,11 +295,17 @@ function summarize(placeOf: Map<number, Place>, tasks: Map<number, Task>, trust:
 }
 
 /**
- * Who coordinates by default when nobody holds the role: the earliest-joined agent still here that
- * the owner hasn't given another role, else the earliest one.
+ * Who coordinates by default when nobody holds the role: the earliest-joined of the owner's own agents
+ * still here (its person is the owner's, by sign-in) that the owner hasn't given another role, else the
+ * earliest of them. Never anyone else's agent: the coordinator hears everything people say, so only the
+ * owner gives that to someone else's. Where nobody is signed in, nobody is provably the owner's: none.
  */
 export function firstAgent(state: Pick<ChannelState, "members">): string | undefined {
-  const agents = [...state.members.values()].filter((m) => m.active && !isPerson(m) && (m.kind as string | undefined) !== "computer").sort((a, b) => a.joined - b.joined);
+  const owner = [...state.members.values()].find((m) => m.owner && m.active)?.sponsor?.user;
+  if (!owner) return undefined;
+  const agents = [...state.members.values()]
+    .filter((m) => m.active && !isPerson(m) && (m.kind as string | undefined) !== "computer" && m.sponsor?.user === owner)
+    .sort((a, b) => a.joined - b.joined);
   return (agents.find((m) => !m.role) ?? agents[0])?.name;
 }
 
