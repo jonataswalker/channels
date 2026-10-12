@@ -117,6 +117,14 @@ try {
   await cdp.send("WebAuthn.addVirtualAuthenticator", {
     options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true, hasPrf: true },
   } as never)
+  // The vault waits until an agent has worked here (T1389): not offered on a fresh sign-in.
+  at = "no passkey offer before an agent works"
+  if (await page.getByRole("button", { name: "Save channels to a passkey" }).isVisible()) throw new Error("the passkey offer showed before any agent worked")
+  await page.evaluate(() => {
+    localStorage.setItem("mc.agent-worked", "1")
+    window.dispatchEvent(new Event("mc:agent-worked"))
+  })
+  console.log(`ok  ${at}`)
   at = "Set up passkey"
   await page.getByRole("button", { name: "Save channels to a passkey" }).click()
   const saving = page.getByRole("dialog").filter({ hasText: "Save your recovery code" })

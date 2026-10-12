@@ -224,6 +224,43 @@ function changed(): void {
   window.dispatchEvent(new Event(CHANGED))
 }
 
+const AGENT_WORKED = "mc.agent-worked"
+const AGENT_WORKED_EVENT = "mc:agent-worked"
+
+/**
+ * Whether an agent has worked in a channel this browser had open (it said what it runs on, which every
+ * agent does once it listens). Things worth setting up later, like the vault, wait for this.
+ */
+export function agentWorked(): boolean {
+  try {
+    return localStorage.getItem(AGENT_WORKED) === "1"
+  } catch {
+    return false
+  }
+}
+
+function noteAgentWorked(): void {
+  if (agentWorked()) return
+  try {
+    localStorage.setItem(AGENT_WORKED, "1")
+  } catch {
+    return
+  }
+  window.dispatchEvent(new Event(AGENT_WORKED_EVENT))
+}
+
+/** agentWorked, as state that turns true the moment it happens. */
+export function useAgentWorked(): boolean {
+  const [worked, setWorked] = useState(agentWorked)
+  useEffect(() => {
+    if (worked) return
+    const on = () => setWorked(true)
+    window.addEventListener(AGENT_WORKED_EVENT, on)
+    return () => window.removeEventListener(AGENT_WORKED_EVENT, on)
+  }, [worked])
+  return worked
+}
+
 /** The last thing said in a channel, and who's in it, as of the last time this browser had it open. */
 export interface Recent {
   from: string
@@ -750,6 +787,7 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
         pending = []
         flush = undefined
         setMessages((prev) => merged(prev, batch))
+        if (batch.some((m) => m.kind === "event" && m.ev?.op === "card")) noteAgentWorked()
         // Seal after paint. A cache failure must not stop the stream.
         const key = ch.access.keys[String(ch.access.epoch)]
         if (key) {

@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react"
 import { formatFull, formatShort } from "@/lib/format"
 import { cancelled, passkeysAvailable } from "@/lib/passkey"
 import { addPasskey, dismissCancelled, removePasskey, resetVault, setUpVault, unlockWithCode, unlockWithPasskey, useVault } from "@/lib/vault"
+import { useAgentWorked } from "@/lib/channel"
 import { cx } from "@/lib/utils"
 import { Icon } from "./icon"
 import { Alert, Button, IconButton, Modal, Spinner, TextField, errorText, toast } from "./kit"
@@ -47,7 +48,9 @@ export function VaultCard() {
     }
   }
 
-  const show = (vault.kind === "none" && supported && !later) || vault.kind === "locked"
+  // Setting one up waits until an agent has worked here: it's never in the way of the first one.
+  const worked = useAgentWorked()
+  const show = (vault.kind === "none" && supported && !later && worked) || vault.kind === "locked"
   return (
     <>
       {show && (
