@@ -462,7 +462,9 @@ export function fold(
           continue;
         }
       }
-      if (mode.coordinatorOnly && coordinator && m.kind !== "event" && !m.esc && !isPerson(member) && m.from !== coordinator) {
+      // Only a coordinator still in the channel: one who left or was removed leaves nobody to route through
+      // (no event marks when, so a replay treats it as gone throughout, the same as the final state does).
+      if (mode.coordinatorOnly && coordinator && members.get(coordinator)?.active && m.kind !== "event" && !m.esc && !isPerson(member) && m.from !== coordinator) {
         const people = (m.to ?? []).filter((n) => { const p = members.get(n); return !!p && isPerson(p); });
         if (people.length) {
           if (mode.strict) {

@@ -29,11 +29,6 @@ function write(room: string, stored: Stored): void {
   window.dispatchEvent(new Event(CHANGED))
 }
 
-/** The icon last seen for this room, or null when it has none. */
-export function cachedIcon(room: string): ChannelIcon | null {
-  return read(room)?.icon ?? null
-}
-
 /** Refetch when iconAt moved. A channel that never had an icon stays a letter. */
 export async function refreshIcon(member: StoredMember): Promise<void> {
   const room = member.access.roomId

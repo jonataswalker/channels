@@ -977,8 +977,14 @@ const commands: Record<string, Command> = {
       const name = args[1] ?? (yield* die("usage: kiwi kick NAME"));
       const m = (yield* s.members(true)).find((x) => x.name === name && x.active) ?? (yield* die(`"${name}" isn't a member`));
       if (m.owner) return yield* die("the owner can't be removed; `kiwi close` deletes the channel");
+      const { state } = yield* s.state();
       yield* owner.fx.remove(m.pk);
       out(`removed ${name}; rotated the channel key so they can't read anything new`);
+      // Coordinator-only follows the role: with its holder gone, people talk with everyone again.
+      if (state.coordinator === name && state.mode.coordinatorOnly) {
+        yield* s.setMode(false);
+        out("coordinator-only is off: nobody holds the coordinator role now");
+      }
     }),
 
   leave: () =>

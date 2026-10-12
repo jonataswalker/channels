@@ -15,7 +15,7 @@ import { Button, IconButton, Monogram, Wordmark } from "./kit"
 import { Menu, MenuItem, MenuNote, MenuSeparator } from "./ui/menu"
 import { usageLine } from "./usage"
 import { setRoomsSlot } from "./rooms"
-import { VaultCard } from "./vault"
+import { offerVault, VaultCard } from "./vault"
 
 /** What a row says on hover: what was said last, or why this browser can't open it yet. */
 function rowNote(c: ChannelRow): string {
@@ -87,6 +87,7 @@ export function Sidebar({
             <MenuNote>{auth.user?.email}</MenuNote>
             <MenuItem icon={ComputerIcon} onClick={onComputers}>Your computers</MenuItem>
             {vault.kind === "open" && <MenuItem icon={Key01Icon} onClick={onPasskeys}>Passkeys</MenuItem>}
+            {vault.kind === "none" && <MenuItem icon={Key01Icon} onClick={offerVault}>Save channels to a passkey…</MenuItem>}
             <MenuItem icon={SmartPhone01Icon} onClick={onAddDevice}>Add a device</MenuItem>
             {usage && <MenuItem icon={ChartColumnIcon} onClick={onUsage}>Usage</MenuItem>}
             <MenuItem icon={Settings01Icon} onClick={onSettings}>Settings…</MenuItem>

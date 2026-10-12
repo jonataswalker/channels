@@ -65,6 +65,15 @@ describe("coordinator-only in fold", () => {
     expect(s.rejected.get(ms[2]!.seq)).toBe("only the coordinator (coord) messages people here");
   });
 
+  test("a coordinator who left or was removed blocks nobody", async () => {
+    const ms = [await makeCoord("coord"), await on(), await msg("dev", "msg", "hi ana", { to: ["ana"] })];
+    const gone = roster.map((x) => (x.name === "coord" ? { ...x, active: false } : x));
+    const s = fold(ms, gone);
+    expect(s.coordinator).toBeNull();
+    expect(s.trust.get(ms[2]!.seq)).toBe("verified");
+    expect(s.rejected.has(ms[2]!.seq)).toBe(false);
+  });
+
   test("not strict: it stands, flagged as sent directly", async () => {
     const ms = [await makeCoord("coord"), await on(false), await msg("dev", "msg", "hi ana", { to: ["ana", "coord"] })];
     const s = fold(ms, roster);
