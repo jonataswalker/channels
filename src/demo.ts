@@ -65,7 +65,8 @@ const play = Effect.fn("Demo.run")(function* (opts: DemoOptions) {
   const { code, access } = yield* Channel.fx.create(relay, owner, { name: "human", role: "owner" }, ids.map((id) => ({ ...id, info: { name: id.name } })), roomId, null, "onemouse");
   const cfg = { ...access, relay, code, owner: "human" };
   saveConfig({ default: "demo", channels: { demo: cfg } });
-  const open = (n: string) => openSession("demo", cfg, n);
+  // The owner's seat is the person watching; the rest are agents.
+  const open = (n: string) => openSession("demo", cfg, n, { person: n === "human" });
   const [human, lead, mac, win, ci] = yield* Effect.all([open("human"), open("lead"), open("mac"), open("win"), open("ci")], { concurrency: "unbounded" });
   const beat = Effect.sleep(pace);
   /** What a refusal says, for the lines that show one. */

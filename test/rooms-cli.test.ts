@@ -20,7 +20,7 @@ afterAll(() => {
 async function ok(...args: string[]): Promise<string> {
   const p = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], {
     cwd: home,
-    env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: server.url.origin, CLAUDE_CONFIG_DIR: claudeDir, CLAUDECODE: "1" },
+    env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: server.url.origin, CLAUDE_CONFIG_DIR: claudeDir, CLAUDECODE: args[0] === "--as" && args[1] === "human" ? "" : "1" },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -35,7 +35,7 @@ test("make a room, post in it, and read it back by room", async () => {
   expect(await ok("send", "before rooms")).toMatch(/^sent #\d+/);
   expect(await ok("log")).not.toContain("[#");
 
-  expect(await ok("room", "create", "design")).toContain("made #design");
+  expect(await ok("--as", "human", "room", "create", "design")).toContain("made #design");
   await ok("send", "--room", "design", "mockups are up");
   await ok("send", "back in general");
 
@@ -50,7 +50,7 @@ test("make a room, post in it, and read it back by room", async () => {
   expect(design).toContain("mockups are up");
   expect(design).not.toContain("back in general");
 
-  await ok("room", "rename", "design", "ux");
+  await ok("--as", "human", "room", "rename", "design", "ux");
   expect(await ok("log", "--room", "ux")).toMatch(/\[#ux\].*mockups are up/);
   await expect(ok("send", "--room", "nowhere", "x")).rejects.toThrow(/no room nowhere/);
 });

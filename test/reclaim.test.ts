@@ -179,9 +179,9 @@ describe("kiwi join, again", () => {
     const first = home();
     const joining = spawn(first, "join", code, "--as", "win", "--role", "windows");
     // The owner's machine opens the request (signing its half) once it has arrived; then the joiner shows the code.
-    await until(async () => /\bwin\b/.test((await run(owner, "-c", "proj", "--as", "lead", "requests")).out));
+    await until(async () => /\bwin\b/.test((await run(owner, "-c", "proj", "--as", "human", "requests")).out));
     let shown = await waitFor(joining, /verification code (\d{3}-\d{3})/, []);
-    expect((await run(owner, "-c", "proj", "--as", "lead", "approve", shown[1]!, "--yes")).code).toBe(0);
+    expect((await run(owner, "-c", "proj", "--as", "human", "approve", shown[1]!, "--yes")).code).toBe(0);
     expect(await joining.exited).toBe(0);
     expect((await run(first, "-c", "proj", "--as", "win", "send", "last words from the old key")).code).toBe(0);
     expect((await run(owner, "-c", "proj", "--as", "lead", "send", "--to", "win", "are you there?")).code).toBe(0);
@@ -189,17 +189,17 @@ describe("kiwi join, again", () => {
     const second = home();
     const reclaiming = spawn(second, "join", code, "--as", "win", "--reclaim");
     let listed = { out: "" };
-    await until(async () => /RECLAIMS win's seat/.test((listed = await run(owner, "-c", "proj", "--as", "lead", "requests")).out));
+    await until(async () => /RECLAIMS win's seat/.test((listed = await run(owner, "-c", "proj", "--as", "human", "requests")).out));
     expect(listed.out).toMatch(/unchecked RECLAIMS win's seat · old key \S+, last seen/);
     const newKey = /new key (\S+)/.exec(listed.out)![1]!;
-    expect((await run(owner, "-c", "proj", "--as", "lead", "check", newKey, "--yes")).code).toBe(0);
+    expect((await run(owner, "-c", "proj", "--as", "human", "check", newKey, "--yes")).code).toBe(0);
     shown = await waitFor(reclaiming, /verification code (\d{3}-\d{3})/, []);
 
     // win spoke a moment ago: the old key may be live, so it takes --force.
-    const refused = await run(owner, "-c", "proj", "--as", "lead", "approve", shown[1]!, "--yes");
+    const refused = await run(owner, "-c", "proj", "--as", "human", "approve", shown[1]!, "--yes");
     expect(refused.code).not.toBe(0);
     expect(refused.err).toContain("IS ONLINE NOW");
-    const moved = await run(owner, "-c", "proj", "--as", "lead", "approve", shown[1]!, "--yes", "--force");
+    const moved = await run(owner, "-c", "proj", "--as", "human", "approve", shown[1]!, "--yes", "--force");
     expect(moved.out).toContain("moved win's seat to key");
     expect(await reclaiming.exited).toBe(0);
 

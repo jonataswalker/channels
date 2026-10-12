@@ -15,9 +15,9 @@ import { saveImages } from "../attach.ts";
 import { ChannelGone } from "../client.ts";
 import { home, writePrivate } from "../config.ts";
 import { fingerprint } from "../identity.ts";
-import { formatClaims, formatFact, formatRooms, formatShown, formatStatus, formatTask, formatTasks, mayDo } from "../format.ts";
+import { formatClaims, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, mayDo } from "../format.ts";
 import { inlineText, NAME_RE, type JoinRequest } from "../membership.ts";
-import type { Kind, Message, Presence, TaskState } from "../protocol.ts";
+import { ignored, type Kind, type Message, type Presence, type TaskState } from "../protocol.ts";
 import { COORDINATOR, findRoom, isPerson, parseTaskId, taskId, type ChannelState } from "../state.ts";
 import * as ed from "./editor.ts";
 import { bannerLines, clean, displayName, eventLines, messageLines, nameStyle, noticeLines, resultLines, truncateStyled, when } from "./render.ts";
@@ -982,6 +982,17 @@ class App {
       },
       { name: "facts", about: "shared facts", run: async () => this.out([...(await this.fresh()).state.facts.values()].map((f) => formatFact(f)).join("\n") || "no facts") },
       { name: "claims", about: "claimed paths", run: async () => this.out(formatClaims((await this.fresh()).state)) },
+      {
+        name: "dropped",
+        owner: true,
+        about: "what every view leaves out: forged, or not allowed",
+        run: async () => {
+          const { messages, state } = await this.fresh();
+          const left = messages.filter((m) => ignored(state.trust.get(m.seq)));
+          if (!left.length) return this.out("nothing left out");
+          this.out(left.map((m) => `${formatMessage(m, state.trust.get(m.seq), state, this.s.me)}  (signed by ${m.pk ? `key ${fingerprint(m.pk)}` : "no key"})`).join("\n"), warn);
+        },
+      },
       {
         name: "requests",
         owner: true,

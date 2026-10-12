@@ -119,9 +119,12 @@ describe("what each member is told", () => {
     expect(modeLine(fold([], roster), "dev")).toBeNull();
   });
 
-  test("the prompt explains coordinator-only", async () => {
+  test("the prompt says what coordinator-only asks of this agent, only when the channel is in it", async () => {
     const { agentPrompt } = await import("../src/cli/main.ts");
-    expect(agentPrompt("c", "dev")).toContain("## Coordinator-only channels");
+    const { modeLine } = await import("../src/format.ts");
+    const state = fold([await makeCoord("coord"), await on()], roster);
+    expect(agentPrompt("c", "dev", { mode: modeLine(state, "dev") })).toContain("coordinator-only");
+    expect(agentPrompt("c", "dev")).not.toContain("coordinator-only");
   });
 });
 

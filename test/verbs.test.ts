@@ -70,10 +70,10 @@ describe("ten verbs", () => {
     const p = spawn(agent, ["join", code, "--as", "dev"]);
     let listed = "";
     await until(async () => {
-      listed = await ok(owner, "requests");
+      listed = await ok(owner, "--as", "human", "requests");
       return /\d{3}-\d{3}/.test(listed);
     }, "request");
-    await ok(owner, "approve", /(\d{3}-\d{3})/.exec(listed)![1]!, "--yes");
+    await ok(owner, "--as", "human", "approve", /(\d{3}-\d{3})/.exec(listed)![1]!, "--yes");
     expect(await p.exited).toBe(0);
     await ok(agent, "listen", "--now");
   });

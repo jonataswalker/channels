@@ -39,7 +39,8 @@ type Env = Record<string, string>;
 function spawn(home: string, args: string[], env: Env = {}, cwd = home, stdin?: string) {
   return Bun.spawn([...MC, ...args], {
     cwd,
-    env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, CLAUDE_CONFIG_DIR: claudeDir, CLAUDE_PROJECT_DIR: "", ...env },
+    // The owner's person seat (--as human) runs from a person's terminal, never an agent's harness.
+    env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, CLAUDE_CONFIG_DIR: claudeDir, CLAUDE_PROJECT_DIR: "", ...env, ...(args[0] === "--as" && args[1] === "human" ? { CLAUDECODE: "" } : {}) },
     stdin: stdin === undefined ? "ignore" : new TextEncoder().encode(stdin),
     stdout: "pipe",
     stderr: "pipe",
@@ -81,11 +82,11 @@ async function join_(owner: string, joiner: string, code: string, env: Env, cwd 
   await until(() => out.includes("waiting for the owner"), "join request");
   let listed = "";
   await until(async () => {
-    listed = await ok(owner, ["requests"]);
+    listed = await ok(owner, ["--as", "human", "requests"]);
     return /\d{3}-\d{3}/.test(listed);
   }, "request listed with a code");
   const codeShown = /(\d{3}-\d{3})/.exec(listed)![1]!;
-  await ok(owner, ["approve", codeShown, "--yes"]);
+  await ok(owner, ["--as", "human", "approve", codeShown, "--yes"]);
   const code_ = await p.exited;
   await reading;
   const err = await new Response(p.stderr).text();
@@ -173,7 +174,7 @@ describe("joining without --as", () => {
     expect(second.code).toBe(3);
     expect(second.out).toContain("asked to join as claude.");
     // One request, not two.
-    const listed = await ok(owner, ["requests"]);
+    const listed = await ok(owner, ["--as", "human", "requests"]);
     expect(listed.match(/claude/g)?.length).toBe(1);
   });
 });
@@ -189,12 +190,12 @@ describe("review fixes (#1352)", () => {
     const p = spawn(b, ["join", code, "--timeout", "4s"], S);
     let listed = "";
     await until(async () => {
-      listed = await ok(owner, ["requests"]);
+      listed = await ok(owner, ["--as", "human", "requests"]);
       return /\d{3}-\d{3}/.test(listed);
     }, "request with a code");
     expect(listed).toContain("claude-2");
     expect(await p.exited).toBe(3);
-    await ok(owner, ["approve", /(\d{3}-\d{3})/.exec(listed)![1]!, "--yes"]);
+    await ok(owner, ["--as", "human", "approve", /(\d{3}-\d{3})/.exec(listed)![1]!, "--yes"]);
     const again = await run(b, ["join", code, "--timeout", "5s"], S);
     expect(again.code).toBe(0);
     expect(again.out).toContain('You\'re "claude-2"');
@@ -237,16 +238,16 @@ describe("review fixes (#1352)", () => {
     try {
       // Locally they ask as claude and claude-2; the owner is offered claude-2 and claude-3.
       const j2 = spawn(h, ["join", code, "--timeout", "40s"], S2, d2);
-      await until(async () => (await ok(owner, ["requests"])).includes("claude-2"), "first request");
+      await until(async () => (await ok(owner, ["--as", "human", "requests"])).includes("claude-2"), "first request");
       const j3 = spawn(h, ["join", code, "--timeout", "40s"], S3, d3);
       let listed = "";
       await until(async () => {
-        listed = await ok(owner, ["requests"]);
+        listed = await ok(owner, ["--as", "human", "requests"]);
         return (listed.match(/\d{3}-\d{3}/g) ?? []).length === 2;
       }, "both requests with codes");
       expect(listed).toContain("claude-3");
       expect(listed).not.toContain("claude-2-2");
-      for (const c of listed.match(/\d{3}-\d{3}/g)!) await ok(owner, ["approve", c, "--yes"]);
+      for (const c of listed.match(/\d{3}-\d{3}/g)!) await ok(owner, ["--as", "human", "approve", c, "--yes"]);
       expect(await j2.exited).toBe(0);
       expect(await j3.exited).toBe(0);
       await ok(h, ["send", "two here"], S2, d2);
