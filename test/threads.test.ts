@@ -1,90 +1,88 @@
-// Threads from the reply chain, and what reaches an agent by default: what's for it, not every conversation.
+// Agents in threads (T1460): a channel starts coordinated; what an agent says while doing a task goes
+// to that task's thread, among the agents working it (and the coordinator); --main and --dm say where
+// else; listening delivers your task threads and your direct thread, not other tasks' talk.
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startRelay } from "../src/relay/bun.ts";
 
-import { beforeAll, describe, expect, test } from "bun:test";
-import { wants } from "../src/agent.ts";
-import { formatMessage } from "../src/format.ts";
-import { generateIdentity, sign, verify, type Identity } from "../src/identity.ts";
-import type { Kind, Message } from "../src/protocol.ts";
-import { fold, type ChannelState, type Roster } from "../src/state.ts";
+setDefaultTimeout(60_000);
 
-const roster: Roster = [];
-const ids: Record<string, Identity> = {};
-let seq = 0;
-async function msg(from: string, body: string, opts: { to?: string[]; re?: number[]; kind?: Kind } = {}): Promise<Message> {
-  seq++;
-  const base = { v: 1 as const, id: crypto.randomUUID(), from, kind: opts.kind ?? ("msg" as const), body, ts: seq, ...(opts.to ? { to: opts.to } : {}), ...(opts.re ? { re: opts.re } : {}) };
-  const p = await sign(ids[from]!, base);
-  return { ...p, seq, rts: seq, sigOk: await verify(p) };
+const MC = ["bun", join(import.meta.dir, "../src/cli/main.ts")];
+const dataDir = mkdtempSync(join(tmpdir(), "kiwi-threads-relay-"));
+const made: string[] = [dataDir];
+let server: ReturnType<typeof startRelay> | undefined;
+let relay = "";
+
+beforeAll(() => {
+  server = startRelay({ port: 0, hostname: "127.0.0.1", dataDir });
+  relay = server.url.origin;
+});
+afterAll(() => {
+  server?.stop(true);
+  for (const d of made) rmSync(d, { recursive: true, force: true });
+});
+
+const scratch = (tag: string) => {
+  const d = mkdtempSync(join(tmpdir(), `kiwi-threads-${tag}-`));
+  made.push(d);
+  return d;
+};
+
+function spawn(home: string, args: string[]) {
+  return Bun.spawn([...MC, ...args], { cwd: home, env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
 }
 
-let ms: Message[];
-let state: ChannelState;
-const seqOf = (body: string) => ms.find((m) => m.body === body)!.seq;
-const inbox = (me: string, d = {}) => ms.filter((m) => wants(me, m, state, d)).map((m) => m.body);
+async function ok(home: string, ...args: string[]): Promise<string> {
+  const p = spawn(home, args);
+  const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+  if ((await p.exited) !== 0) throw new Error(`kiwi ${args.join(" ")}: ${err}`);
+  return out;
+}
 
-beforeAll(async () => {
-  for (const [name, extra] of [["jonatas", { kind: "human" as const, owner: true }], ["coord", {}], ["mac", { role: "backend" }], ["win", { role: "frontend" }], ["grok", {}]] as const) {
-    ids[name] = await generateIdentity(name);
-    roster.push({ name, pk: ids[name]!.pk, owner: false, at: 0, active: true, ...extra });
+async function join_(owner: string, joiner: string, code: string, name: string) {
+  const p = spawn(joiner, ["join", code, "--as", name]);
+  let listed = "";
+  for (let i = 0; i < 300 && !new RegExp(`\\d{3}-\\d{3}\\s+${name}\\b`).test(listed); i++) {
+    listed = await ok(owner, "--as", "human", "requests");
+    await Bun.sleep(50);
   }
-  ms = [];
-  ms.push(await msg("jonatas", "people's broadcast"));
-  ms.push(await msg("coord", "agent chatter, no --to"));
-  ms.push(await msg("coord", "everyone must see this", { to: ["*"] }));
-  ms.push(await msg("coord", "mac, take T5", { to: ["mac"] }));
-  ms.push(await msg("win", "a question for anyone", { kind: "ask" }));
-  ms.push(await msg("coord", "win and grok, sync up", { to: ["win", "grok"] }));
-  ms.push(await msg("win", "grok: I'll take the panel", { re: [seqOf("win and grok, sync up")], to: ["grok"] }));
-  ms.push(await msg("mac", "jumping into their thread", { re: [seqOf("grok: I'll take the panel")], to: ["win"] }));
-  ms.push(await msg("grok", "ok, the rest is mine", { re: [seqOf("grok: I'll take the panel")] }));
-  ms.push(await msg("coord", "to the backend role", { to: ["role:backend"] }));
-  state = fold(ms, roster);
-});
+  await ok(owner, "--as", "human", "approve", new RegExp(`(\\d{3}-\\d{3})\\s+${name}\\b`).exec(listed)![1]!, "--yes");
+  expect(await p.exited).toBe(0);
+}
 
-describe("threads", () => {
-  test("every reply belongs to the thread at the top of its chain", () => {
-    const root = seqOf("win and grok, sync up");
-    for (const b of ["grok: I'll take the panel", "jumping into their thread", "ok, the rest is mine"]) expect(state.threadOf.get(seqOf(b))).toBe(root);
-    expect(state.threadOf.get(seqOf("people's broadcast"))).toBe(seqOf("people's broadcast"));
-    expect([...state.threadPeople.get(root)!].sort()).toEqual(["coord", "grok", "mac", "win"]);
-  });
+describe("agents in threads", () => {
+  test("a task's talk stays in its thread; main and direct threads are where you say", async () => {
+    const owner = scratch("owner");
+    const dev = scratch("dev");
+    const dev2 = scratch("dev2");
+    const code = /join code: (\S+)/.exec(await ok(owner, "create", "th", "--as", "lead"))![1]!;
+    await join_(owner, dev, code, "dev");
+    await join_(owner, dev2, code, "dev2");
+    // Everyone catches up first, so what follows is all that's new.
+    for (const h of [owner, dev, dev2]) await ok(h, "listen", "--now");
+    await ok(owner, "--as", "lead", "listen", "--now");
 
-  test("--thread N gives one thread, named by its root or any reply", () => {
-    const expected = ["win and grok, sync up", "grok: I'll take the panel", "jumping into their thread", "ok, the rest is mine"];
-    expect(inbox("jonatas", { thread: seqOf("win and grok, sync up") })).toEqual(expected);
-    expect(inbox("jonatas", { thread: seqOf("ok, the rest is mine") })).toEqual(expected);
-  });
-});
+    const added = await ok(owner, "--as", "lead", "task", "add", "fix the build", "--owner", "dev");
+    const task = /T(\d+)/.exec(added)![0];
+    await ok(dev, "task", "start", task);
+    // Doing one task: what dev says goes to its thread.
+    expect(await ok(dev, "send", "found it: a stale lockfile")).toContain(`in ${task}'s thread`);
+    expect(await ok(dev, "send", "--main", "build fixed soon")).not.toContain("thread");
+    expect(await ok(dev2, "send", "--dm", "lead", "got a minute?")).toContain("to lead (direct)");
 
-describe("what reaches an agent by default", () => {
-  test("what's for it: to it or its role, to everyone, people's broadcasts, questions, and its threads", () => {
-    expect(inbox("mac")).toEqual([
-      "people's broadcast",
-      "everyone must see this",
-      "mac, take T5",
-      "a question for anyone",
-      // mac wrote in this thread, so all of it reaches mac, from the start.
-      "win and grok, sync up",
-      "grok: I'll take the panel",
-      "ok, the rest is mine",
-      "to the backend role",
-    ]);
-  });
-
-  test("another agents' conversation stays out until it's in it", () => {
-    expect(inbox("coord")).not.toContain("mac, take T5");
-    expect(inbox("grok")).not.toContain("mac, take T5");
-    expect(inbox("grok")).not.toContain("agent chatter, no --to");
-  });
-
-  test("--chat is every conversation; --for-me only what's addressed", () => {
-    expect(inbox("grok", { chat: true })).toContain("agent chatter, no --to");
-    expect(inbox("grok", { chat: true })).toContain("mac, take T5");
-    expect(inbox("mac", { forMe: true })).toEqual(["everyone must see this", "mac, take T5", "a question for anyone", "to the backend role"]);
-  });
-
-  test("--to all reads as 'everyone'", () => {
-    expect(formatMessage(ms.find((m) => m.body === "everyone must see this")!)).toContain("coord → everyone:");
-    expect(formatMessage(ms.find((m) => m.body === "agent chatter, no --to")!)).toContain("coord → all:");
+    const leadHeard = await ok(owner, "--as", "lead", "listen", "--now");
+    // The coordinator hears the task's thread, main, and its direct thread.
+    expect(leadHeard).toContain(`[${task}]`);
+    expect(leadHeard).toContain("found it: a stale lockfile");
+    expect(leadHeard).toContain("[direct]");
+    const dev2Heard = await ok(dev2, "listen", "--now");
+    // dev2 isn't working the task: its thread's talk isn't for dev2.
+    expect(dev2Heard).not.toContain("stale lockfile");
+    // dev doesn't get dev2's direct thread with lead.
+    expect(await ok(dev, "listen", "--now")).not.toContain("got a minute?");
+    // Anyone can still read any place.
+    expect(await ok(dev2, "log", "-n", "50")).toContain("stale lockfile");
   });
 });

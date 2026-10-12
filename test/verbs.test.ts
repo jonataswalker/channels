@@ -66,7 +66,7 @@ describe("ten verbs", () => {
   const agent = scratch("agent");
 
   beforeAll(async () => {
-    const code = /join code: (\S+)/.exec(await ok(owner, "create", "verbs", "--as", "lead"))![1]!;
+    const code = /join code: (\S+)/.exec(await ok(owner, "create", "verbs", "--as", "lead", "--open"))![1]!;
     const p = spawn(agent, ["join", code, "--as", "dev"]);
     let listed = "";
     await until(async () => {

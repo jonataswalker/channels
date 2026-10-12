@@ -199,7 +199,7 @@ describe("kiwi sh, end to end", () => {
   });
 
   test("answers from a real session, and holds nothing from ~/.kiwi", async () => {
-    expect((await kiwi("create", "proj", "--as", "lead", "--role", "planner")).code).toBe(0);
+    expect((await kiwi("create", "proj", "--as", "lead", "--role", "planner", "--open")).code).toBe(0);
     expect((await kiwi("-c", "proj", "--as", "lead", "set", "port", "7000")).code).toBe(0);
     expect((await kiwi("-c", "proj", "--as", "lead", "task", "add", "ship it")).code).toBe(0);
 

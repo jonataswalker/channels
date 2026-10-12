@@ -10,7 +10,7 @@ import { decodeJoinCode } from "@mc/crypto.ts"
 import { browserCode, pairNonce, sealedTo, type Chosen, type PairRow } from "@mc/pair.ts"
 import { TOO_MANY_REQUESTS } from "@mc/sas.ts"
 import { SCOPES, type Scope } from "@mc/scopes.ts"
-import { colorOf, COORDINATOR, isPerson, taskId, type ChannelState, type Member } from "@mc/state.ts"
+import { colorOf, COORDINATOR, firstAgent, isPerson, taskId, type ChannelState, type Member } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
 import { noteAgentWorked, useClock } from "@/lib/channel"
 import { formatAgo, memberLine, memberName } from "@/lib/format"
@@ -175,33 +175,39 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
    * coordinator role (one holder: giving it moves it). If the mode change fails, the reconciler below
    * puts it right the next time this owner's page sees the channel.
    */
+  // While the owner changes a role (and the mode that follows it), the reconciler below keeps out of it.
+  const changing = useRef(false)
   const setRole = async (ev: Extract<Event, { op: "role.set" | "role.refuse" }>) => {
-    await p.onRole(ev)
-    if (ev.op !== "role.set" || !p.onMode) return
-    const becomes = isCoordinator(ev.role)
-    const was = p.state.coordinator === ev.member
-    if (becomes && !p.state.mode.coordinatorOnly) await p.onMode(true, true)
-    else if (!becomes && was && p.state.mode.coordinatorOnly) await p.onMode(false, true)
+    changing.current = true
+    try {
+      await p.onRole(ev)
+      if (ev.op !== "role.set" || !p.onMode) return
+      const becomes = isCoordinator(ev.role)
+      const was = p.state.coordinator === ev.member
+      if (becomes && !p.state.mode.coordinatorOnly) await p.onMode(true, true)
+      else if (!becomes && was && p.state.mode.coordinatorOnly) await p.onMode(false, true)
+    } finally {
+      changing.current = false
+    }
   }
 
-  // The owner's page turns coordinator-only off once nobody holds the role: a coordinator who left
-  // or was removed (no event says so in the log), or a mode change that failed, must not leave every
-  // other agent refused. Only that direction on its own: turning it on is always a person's click.
-  // Once per page, so a refused change doesn't loop.
   // An agent with a card in this channel has worked here, however old the history (the vault waits for this).
   const agentHere = [...p.state.members.values()].some((m) => m.active && !isPerson(m) && !!m.card)
   useEffect(() => {
     if (agentHere) noteAgentWorked()
   }, [agentHere])
 
-  const tried = useRef(false)
-  const stuck = p.state.mode.coordinatorOnly && !p.state.coordinator
-  const { isOwner, onMode } = p
+  // Coordinator mode with nobody coordinating (a new channel, or the coordinator left): the owner's page
+  // gives the role to the first agent in, the default unless the owner picks another. Once per agent, so a
+  // refused change doesn't loop; with no agent yet, delivery is as usual until one arrives.
+  const tried = useRef("")
+  const next = p.state.mode.coordinatorOnly && !p.state.coordinator ? firstAgent(p.state) : undefined
+  const { isOwner, onRole } = p
   useEffect(() => {
-    if (!isOwner || !onMode || !stuck || tried.current) return
-    tried.current = true
-    void onMode(false, true).catch(() => {})
-  }, [isOwner, onMode, stuck])
+    if (!isOwner || !next || tried.current === next || changing.current) return
+    tried.current = next
+    void onRole({ op: "role.set", member: next, role: COORDINATOR }).catch(() => {})
+  }, [isOwner, onRole, next])
 
   const api: Api = {
     p,

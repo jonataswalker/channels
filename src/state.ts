@@ -294,6 +294,25 @@ function summarize(placeOf: Map<number, Place>, tasks: Map<number, Task>, trust:
   return out;
 }
 
+/**
+ * Who coordinates by default when nobody holds the role: the earliest-joined agent still here that
+ * the owner hasn't given another role, else the earliest one.
+ */
+export function firstAgent(state: Pick<ChannelState, "members">): string | undefined {
+  const agents = [...state.members.values()].filter((m) => m.active && !isPerson(m) && (m.kind as string | undefined) !== "computer").sort((a, b) => a.joined - b.joined);
+  return (agents.find((m) => !m.role) ?? agents[0])?.name;
+}
+
+/**
+ * The task an agent's words belong to by default: the one it's doing, when it owns exactly one in
+ * progress. The coordinator's words belong in main, so never for it.
+ */
+export function workingOn(state: Pick<ChannelState, "tasks" | "coordinator">, me: string): number | undefined {
+  if (state.coordinator === me) return undefined;
+  const doing = [...state.tasks.values()].filter((t) => t.owner === me && t.state === "doing");
+  return doing.length === 1 ? doing[0]!.id : undefined;
+}
+
 /** Parse "T12", "t12", "#12" or "12". */
 export function parseTaskId(s: string): number | null {
   const m = /^(?:[Tt#])?(\d+)$/.exec(s.trim());
@@ -518,7 +537,7 @@ export function fold(
         }
         roomOf.set(m.seq, room);
         // Its place: a reply sits where its parent does (a thread never splits); else the task it names,
-        // a direct thread for a dm to one other member, or main.
+        // a direct thread for a dm to one other member (ever a member: it stays put after they leave), or main.
         const parentPlace = parent !== undefined ? placeOf.get(parent) : undefined;
         const to = m.to?.length === 1 ? m.to[0]! : undefined;
         placeOf.set(
@@ -526,7 +545,7 @@ export function fold(
           parentPlace ??
             (m.task !== undefined && tasks.has(m.task)
               ? { kind: "task", task: m.task }
-              : m.dm && to && to !== m.from && members.get(to)?.active
+              : m.dm && to && to !== m.from && members.has(to)
                 ? dmPlace(m.from, to)
                 : MAIN),
         );

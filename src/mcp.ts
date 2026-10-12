@@ -25,7 +25,7 @@ import { cardLine, formatFact, formatMessage, formatRooms, formatShown, formatSt
 import { SCOPES } from "./scopes.ts";
 import { CHAT_KINDS, ignored, type Kind, type Message } from "./protocol.ts";
 import { inlineText } from "./membership.ts";
-import { parseTaskId, similarOpenTasks, taskId } from "./state.ts";
+import { parseTaskId, similarOpenTasks, taskId, workingOn } from "./state.ts";
 import { detectCard } from "./card.ts";
 import { VERSION } from "./version.ts";
 import { channelFiles, runSh, sessionViews } from "./sh.ts";
@@ -241,7 +241,8 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
   server.registerTool(
     "send",
     {
-      description: "Post a message. Omit `to` to address everyone; `role:x` addresses everyone with that role. Example: send {\"text\":\"hello\",\"to\":[\"win\"]}.",
+      description:
+        "Post a message. Omit `to` to address everyone; `role:x` addresses everyone with that role. While you're doing a task it goes to that task's thread unless `main` or `dm`. Example: send {\"text\":\"hello\",\"to\":[\"win\"]}.",
       inputSchema: {
         text: z.string(),
         to: z.array(z.string()).optional(),
@@ -249,10 +250,20 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
         re: z.array(z.number().int()).optional(),
         images: z.array(z.string()).optional().describe("local image files to attach (png, jpg, gif, webp, ≤256KB each)"),
         room: z.string().optional().describe("the room's name or id; general if omitted (a reply defaults to its parent's room)"),
+        task: z.string().optional().describe("a task id (T7): post in that task's thread"),
+        main: z.boolean().optional().describe("post in the main conversation, even while doing a task"),
+        dm: z.string().optional().describe("a member's name: a direct message, in your direct thread with them"),
       },
     },
-    tool(({ text, to, kind, re, images, room }) =>
-      Effect.suspend(() => Effect.map(s.send(text, { to, kind, re, room, imgs: images?.length ? loadImages(images) : undefined }), (seq) => `sent #${seq}`)),
+    tool(({ text, to, kind, re, images, room, task, main, dm }) =>
+      Effect.gen(function* () {
+        const { state } = yield* s.state();
+        const named = task === undefined ? undefined : (parseTaskId(task) ?? (yield* new Rejected(`"${task}" isn't a task id (like T12)`)));
+        const doing = dm || main || re?.length || named !== undefined ? undefined : workingOn(state, s.me);
+        const place = named ?? doing;
+        const seq = yield* s.send(text, { to: dm ? [dm] : to, kind, re, room, imgs: images?.length ? loadImages(images) : undefined, ...(place !== undefined ? { task: place } : {}), ...(dm ? { dm: true } : {}) });
+        return `sent #${seq}${dm ? ` to ${dm} (direct)` : place !== undefined ? ` in ${taskId(place)}'s thread` : ""}`;
+      }),
     ),
   );
 

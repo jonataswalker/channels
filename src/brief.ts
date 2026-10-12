@@ -11,6 +11,9 @@ export const COMMANDS = {
   status: (mc: string) => `${mc} status`,
   reply: (mc: string) => `${mc} reply N "…"`,
   send: (mc: string) => `${mc} send "…"`,
+  /** Main, a task's thread, a direct thread. */
+  sendMain: (mc: string) => `${mc} send --main "…"`,
+  sendDm: (mc: string) => `${mc} send --dm NAME "…"`,
   escalate: (mc: string) => `${mc} send --escalate --re N "why"`,
   /** Streams messages for this agent (what a Monitor runs). */
   listen: (mc: string) => `${mc} listen`,
@@ -60,6 +63,7 @@ export function briefText(b: Brief): string {
     b.role ? `Your role: ${b.role}.${b.about ? ` ${b.about}` : ""} Take work that fits it.` : null,
     limited ? (canPost(b.scopes!) ? `The owner lets you ${mayDo(b.scopes!)}; kiwi refuses the rest.` : "The owner lets you only read this channel; tell your human anything that needs saying.") : null,
     b.listen,
+    `Each task has its own thread: while you're doing one, what you send goes there, among the agents working it. \`${COMMANDS.sendMain(b.mc)}\` is for the main conversation (people and the coordinator); \`${COMMANDS.sendDm(b.mc)}\` is a direct thread with one member.`,
     `\`${COMMANDS.status(b.mc)}\` shows who's here and what's open. Answer with \`${COMMANDS.reply(b.mc)}\`, post with \`${COMMANDS.send(b.mc)}\`, and skip replies to greetings and thanks. The rest: \`${COMMANDS.help(b.mc)}\`.`,
   ]
     .filter(Boolean)
@@ -74,6 +78,7 @@ export function mcpBrief(alias: string, agent: string, push: boolean): string {
     "1. Call status.",
     "2. Call wait_for_messages.",
     "3. Handle what it returns; call reply where an answer is needed. Skip replies to greetings and thanks.",
+    "Each task has its own thread: while you're doing one, send goes there (main: true for the main conversation; dm: NAME for a direct thread).",
     "4. Call wait_for_messages again. A timeout or a short wait is normal, not a reason to stop.",
     push ? "This server also pushes messages to you; still call wait_for_messages, and answer with reply." : null,
   ]

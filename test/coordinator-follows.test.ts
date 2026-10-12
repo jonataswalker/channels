@@ -1,5 +1,5 @@
-// Coordinator-only follows the coordinator role (T1389): removing the coordinator turns it off, so
-// no agent is left refused for want of a coordinator that isn't there.
+// Coordinator mode by default (T1460): kiwi create starts it with its agent coordinating; removing the
+// coordinator hands the role to the next agent in, and with none left nobody is refused for want of one.
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,11 +40,15 @@ async function ok(home: string, ...args: string[]): Promise<string> {
   return out;
 }
 
-test("kicking the coordinator turns coordinator-only off", async () => {
+test("a new channel starts coordinated, and kicking the coordinator hands the role on", async () => {
   const owner = scratch();
   const agent = scratch();
   const code = /join code: (\S+)/.exec(await ok(owner, "create", "cf", "--as", "lead"))![1]!;
-  const p = spawn(agent, ["join", code, "--as", "coord"]);
+  const status = await ok(owner, "--as", "human", "status");
+  expect(status).toContain("lead — coordinator");
+  expect(status).toContain("you talk with lead");
+  expect(await ok(owner, "--as", "human", "log", "--all")).toContain("turned on coordinator-only");
+  const p = spawn(agent, ["join", code, "--as", "dev"]);
   let listed = "";
   for (let i = 0; i < 300 && !/\d{3}-\d{3}/.test(listed); i++) {
     listed = await ok(owner, "--as", "human", "requests");
@@ -52,10 +56,7 @@ test("kicking the coordinator turns coordinator-only off", async () => {
   }
   await ok(owner, "--as", "human", "approve", /(\d{3}-\d{3})/.exec(listed)![1]!, "--yes");
   expect(await p.exited).toBe(0);
-  await ok(owner, "--as", "human", "role", "coord", "coordinator", "--yes");
-  await ok(owner, "--as", "human", "mode", "coordinator-only", "on", "--yes");
-  expect(await ok(owner, "--as", "human", "status")).toContain("coordinator-only");
-  const kicked = await ok(owner, "--as", "human", "kick", "coord", "--yes");
-  expect(kicked).toContain("coordinator-only is off");
-  expect(await ok(owner, "log", "--all")).toContain("turned off coordinator-only");
+  const kicked = await ok(owner, "--as", "human", "kick", "lead", "--yes");
+  expect(kicked).toContain("dev is the coordinator now");
+  expect(await ok(owner, "--as", "human", "log", "--all")).toContain("made dev coordinator");
 });

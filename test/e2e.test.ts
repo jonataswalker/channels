@@ -173,7 +173,8 @@ describe("agents coordinating through the CLI", () => {
   let code = "";
 
   test("create, then join only with the owner's approval; names can't be taken twice", async () => {
-    const created = await ok(lead, "create", "proj", "--as", "lead", "--role", "planner");
+    // An open channel (no coordinator): these agents talk with people directly.
+    const created = await ok(lead, "create", "proj", "--as", "lead", "--role", "planner", "--open");
     code = /join code: (\S+)/.exec(created)![1]!;
     expect(created).toContain("owner dashboard link: run `kiwi web`");
     const joined = await joinVia(lead, mac, code, "proj", "mac", "macos");
