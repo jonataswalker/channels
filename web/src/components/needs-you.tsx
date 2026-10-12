@@ -7,6 +7,7 @@ import { TOO_MANY_REQUESTS } from "@mc/sas.ts"
 import { taskId, type Task } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
 import { excerpt, formatAgo } from "@/lib/format"
+import { escapeLayer } from "@/lib/escape"
 import { cx } from "@/lib/utils"
 import { useControls } from "./controls"
 import { Icon } from "./icon"
@@ -74,12 +75,11 @@ export function NeedsYou({
   useEffect(() => {
     if (!open || variant === "stack") return
     const away = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false)
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false)
     document.addEventListener("pointerdown", away)
-    document.addEventListener("keydown", esc)
+    const stop = escapeLayer(() => box.current, () => setOpen(false))
     return () => {
       document.removeEventListener("pointerdown", away)
-      document.removeEventListener("keydown", esc)
+      stop()
     }
   }, [open, variant])
   const items: { key: string; summary: string; node: ReactNode }[] = [
@@ -301,7 +301,7 @@ function EscalationItem({ m, now, nameOf, onReply, onJump }: { m: Message; now: 
             void send()
           }}
         >
-          <TextField autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setDraft(null)} placeholder={`Answer ${nameOf(m.from)}`} aria-label="Answer" className="flex-1" />
+          <TextField autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), setDraft(null))} placeholder={`Answer ${nameOf(m.from)}`} aria-label="Answer" className="flex-1" />
           <Button size="sm" variant="secondary" type="submit" disabled={busy || !draft.trim()}>
             Send
           </Button>
@@ -357,7 +357,7 @@ function ReviewItem({ t, nameOf, onApprove, onSendBack, onOpen }: { t: Task; nam
             if (why.trim()) void act(() => onSendBack(t, why.trim()), `Sent ${taskId(t.id)} back`)
           }}
         >
-          <TextField autoFocus value={why} onChange={(e) => setWhy(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setWhy(null)} placeholder="What to change" aria-label="What to change" className="flex-1" />
+          <TextField autoFocus value={why} onChange={(e) => setWhy(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), setWhy(null))} placeholder="What to change" aria-label="What to change" className="flex-1" />
           <Button size="sm" variant="secondary" type="submit" disabled={busy || !why.trim()}>
             Send back
           </Button>

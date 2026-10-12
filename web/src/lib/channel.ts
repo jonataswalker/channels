@@ -24,6 +24,7 @@ import { handleFor, type JoinRequest, type Member } from "@mc/membership.ts"
 import type { Message } from "@mc/protocol.ts"
 import type { Signed, SigningBudget } from "@mc/sas.ts"
 import { fold, type ChannelState, type GuardFloor, type Roster } from "@mc/state.ts"
+import { foldCache } from "./fold-cache"
 import { forgetHistory, readCached, rememberMessage } from "./history"
 import { wholeLog } from "./history-plan"
 import { ICON_LIVE } from "./icon-event"
@@ -910,13 +911,16 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
     [onGone]
   )
 
-  const foldAt = useCallback(
-    (seq: number) => {
-      const upTo = messages.filter((m) => m.seq <= seq)
-      const at = upTo.at(-1)
-      return fold(upTo, rosterForFold, at ? (at.rts ?? at.ts) : now, modeFloor, roomsFloor, guardFloor)
-    },
-    [messages, rosterForFold, now, modeFloor, roomsFloor, guardFloor]
+  // The time a replay stands at is its own message's (before any message, nothing has happened), not the
+  // clock's: a tick doesn't change the past, so it mustn't fold it again. Scrubbing over the same points costs nothing.
+  const foldAt = useMemo(
+    () =>
+      foldCache((seq: number) => {
+        const upTo = messages.filter((m) => m.seq <= seq)
+        const at = upTo.at(-1)
+        return fold(upTo, rosterForFold, at ? (at.rts ?? at.ts) : 0, modeFloor, roomsFloor, guardFloor)
+      }),
+    [messages, rosterForFold, modeFloor, roomsFloor, guardFloor]
   )
 
   return { ch, connection, gone, messages, roster, state, online: live, isOwner, requests, send, refreshRequests, refreshRoster, head: start?.head ?? 0, foldAt }

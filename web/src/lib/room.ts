@@ -3,7 +3,7 @@
 // their own. coordinator-mood.ts reads the coordinator; this reads everyone else the same way.
 
 import { ignored, type Message } from "../../../src/protocol.ts"
-import { isPerson, type ChannelState, type Task } from "../../../src/state.ts"
+import { dmPlace, isPerson, type ChannelState, type Place, type Task } from "../../../src/state.ts"
 import { ERROR_MS, type Mood } from "./coordinator-mood"
 
 /** How long an agent's face keeps speaking after it posts (shorter than the coordinator's: there are several). */
@@ -62,9 +62,43 @@ export function agentInputs(state: Read, messages: Message[], name: string): Pic
   return { saidAt, failedAt, thinking, working, line }
 }
 
-/** The agents on the stage: everyone active who isn't a person or the coordinator, in the order they joined. */
-export function stageAgents(state: Pick<ChannelState, "members">, coordinator: string | null): string[] {
-  return [...state.members.values()].filter((m) => m.active && !isPerson(m) && m.name !== coordinator).map((m) => m.name)
+/**
+ * The agents on the stage: everyone active who isn't a person or the coordinator, in the order they
+ * joined. In a replay (`asOf`, a time), only those who had joined by then: the fold uses today's
+ * roster, so without this an agent that came later would stand there, asleep, before it existed.
+ */
+export function stageAgents(state: Pick<ChannelState, "members">, coordinator: string | null, asOf: number | null = null): string[] {
+  return [...state.members.values()].filter((m) => m.active && !isPerson(m) && m.name !== coordinator && (asOf === null || m.joined <= asOf)).map((m) => m.name)
+}
+
+/** How many things agents past the shown faces need from you: the "+N" seat carries them, so a flag never leaves the stage. */
+export function hiddenFlags(agents: string[], shown: number, flags: Map<string, { escalations: unknown[]; reviews: unknown[] }>): number {
+  let n = 0
+  for (const name of agents.slice(shown)) {
+    const f = flags.get(name)
+    if (f) n += f.escalations.length + f.reviews.length
+  }
+  return n
+}
+
+/**
+ * How many agents sit beside the coordinator, per side, inside the column: a seat is its face plus
+ * 40px of caption, 16px apart, and 32px from the coordinator. None on a phone; at most two a side.
+ */
+export function seatsPerSide(column: number, coord: number, face: number): number {
+  const seat = face + 40
+  const room = (column - coord - 2 * 32 + 16) / 2
+  return Math.max(0, Math.min(2, Math.floor(room / (seat + 16))))
+}
+
+/**
+ * The place an agent's drawer opens on: its task's conversation, or else its direct one with the
+ * coordinator. Read once, when the drawer opens, and kept: an agent moving on to its next task mid-
+ * sentence mustn't pull the drawer (and the draft in it) along.
+ */
+export function drawerPlaceFor(state: Pick<ChannelState, "tasks">, agent: string, coordinator: string | null, me: string): Place {
+  const t = currentTask(state, agent)
+  return t ? { kind: "task", task: t.id } : dmPlace(coordinator ?? me, agent)
 }
 
 /** Decisions and escalations an agent is waiting on a person for, and tasks of its waiting on a review, by agent. */
@@ -101,6 +135,15 @@ export function delegations(messages: Message[], state: Pick<ChannelState, "memb
     else if (m.kind !== "event" && m.dm && m.to?.length === 1 && agent(m.to[0])) out.push({ seq: m.seq, to: m.to[0]!, at })
   }
   return out
+}
+
+/**
+ * The lines to draw, of everything handed out: what came after the last one seen, and only if it was
+ * handed out just now (history arriving on a reconnect or from the cache draws nothing).
+ */
+export function newDelegations(all: Delegation[], seenTo: number, now: number): { fresh: Delegation[]; seenTo: number } {
+  const unseen = all.filter((d) => d.seq > seenTo)
+  return { fresh: unseen.filter((d) => now - d.at < 10_000), seenTo: unseen.at(-1)?.seq ?? seenTo }
 }
 
 /**
