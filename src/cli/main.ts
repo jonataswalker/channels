@@ -31,7 +31,7 @@ import { canPost, describeScopes, parseScopes, presetOf, SCOPES, type Scope } fr
 import { fingerprint, generateIdentity, type Identity } from "../identity.ts";
 import { PAIR_TTL_MS, pairNonce } from "../pair.ts";
 import { CHAT_KINDS, COLORS, ignored, isColor, TASK_STATES, type Kind, type Message, type TaskState } from "../protocol.ts";
-import { COORDINATOR, humanOf, parseTaskId, similarOpenTasks, taskId, workingOn, type ChannelState } from "../state.ts";
+import { chooseThread, COORDINATOR, humanOf, parseTaskId, similarOpenTasks, taskId, wentTo, type ChannelState } from "../state.ts";
 import { VERSION } from "../version.ts";
 import { channelFiles, runSh, sessionViews } from "../sh.ts";
 import { forgetMachine, linkUrl, loadMachine, machineCode, machineFx, newMachine, saveMachine, vouchFor, type MachineFile } from "../machine.ts";
@@ -535,7 +535,7 @@ const commands: Record<string, Command> = {
       const ownerCh = new Channel(access, relay, owner);
       if (!opt.open) {
         yield* ownerCh.fx.startCoordinated();
-        if (!opt.role) yield* ownerCh.fx.send(`made ${name} ${COORDINATOR}`, { kind: "event", ev: { op: "role.set", member: name, role: COORDINATOR } });
+        if (!opt.role) yield* ownerCh.fx.send(`made ${name} ${COORDINATOR}`, { kind: "event", ev: { op: "role.set", member: name, role: COORDINATOR }, to: [name] });
       }
       // The channel's setting-up isn't news to the agent that set it up.
       yield* (yield* Cursor).write(alias, name, yield* ownerCh.fx.head());
@@ -1106,12 +1106,11 @@ const commands: Record<string, Command> = {
       // Where it goes: a direct thread (--dm NAME), a task's thread (--task T7), main (--main), the thread
       // it answers (--re), or by default the task this agent is doing, when it's doing exactly one.
       if (opt.dm && opt.to) return yield* die("--dm NAME names who it goes to; leave out --to");
-      if ([opt.dm, opt.task, opt.main].filter(Boolean).length > 1) return yield* die("one of --dm, --task or --main");
       const { state } = yield* s.state();
       const named = opt.task === undefined ? undefined : (parseTaskId(opt.task) ?? (yield* die(`"${opt.task}" isn't a task id (like T12)`)));
-      const doing = opt.dm || opt.main || opt.re || named !== undefined ? undefined : workingOn(state, s.me);
-      const task = named ?? doing;
-      const to = opt.dm ? [opt.dm] : list(opt.to);
+      const chosen = chooseThread(state, s.me, { ...(named !== undefined ? { task: named } : {}), main: opt.main, ...(opt.dm ? { dm: opt.dm } : {}), reply: !!opt.re });
+      if (typeof chosen === "string") return yield* die(chosen);
+      const to = chosen.to ?? list(opt.to);
       const kind = (opt.kind ?? "msg") as Kind;
       if (!CHAT_KINDS.includes(kind)) return yield* die(`kind must be one of: ${CHAT_KINDS.join(", ")}`);
       const re = list(opt.re)?.map((x) => Number(x.replace(/^#/, ""))).filter((n) => n > 0);
@@ -1120,27 +1119,19 @@ const commands: Record<string, Command> = {
       const asking = opt.ask || !!opt.wait;
       // Only a question that waits needs to know where the channel was, to catch an answer that comes at once.
       const head = asking && opt.wait ? yield* s.ch.fx.head() : 0;
-      const seq = yield* s.send(body, { to, kind: asking && !opt.kind ? "ask" : kind, re, imgs, room: opt.room, ...(task !== undefined ? { task } : {}), ...(opt.dm ? { dm: true } : {}) });
-      const where = opt.dm ? ` to ${opt.dm} (direct)` : task !== undefined ? ` in ${taskId(task)}'s thread${doing !== undefined ? " (the task you're doing; --main for the main conversation)" : ""}` : "";
-      if (!asking || !opt.wait) return out(`${asking ? "asked" : "sent"} #${seq}${where}`);
+      const seq = yield* s.send(body, { to, kind: asking && !opt.kind ? "ask" : kind, re, imgs, room: opt.room, ...(chosen.task !== undefined ? { task: chosen.task } : {}), ...(chosen.dm ? { dm: true } : {}) });
+      if (!asking || !opt.wait) return out(`${asking ? "asked" : "sent"} #${seq}${wentTo(chosen)}`);
       const replies = yield* s.awaitReplies(seq, head, parseDuration(opt.wait));
       if (!replies.length) return yield* die(`no answer to #${seq} within ${opt.wait}; replies will still arrive when you listen`, 2);
       for (const r of replies) out(render(r));
     }),
 
-  ask: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const body = yield* text(1);
-      if (!body.trim()) return yield* die('usage: kiwi ask --to NAME "question" [--wait 10m]');
-      const waitSec = opt.wait ? parseDuration(opt.wait) : 0;
-      const kind = (opt.kind ?? "ask") as Kind;
-      const imgs = yield* images;
-      const { seq, replies } = yield* s.ask(body, { to: list(opt.to), kind, waitSec, imgs, room: opt.room });
-      if (!waitSec) return out(`asked #${seq}`);
-      if (!replies.length) return yield* die(`no answer to #${seq} within ${opt.wait}; replies will still arrive in tail/wait`, 2);
-      for (const r of replies) out(render(r));
-    }),
+  /** `kiwi ask`: a question, the same as send --ask (in the task you're doing, unless you say where). */
+  ask: () => {
+    opt.ask = true;
+    if (opt.kind === undefined) opt.kind = "ask";
+    return commands.send!();
+  },
 
   reply: () =>
     Effect.gen(function* () {
@@ -1545,15 +1536,17 @@ const commands: Record<string, Command> = {
       const { state } = yield* s.state();
       const wasCoordinator = state.coordinator === member;
       const becomes = !clear && role.trim().toLowerCase() === COORDINATOR;
+      // Coordinator-only follows the role. Taking it away turns the mode off first, so there's never a moment
+      // of coordinator mode with nobody in it (when an owner page would hand the role to the next agent).
+      if (wasCoordinator && !becomes && state.mode.coordinatorOnly) {
+        yield* s.setMode(false);
+        out("coordinator-only is off: nobody holds the coordinator role now");
+      }
       yield* s.decideRole(member, { role: clear ? null : role, ...(opt.about !== undefined ? { about: opt.about } : {}) });
       out(clear ? `cleared ${member}'s role` : `made ${member} ${role}`);
-      // Coordinator-only follows the role: on with a coordinator, off when the last one stops.
       if (becomes && !state.mode.coordinatorOnly) {
         yield* s.setMode(true);
         out("coordinator-only is on: people talk with the coordinator");
-      } else if (wasCoordinator && !becomes && state.mode.coordinatorOnly) {
-        yield* s.setMode(false);
-        out("coordinator-only is off: nobody holds the coordinator role now");
       }
     }),
 

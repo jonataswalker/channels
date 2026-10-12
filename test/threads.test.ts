@@ -84,5 +84,31 @@ describe("agents in threads", () => {
     expect(await ok(dev, "listen", "--now")).not.toContain("got a minute?");
     // Anyone can still read any place.
     expect(await ok(dev2, "log", "-n", "50")).toContain("stale lockfile");
+
+    // dev2, not on the task, asks in its thread: the answer in that conversation reaches dev2.
+    const q = /#(\d+)/.exec(await ok(dev2, "send", "--task", task, "which lockfile?"))![1]!;
+    await ok(dev, "send", "--re", q, "bun.lock");
+    expect(await ok(dev2, "listen", "--now")).toContain("bun.lock");
+
+    // Asking defaults to the task too; doing two tasks, nothing is guessed.
+    expect(await ok(dev, "ask", "--to", "dev2", "can you review?")).toContain(`in ${task}'s thread`);
+    const second = /T(\d+)/.exec(await ok(owner, "--as", "lead", "task", "add", "and the tests", "--owner", "dev"))![0];
+    await ok(dev, "task", "start", second);
+    expect(await ok(dev, "send", "both under way")).toContain(`you're doing ${task} and ${second}, so say which with --task`);
+  });
+
+  test("a coordinator handed the role is told; taking it away turns the mode off before the role", async () => {
+    const owner = scratch("owner2");
+    const code = /join code: (\S+)/.exec(await ok(owner, "create", "th2", "--as", "lead", "--role", "builder"))![1]!;
+    const dev = scratch("dev3");
+    await join_(owner, dev, code, "dev");
+    await ok(dev, "listen", "--now");
+    await ok(owner, "--as", "human", "role", "dev", "coordinator", "--yes");
+    expect(await ok(dev, "listen", "--now")).toContain("made dev coordinator");
+    // lead kept its role: a role given at creation isn't taken over by the default.
+    expect(await ok(owner, "--as", "human", "status")).toContain("lead — builder");
+    await ok(owner, "--as", "human", "role", "dev", "none", "--yes");
+    const log = await ok(owner, "--as", "human", "log", "--all", "-n", "10");
+    expect(log.indexOf("turned off coordinator-only")).toBeLessThan(log.lastIndexOf("cleared dev's role"));
   });
 });

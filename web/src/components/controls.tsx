@@ -180,12 +180,13 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
   const setRole = async (ev: Extract<Event, { op: "role.set" | "role.refuse" }>) => {
     changing.current = true
     try {
+      const becomes = ev.op === "role.set" && isCoordinator(ev.role)
+      const was = ev.op === "role.set" && p.state.coordinator === ev.member
+      // Taking the coordinator away: the mode goes first, so no moment has coordinator mode with nobody in
+      // it (when any owner page or CLI would hand the role to the next agent).
+      if (!becomes && was && p.onMode && p.state.mode.coordinatorOnly) await p.onMode(false, true)
       await p.onRole(ev)
-      if (ev.op !== "role.set" || !p.onMode) return
-      const becomes = isCoordinator(ev.role)
-      const was = p.state.coordinator === ev.member
-      if (becomes && !p.state.mode.coordinatorOnly) await p.onMode(true, true)
-      else if (!becomes && was && p.state.mode.coordinatorOnly) await p.onMode(false, true)
+      if (becomes && p.onMode && !p.state.mode.coordinatorOnly) await p.onMode(true, true)
     } finally {
       changing.current = false
     }

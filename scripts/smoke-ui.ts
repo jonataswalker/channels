@@ -368,7 +368,11 @@ try {
   await page.getByText(/People talk with .*, the coordinator/).waitFor()
   await page.getByRole("button", { name: "More for bot" }).click()
   await page.getByRole("menuitem", { name: "No longer coordinator" }).click()
-  await page.getByText(/turned off coordinator-only/).first().waitFor({ timeout: 15000 })
+  // The mode goes off first (so nobody re-appoints in between), then the role: the role is the newest line.
+  await page.getByText(/cleared bot's role/).first().waitFor({ timeout: 15000 })
+  await peopleButton.click()
+  if (await page.getByText(/People talk with .*, the coordinator/).isVisible()) throw new Error("coordinator-only stayed on")
+  await page.keyboard.press("Escape")
   console.log(`ok  ${at}`)
 
   at = "Tasks view"

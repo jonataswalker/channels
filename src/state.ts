@@ -296,8 +296,8 @@ function summarize(placeOf: Map<number, Place>, tasks: Map<number, Task>, trust:
 
 /**
  * Who coordinates by default when nobody holds the role: the earliest-joined of the owner's own agents
- * still here (its person is the owner's, by sign-in) that the owner hasn't given another role, else the
- * earliest of them. Never anyone else's agent: the coordinator hears everything people say, so only the
+ * still here (its person is the owner's, by sign-in) that the owner hasn't given another role (one with
+ * a role keeps it). Never anyone else's agent: the coordinator hears everything people say, so only the
  * owner gives that to someone else's. Where nobody is signed in, nobody is provably the owner's: none.
  */
 export function firstAgent(state: Pick<ChannelState, "members">): string | undefined {
@@ -306,7 +306,46 @@ export function firstAgent(state: Pick<ChannelState, "members">): string | undef
   const agents = [...state.members.values()]
     .filter((m) => m.active && !isPerson(m) && (m.kind as string | undefined) !== "computer" && m.sponsor?.user === owner)
     .sort((a, b) => a.joined - b.joined);
-  return (agents.find((m) => !m.role) ?? agents[0])?.name;
+  return agents.find((m) => !m.role)?.name;
+}
+
+/** Where an agent asked a message to go: one of a task, main, a direct thread with someone; or nothing said. */
+export interface ThreadAsk {
+  task?: number;
+  main?: boolean;
+  dm?: string;
+  /** It answers a message: it sits where that one does, whatever else is said. */
+  reply?: boolean;
+}
+
+/** Where it goes: what to send it with, and when it's by default, the task (or, doing several, the tasks). */
+export interface ThreadChoice {
+  task?: number;
+  dm?: true;
+  to?: string[];
+  /** Went to this task's thread because the agent is doing it. */
+  doing?: number;
+  /** Went to main because the agent is doing several tasks and didn't say which. */
+  several?: number[];
+}
+
+/** One place for a message from `me`: what it asked, else the task it's doing (see workingOn). A string is why not. */
+export function chooseThread(state: Pick<ChannelState, "tasks" | "coordinator">, me: string, a: ThreadAsk): ThreadChoice | string {
+  if ([a.task !== undefined, !!a.main, !!a.dm].filter(Boolean).length > 1) return "say one of: a task (--task), main (--main) or a direct thread (--dm)";
+  if (a.dm) return { to: [a.dm], dm: true };
+  if (a.task !== undefined) return { task: a.task };
+  if (a.main || a.reply || state.coordinator === me) return {};
+  const doing = [...state.tasks.values()].filter((t) => t.owner === me && t.state === "doing").map((t) => t.id);
+  if (doing.length === 1) return { task: doing[0]!, doing: doing[0]! };
+  return doing.length > 1 ? { several: doing } : {};
+}
+
+/** Where a sent message went, in words: " in T7's thread (the task you're doing…)", " to X (direct)", or a note. */
+export function wentTo(c: ThreadChoice): string {
+  if (c.dm && c.to) return ` to ${c.to[0]} (direct)`;
+  if (c.task !== undefined) return ` in ${taskId(c.task)}'s thread${c.doing !== undefined ? " (the task you're doing; --main for the main conversation)" : ""}`;
+  if (c.several) return ` in the main conversation: you're doing ${c.several.map(taskId).join(" and ")}, so say which with --task`;
+  return "";
 }
 
 /**

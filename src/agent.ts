@@ -511,7 +511,7 @@ export class AgentSession {
         const p = state.members.get(n);
         return !!p && (p.kind === "human" || p.owner);
       });
-      if (people.length) return yield* new Rejected(`this channel is coordinator-only: only ${state.coordinator} messages people. Send it to ${state.coordinator}, who passes it on.`);
+      if (people.length) return yield* new Rejected(`this channel is coordinator-only: only ${state.coordinator} messages people. Send it to ${state.coordinator}, who passes it on, or for a decision only a person can make: kiwi send --escalate --re N "why".`);
     });
   }
 
@@ -543,10 +543,10 @@ export class AgentSession {
   readonly ask = Effect.fn("AgentSession.ask")({ self: this }, function* (
     this: AgentSession,
     body: string,
-    opts: { to?: string[]; kind?: Kind; waitSec?: number; imgs?: ImageAttachment[]; room?: string },
+    opts: { to?: string[]; kind?: Kind; waitSec?: number; imgs?: ImageAttachment[]; room?: string; task?: number; dm?: boolean },
   ) {
     const head = yield* this.ch.fx.head();
-    const seq = yield* this.send(body, { to: opts.to, kind: opts.kind ?? "ask", imgs: opts.imgs, room: opts.room });
+    const seq = yield* this.send(body, { to: opts.to, kind: opts.kind ?? "ask", imgs: opts.imgs, room: opts.room, ...(opts.task !== undefined ? { task: opts.task } : {}), ...(opts.dm ? { dm: true } : {}) });
     if (!opts.waitSec) return { seq, replies: [] as Message[] };
     const replies = yield* this.awaitReplies(seq, head, opts.waitSec);
     return { seq, replies };
@@ -616,7 +616,8 @@ export class AgentSession {
     const m = state.members.get(member);
     if (!m?.active) return yield* new Rejected(`no member named ${member}`);
     const ev = { op: "role.set" as const, member, ...decision };
-    const seq = yield* owner.fx.send(`made ${member} ${ev.role ?? "unassigned"}`, { kind: "event", ev });
+    // Addressed to them: a role (the coordinator's, handed out unasked) is news they have to get.
+    const seq = yield* owner.fx.send(`made ${member} ${ev.role ?? "unassigned"}`, { kind: "event", ev, to: [member] });
     // Then the member's record says it too, for clients holding only the log's tail. If this fails,
     // the owner's next reconcile puts it right; the role.set already counts for every client.
     if (!m.owner) {
@@ -903,7 +904,8 @@ export function wants(me: string, m: Message, state: ChannelState | null, d: Del
   // A task's thread is for the agents working it (and its reviewer and the coordinator); a direct thread
   // for its two. Anyone named in a message still gets it. Main follows the rules below.
   const place = state?.placeOf.get(m.seq);
-  if (state && place && place.kind !== "main") return isDirectedAt(m, me) || threadMembers(state, place).includes(me);
+  // (A conversation started there counts too: whoever is in it hears its replies.)
+  if (state && place && place.kind !== "main") return isDirectedAt(m, me) || threadMembers(state, place).includes(me) || !!state.threadPeople.get(state.threadOf.get(m.seq) ?? m.seq)?.has(me);
   // Coordinator-only (with a coordinator in place): what people say goes to the coordinator, who
   // relays it. Another agent gets a person's message only if it's addressed to that agent by name.
   const sender = state?.members.get(m.from);
