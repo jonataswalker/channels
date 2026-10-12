@@ -23,11 +23,11 @@ import { TOO_MANY_REQUESTS } from "./sas.ts";
 import type { ChannelAccess } from "./crypto.ts";
 import { inlineText, type Member } from "./membership.ts";
 import type { Identity } from "./identity.ts";
-import { isLocalRefusal, Rejected } from "./refusals.ts";
+import { isLocalRefusal, OwnerOnly, Rejected } from "./refusals.ts";
 import { canPost, describeScopes, refusal, wireScopes, type Scope } from "./scopes.ts";
 import { GENERAL_ROOM, ignored, MAX_CHARTER, TASK_STATES, type Card, type Color, type Event, type Handoff, type ImageAttachment, type Kind, type Message, type Presence, type TaskState } from "./protocol.ts";
 import { allowedOnHold, claimConflict, findRoom, fold, humanOf, isPerson, keptFromPeople, newRoomId, normTags, ON_HOLD, overlaps, ownerOf, taskId, waitingOn, wouldCycle, type ChannelState, type GuardFloor, type Roster, type RoomsFloor } from "./state.ts";
-import { mergeCard, sameCard } from "./card.ts";
+import { detectHarness, mergeCard, sameCard } from "./card.ts";
 import { cardLine } from "./format.ts";
 
 export { Rejected };
@@ -94,10 +94,30 @@ const toRoster = (m: Member): Roster[number] => ({
 /** A floor from the channel's settings; one that can't be read is no floor. */
 const orNone = <A, E, R>(e: Effect.Effect<A | null, E, R>) => Effect.catchCause(e, () => Effect.succeed(null));
 
+/**
+ * Why this session can't do an admin act: a person decides who's in and what they may do, never an
+ * agent. `where` says what this session is: an agent's seat, the owner's seat run from inside an
+ * agent's harness, or a seat on a machine without the owner key.
+ */
+export function peopleOnly(what: string, where: "agent" | "harness" | "elsewhere"): string {
+  if (where === "agent") return `only a person can ${what}: the channel's owner does it in the web dashboard or with kiwi tui. Agents can't let anyone in, remove anyone, or change roles, what members may do, the mode, the charter or the hold. Ask your human (kiwi escalate).`;
+  if (where === "harness") return `only a person can ${what}, and this runs inside an agent's harness: use kiwi tui, the web dashboard, or kiwi in a terminal of your own`;
+  return `only the channel's owner can ${what}: in the web dashboard, or with kiwi tui on their computer`;
+}
+
 export class AgentSession {
   readonly ch: Channel;
-  /** The owner's channel handle, when this machine holds the owner key. */
+  /**
+   * The owner's channel handle for admin (approve, remove, roles, scopes, mode, charter, hold, rooms):
+   * only when this session is the owner's own seat, run by a person. An agent's session never has it,
+   * even on the owner's machine, so no agent can be talked into acting as the owner.
+   */
   readonly ownerCh: Channel | null;
+  /**
+   * The owner key on this machine, for chores that only finish what the owner already decided (the
+   * key rotation owed to someone leaving, the relay's can-post bits). Any session here runs those.
+   */
+  private readonly duty: Channel | null;
   private roster: Roster | null = null;
   /** Whether the relay's can-post bits were checked against the log since the roster last changed. */
   private postingChecked = false;
@@ -113,14 +133,27 @@ export class AgentSession {
     owner: Identity | null,
     /** Keeps the channel's keys after a rotation. */
     persist: (a: ChannelAccess) => void,
+    /** Whether this session may act as the owner: the owner's own seat, run by a person. */
+    admin = false,
   ) {
     this.ch = new Channel(cfg, cfg.relay, identity, persist);
-    this.ownerCh = owner ? new Channel(cfg, cfg.relay, owner, persist) : null;
+    this.duty = owner ? new Channel(cfg, cfg.relay, owner, persist) : null;
+    this.ownerCh = admin && owner?.pk === identity.pk ? this.duty : null;
+  }
+
+  /** The owner's handle for an admin act, or a refusal saying who does it instead. */
+  adminCh(what: string): Effect.Effect<Channel, OwnerOnly> {
+    if (this.ownerCh) return Effect.succeed(this.ownerCh);
+    const where = this.identity.pk !== this.cfg.ownerPk ? "agent" : this.duty ? "harness" : "elsewhere";
+    // A person at their own terminal, on the machine that holds the owner key: say how to act as themself.
+    // Never said inside an agent's harness, where it would be refused anyway.
+    const hint = where === "agent" && this.duty && this.cfg.owner && !detectHarness() ? ` If you're that person, at your own terminal: kiwi --as ${this.cfg.owner} …` : "";
+    return Effect.fail(new OwnerOnly(peopleOnly(what, where) + hint));
   }
 
   /** openSession, as a Promise: for callers outside Effect. */
-  static open(alias: string, cfg: ChannelConfig, name: string): Promise<AgentSession> {
-    return runAgent(openSession(alias, cfg, name));
+  static open(alias: string, cfg: ChannelConfig, name: string, opts: { person?: boolean } = {}): Promise<AgentSession> {
+    return runAgent(openSession(alias, cfg, name, opts));
   }
 
   /**
@@ -143,7 +176,7 @@ export class AgentSession {
 
   /** Owner duty: rotate the channel key if someone left since the last rotation. */
   readonly ownerChores = Effect.fn("AgentSession.ownerChores")({ self: this }, function* (this: AgentSession) {
-    const owner = this.ownerCh;
+    const owner = this.duty;
     if (!owner) return;
     if (yield* owner.fx.rotateIfDue()) yield* this.ch.fx.refreshKeys();
     // The relay's "can post" bit follows the log's scopes: check once a session, and again whenever
@@ -156,8 +189,8 @@ export class AgentSession {
 
   /** Pending join requests (owner machine only). */
   readonly requests = Effect.fn("AgentSession.requests")({ self: this }, function* (this: AgentSession) {
-    if (!this.ownerCh) return yield* new Rejected("only the channel owner's machine can see join requests");
-    return yield* this.ownerCh.fx.requests({ budget: (yield* Keystore).budget });
+    const owner = yield* this.adminCh("see join requests");
+    return yield* owner.fx.requests({ budget: (yield* Keystore).budget });
   });
 
   // ---------- log & state ----------
@@ -211,17 +244,17 @@ export class AgentSession {
 
   /** Owner: make a room. Its id is made here and never changes; the name can (renameRoom). */
   readonly createRoom = Effect.fn("AgentSession.createRoom")({ self: this }, function* (this: AgentSession, name: string) {
-    if (!this.ownerCh) return yield* new Rejected("only the channel owner's machine makes rooms");
+    const owner = yield* this.adminCh("make rooms");
     const id = newRoomId();
-    const state = yield* this.roomEvent(this.ownerCh, { op: "room.create", id, name }, `made the room #${name}`);
+    const state = yield* this.roomEvent(owner, { op: "room.create", id, name }, `made the room #${name}`);
     return { id, state };
   });
 
   /** Owner: rename a room (general too; ids stay). */
   readonly renameRoom = Effect.fn("AgentSession.renameRoom")({ self: this }, function* (this: AgentSession, nameOrId: string, name: string) {
-    if (!this.ownerCh) return yield* new Rejected("only the channel owner's machine names rooms");
+    const owner = yield* this.adminCh("name rooms");
     const id = yield* this.roomId(nameOrId);
-    return yield* this.roomEvent(this.ownerCh, { op: "room.rename", id, name }, `renamed a room to #${name}`);
+    return yield* this.roomEvent(owner, { op: "room.rename", id, name }, `renamed a room to #${name}`);
   });
 
   /** Send a room event as the owner, confirm it, then sign the room list into the settings as of it. */
@@ -563,8 +596,7 @@ export class AgentSession {
     member: string,
     decision: { role: string | null; about?: string | null } | "allow" | "refuse",
   ) {
-    const owner = this.ownerCh;
-    if (!owner) return yield* new Rejected("only the channel owner's machine decides roles");
+    const owner = yield* this.adminCh("decide roles");
     const { state } = yield* this.state();
     const m = state.members.get(member);
     if (!m?.active) return yield* new Rejected(`no member named ${member}`);
@@ -590,8 +622,7 @@ export class AgentSession {
    * whoever is admitted under that name next. The relay is told the one bit it enforces itself.
    */
   readonly setScopes = Effect.fn("AgentSession.setScopes")({ self: this }, function* (this: AgentSession, member: string, scopes: Scope[] | null) {
-    const owner = this.ownerCh;
-    if (!owner) return yield* new Rejected("only the channel owner's machine sets what members may do");
+    const owner = yield* this.adminCh("set what members may do");
     const { state } = yield* this.state();
     const m = state.members.get(member);
     if (!m?.active) return yield* new Rejected(`no member named ${member}`);
@@ -615,8 +646,7 @@ export class AgentSession {
    * coordinator; strict (the default) has every client refuse other agents' messages to people.
    */
   readonly setMode = Effect.fn("AgentSession.setMode")({ self: this }, function* (this: AgentSession, coordinatorOnly: boolean, strict = true) {
-    const owner = this.ownerCh;
-    if (!owner) return yield* new Rejected("only the channel owner's machine sets the channel's mode");
+    const owner = yield* this.adminCh("set the channel's mode");
     const ev = { op: "mode.set" as const, coordinatorOnly, strict: coordinatorOnly && strict };
     const body = coordinatorOnly ? `coordinator-only on${ev.strict ? " (strict)" : ""}` : "coordinator-only off";
     const since = yield* owner.fx.send(body, { kind: "event", ev });
@@ -630,8 +660,7 @@ export class AgentSession {
    * and told to escalate what falls outside it instead of doing it.
    */
   readonly setCharter = Effect.fn("AgentSession.setCharter")({ self: this }, function* (this: AgentSession, text: string | null) {
-    const owner = this.ownerCh;
-    if (!owner) return yield* new Rejected("only the channel owner's machine sets the charter");
+    const owner = yield* this.adminCh("set the charter");
     const clean = text?.trim() || null;
     if (clean && clean.length > MAX_CHARTER) return yield* new Rejected(`a charter is at most ${MAX_CHARTER} characters`);
     const since = yield* owner.fx.send(clean ? `charter: ${clean}` : "cleared the charter", { kind: "event", ev: { op: "charter.set", text: clean } });
@@ -646,8 +675,7 @@ export class AgentSession {
    * (tasks, claims, facts, messages to other agents); agents may still answer people.
    */
   readonly setHold = Effect.fn("AgentSession.setHold")({ self: this }, function* (this: AgentSession, on: boolean, note?: string) {
-    const owner = this.ownerCh;
-    if (!owner) return yield* new Rejected("only the channel owner's machine puts the channel on hold");
+    const owner = yield* this.adminCh("put the channel on hold or lift it");
     const clean = note?.trim().slice(0, 500) || undefined;
     const since = yield* owner.fx.send(on ? `on hold${clean ? `: ${clean}` : ""}` : "hold lifted", { kind: "event", ev: { op: "hold.set", on, ...(clean ? { note: clean } : {}) } });
     yield* owner.fx.setHold({ on, ...(clean ? { note: clean } : {}), since });
@@ -676,8 +704,7 @@ export class AgentSession {
    * refuses a colour someone else has, and colours on agents.
    */
   readonly setColor = Effect.fn("AgentSession.setColor")({ self: this }, function* (this: AgentSession, member: string, color: Color | null) {
-    const ch = member === this.me ? this.ch : this.ownerCh;
-    if (!ch) return yield* new Rejected("only that person, or the channel owner's machine, sets their colour");
+    const ch = member === this.me ? this.ch : yield* this.adminCh("set someone else's colour");
     const ev: Event = { op: "color.set", member, color };
     if (ch === this.ch) yield* this.mayI({ kind: "event", ev });
     return yield* this.confirm(yield* ch.fx.send(color ? `${member}'s colour is ${color}` : `cleared ${member}'s colour`, { kind: "event", ev }));
@@ -873,13 +900,17 @@ export class AgentSession {
 }
 
 /** One agent's session on one channel, with its keys (and the owner's, when this machine holds them) loaded. */
-export const openSession = Effect.fn("AgentSession.open")(function* (alias: string, cfg: ChannelConfig, name: string) {
+export const openSession = Effect.fn("AgentSession.open")(function* (alias: string, cfg: ChannelConfig, name: string, opts: { person?: boolean } = {}) {
   const keys = yield* Keystore;
   // Member records: the newest this machine has seen per key wins, across runs.
   keepRecordsIn(keys.records);
   const owner = cfg.owner ? yield* keys.identity(cfg.owner, cfg.roomId) : null;
   const identity = yield* keys.identity(name, cfg.roomId);
-  return new AgentSession(alias, cfg, identity, owner, (a) => Effect.runSync(keys.saveAccess(alias, a)));
+  // Admin is the owner's own seat, run by a person: never an agent's seat, and not from inside an
+  // agent's harness (an agent there could pass --as for the owner). A person's terminal, kiwi tui
+  // and the dashboard are where it happens.
+  const admin = identity.pk === cfg.ownerPk && (opts.person ?? !detectHarness());
+  return new AgentSession(alias, cfg, identity, owner, (a) => Effect.runSync(keys.saveAccess(alias, a)), admin);
 });
 
 /** A person's seat (`kiwi tui`): the owner's handle only when this person's key is the owner's. */
@@ -887,7 +918,8 @@ export const openPersonSession = Effect.fn("AgentSession.openPerson")(function* 
   const keys = yield* Keystore;
   keepRecordsIn(keys.records);
   const identity = yield* keys.identity(name, cfg.roomId);
-  return new AgentSession(alias, cfg, identity, identity.pk === cfg.ownerPk ? identity : null, (a) => Effect.runSync(keys.saveAccess(alias, a)));
+  const owner = identity.pk === cfg.ownerPk;
+  return new AgentSession(alias, cfg, identity, owner ? identity : null, (a) => Effect.runSync(keys.saveAccess(alias, a)), owner);
 });
 
 export type { Presence };

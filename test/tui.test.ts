@@ -204,8 +204,8 @@ describe("kiwi tui, end to end", () => {
 
   test("the person writes to the coordinator, sees the answer, and turns the mode off", async () => {
     await cli("create", "tuitest", "--as", "lead");
-    await cli("-c", "tuitest", "role", "lead", "coordinator", "--yes");
-    await cli("-c", "tuitest", "mode", "coordinator-only", "on");
+    await cli("-c", "tuitest", "--as", "human", "role", "lead", "coordinator", "--yes");
+    await cli("-c", "tuitest", "--as", "human", "mode", "coordinator-only", "on");
 
     const prior = process.env.KIWI_HOME;
     process.env.KIWI_HOME = kiwiHome;

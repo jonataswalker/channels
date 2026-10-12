@@ -38,7 +38,7 @@ await review.hello("reviewer", "reviews every PR before merge");
 await beat();
 
 // Hello only asks for a role. The owner grants the ones this script addresses.
-const human = await agent("human");
+const human = await AgentSession.open("demo", cfg, "human", { person: true });
 await human.decideRole("lead", { role: "planner", about: "breaks work down and unblocks people" });
 await human.decideRole("mac", { role: "macos", about: "input capture and edge switching on the Mac" });
 await human.decideRole("win", { role: "windows", about: "input injection on the PC" });

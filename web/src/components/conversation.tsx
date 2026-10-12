@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from "react-dom"
 
 import { b64url } from "@mc/crypto.ts"
+import { droppedCount } from "@mc/format.ts"
 import { GENERAL_ROOM, ignored, type Color, type Message } from "@mc/protocol.ts"
 import { describeScopes, wireScopes } from "@mc/scopes.ts"
 import type { Member as RosterMember } from "@mc/membership.ts"
@@ -211,7 +212,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   const threads = useMemo(() => {
     const out = new Map<number, Message[]>()
     for (const m of messages) {
-      if (m.kind === "event") continue
+      if (m.kind === "event" || ignored(state.trust.get(m.seq))) continue
       const root = rootOf(m.seq)
       if (root === null) continue
       const list = out.get(root)
@@ -219,7 +220,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       else out.set(root, [m])
     }
     return out
-  }, [messages, rootOf])
+  }, [messages, rootOf, state.trust])
 
   const visible = useMemo(() => {
     // Filters and search show every match flat, threads or not.
@@ -236,8 +237,9 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
               : messages
     if (!filter) list = list.filter((m) => roomOfMessage(state, m) === rooms.active)
     if (!flat) list = list.filter((m) => m.kind === "event" || rootOf(m.seq) === null)
-    // Joins are noise; the member list already shows who's here.
-    list = list.filter((m) => m.ev?.op !== "hello")
+    // Joins are noise; the member list already shows who's here. Forged messages, and ones the
+    // owner's settings don't allow, are left out (the owner sees how many, below).
+    list = list.filter((m) => m.ev?.op !== "hello" && !ignored(state.trust.get(m.seq)))
     const q = search?.trim().toLowerCase()
     if (q) list = list.filter((m) => m.body.toLowerCase().includes(q) || nameOf(m.from).toLowerCase().includes(q))
     return list
@@ -325,6 +327,13 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   // The transcript: day marks, events as muted timeline rows, and each run of messages from one
   // sender as one card (the Linear activity feed, T1126).
   const rows: ReactNode[] = []
+  const dropped = isOwner ? droppedCount(state) : 0
+  if (dropped)
+    rows.push(
+      <p key="dropped" className="mt-3 text-meta text-ink-3">
+        {dropped === 1 ? "1 message" : `${dropped} messages`} left out: forged, or not allowed by your settings.
+      </p>
+    )
   let run: ReactNode[] = []
   let runKey = 0
   const flushRun = () => {

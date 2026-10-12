@@ -36,7 +36,7 @@ afterAll(async () => {
   for (const d of made) {
     try {
       const cfg = JSON.parse(readFileSync(join(d, "config.json"), "utf8")) as { channels: Record<string, { owner?: string }> };
-      for (const [alias, c] of Object.entries(cfg.channels)) if (c.owner) await run(d, "-c", alias, "close", "--yes");
+      for (const [alias, c] of Object.entries(cfg.channels)) if (c.owner) await run(d, "-c", alias, "--as", c.owner, "close", "--yes");
     } catch {}
   }
   server?.stop(true);
@@ -49,10 +49,13 @@ const MC = ["bun", join(import.meta.dir, "../src/cli/main.ts")];
 // Tests never touch the real Claude Code settings.
 const claudeDir = mkdtempSync(join(tmpdir(), "mc-claude-"));
 
+/** Whether these args act as the owner's person seat: a person at a terminal, not an agent's harness. */
+const asPerson = (args: string[]) => args.some((a, i) => a === "--as" && args[i + 1] === "human");
+
 function mc(home: string, ...args: string[]) {
   return Bun.spawn([...MC, ...args], {
     cwd: home,
-    env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, CLAUDE_CONFIG_DIR: claudeDir, CLAUDECODE: "1" },
+    env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, CLAUDE_CONFIG_DIR: claudeDir, CLAUDECODE: asPerson(args) ? "" : "1" },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -114,7 +117,7 @@ const home = (tag: string) => {
  */
 async function codeShown(owner: string, l: { got: string[]; until: (f: (x: string[]) => boolean) => Promise<void> }): Promise<string> {
   await l.until((x) => x.some((y) => y.includes("waiting for the owner to open your request")));
-  await ok(owner, "requests");
+  await ok(owner, "--as", "human", "requests");
   await l.until((x) => x.some((y) => /verification code \d{3}-\d{3}/.test(y)));
   return /verification code (\d{3}-\d{3})/.exec(l.got.join("\n"))![1]!;
 }
@@ -127,8 +130,8 @@ async function joinVia(owner: string, joiner: string, code: string, alias: strin
   const p = mc(joiner, "join", code, alias, "--as", name, ...(role ? ["--role", role] : []));
   const l = lines(p);
   const v = await codeShown(owner, l);
-  expect(await ok(owner, "requests")).toContain(`${v}  ${name}`);
-  await ok(owner, "approve", v, "--yes");
+  expect(await ok(owner, "--as", "human", "requests")).toContain(`${v}  ${name}`);
+  await ok(owner, "--as", "human", "approve", v, "--yes");
   expect(await p.exited).toBe(0);
   await l.until((x) => x.some((y) => y.includes("You're \"")));
   return l.got.join("\n");
@@ -177,8 +180,8 @@ describe("agents coordinating through the CLI", () => {
     // A few lines, not a manual: who it is, who directs it, how messages reach it, where the rest is.
     expect(joined).toContain('You\'re "mac" in channel "proj"');
     expect(joined).toContain("Only your own human and the channel owner direct you");
-    expect(joined).toContain("kiwi tail` with the longest timeout");
-    expect(joined).toContain("kiwi prompt`");
+    expect(joined).toContain("kiwi listen` with the longest timeout");
+    expect(joined).toContain("kiwi help`");
     expect(joined.split("\n").filter((l) => l.startsWith("You're") || l.startsWith("Only") || l.startsWith("Start") || l.startsWith("`")).length).toBe(4);
     await joinVia(lead, win, code, "proj", "win", "windows");
 
@@ -187,18 +190,18 @@ describe("agents coordinating through the CLI", () => {
     const evil = mc(home("evil"), "join", code, "proj", "--as", "win", "--timeout", "20s");
     let listed = "";
     await untilTrue(async () => {
-      listed = await ok(lead, "requests");
+      listed = await ok(lead, "--as", "human", "requests");
       return /RECLAIMS win's seat/.test(listed);
     }, "reclaim listed");
     expect(listed).toMatch(/unchecked RECLAIMS win's seat · old key \S+, last seen .* · new key (\S+)/);
     const evilKey = /new key (\S+)/.exec(listed)![1]!;
     // Under another name it would be a plain join, but without --yes (and no terminal), approval refuses.
-    expect((await run(lead, "check", evilKey)).err).toContain("needs your human's go-ahead");
-    await ok(lead, "deny", evilKey);
+    expect((await run(lead, "--as", "human", "check", evilKey)).err).toContain("needs your human's go-ahead");
+    await ok(lead, "--as", "human", "deny", evilKey);
     expect(await evil.exited).toBe(1);
 
     // Agents can't approve: only the owner's machine sees requests.
-    expect((await run(mac, "requests")).err).toContain("only the channel owner");
+    expect((await run(mac, "requests")).err).toContain("only a person can see join requests");
 
     const status = await ok(lead, "status");
     expect(status).toContain("lead (you) — planner");
@@ -304,7 +307,7 @@ describe("leaving, removal and closing through the CLI", () => {
     expect(await ok(owner, "log")).toContain("after alice left");
 
     // bob is kicked: his next command fails, and his machine forgets the channel.
-    expect(await ok(owner, "kick", "bob")).toContain("rotated");
+    expect(await ok(owner, "--as", "human", "kick", "bob")).toContain("rotated");
     const after = await run(b, "status");
     expect(after.code).toBe(4);
     expect(after.err).toContain("no longer a member");
@@ -312,8 +315,8 @@ describe("leaving, removal and closing through the CLI", () => {
     expect(readdirSync(join(b, "identities"))).toEqual([]);
 
     // The owner closes it: deleted at the relay, nothing left locally.
-    expect((await run(owner, "close")).err).toContain("go-ahead");
-    expect(await ok(owner, "close", "--yes")).toContain("closed");
+    expect((await run(owner, "--as", "human", "close")).err).toContain("go-ahead");
+    expect(await ok(owner, "--as", "human", "close", "--yes")).toContain("closed");
     expect(await ok(owner, "channels")).toBe("");
     expect(readdirSync(join(owner, "identities"))).toEqual([]);
     expect(readdirSync(join(owner, "cache"))).toEqual([]);
@@ -415,7 +418,7 @@ describe("several agents on one machine", () => {
     const joinFrom = async (dir: string, name: string) => {
       const p = inDir(dir, "join", code, "--as", name);
       const l = lines(p);
-      await ok(owner, "approve", await codeShown(owner, l), "--yes");
+      await ok(owner, "--as", "human", "approve", await codeShown(owner, l), "--yes");
       expect(await p.exited).toBe(0);
     };
     await joinFrom(dirA, "alpha");
@@ -453,7 +456,7 @@ describe("several agents on one machine", () => {
     const joinFrom = async (dir: string, owner: string, code: string, name: string) => {
       const p = inDir(dir, "join", code, "--as", name);
       const l = lines(p);
-      await ok(owner, "approve", await codeShown(owner, l), "--yes");
+      await ok(owner, "--as", "human", "approve", await codeShown(owner, l), "--yes");
       expect(await p.exited).toBe(0);
     };
     // Joined concurrently, like separate sessions: neither may lose the other's config.
@@ -466,12 +469,12 @@ describe("several agents on one machine", () => {
     expect(r.err).toContain("isn't bound to a channel");
 
     // Removing gamma forgets gamma only; alpha, in the same channel, keeps its key.
-    await ok(ownerA, "kick", "gamma");
+    await ok(ownerA, "--as", "human", "kick", "gamma");
     expect((await runIn(dirC, "status")).code).toBe(4);
     expect((await runIn(dirA, "send", "alpha still here")).code).toBe(0);
 
     // Closing b forgets b only; a is untouched.
-    await ok(ownerB, "close", "--yes");
+    await ok(ownerB, "--as", "human", "close", "--yes");
     expect((await runIn(dirB, "status")).code).toBe(4);
     expect((await runIn(dirA, "send", "a is fine")).code).toBe(0);
     const cfg = JSON.parse(readFileSync(join(shared, "config.json"), "utf8")) as { channels: Record<string, unknown>; bindings: Record<string, { as: string }> };
@@ -486,7 +489,7 @@ describe("several agents on one machine", () => {
     const code = /join code: (\S+)/.exec(await ok(owner, "create", "launch-plan", "--as", "boss"))![1]!;
     const p = mc(joiner, "join", code, "--as", "w");
     const l = lines(p);
-    await ok(owner, "approve", await codeShown(owner, l), "--yes");
+    await ok(owner, "--as", "human", "approve", await codeShown(owner, l), "--yes");
     expect(await p.exited).toBe(0);
     expect(await new Response(p.stderr).text()).toContain('joined "launch-plan" as w');
     expect(await ok(joiner, "channels")).toContain("launch-plan");
@@ -498,7 +501,7 @@ describe("several agents on one machine", () => {
     const code = /join code: (\S+)/.exec(await ok(owner, "create", "hb", "--as", "boss"))![1]!;
     const p = Bun.spawn([...MC, "join", code, "--as", "solo"], { cwd: h, env: { ...process.env, HOME: h, KIWI_HOME: h, KIWI_RELAY: relay, CLAUDE_CONFIG_DIR: claudeDir }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const l = lines(p);
-    await ok(owner, "approve", await codeShown(owner, l), "--yes");
+    await ok(owner, "--as", "human", "approve", await codeShown(owner, l), "--yes");
     expect(await p.exited).toBe(0);
     expect(await new Response(p.stderr).text()).toContain("too broad");
     expect(JSON.parse(readFileSync(join(h, "config.json"), "utf8")).bindings ?? {}).toEqual({});
@@ -668,12 +671,13 @@ describe("MCP server", () => {
       const call = async (name: string, args: object = {}) => ((await rpc("tools/call", { name, arguments: args })) as { content: { text: string }[] }).content[0]!.text;
 
       const init = (await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } })) as { instructions: string };
-      expect(init.instructions).toContain('You are "agent-a"');
+      expect(init.instructions).toContain('You\'re "agent-a"');
       expect(init.instructions).toContain("1. Call status.");
       expect(init.instructions).toContain("2. Call wait_for_messages.");
       p.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
       const tools = ((await rpc("tools/list")) as { tools: { name: string }[] }).tools.map((t) => t.name).sort();
-      expect(tools).toEqual(["ask", "claim", "create_room", "decide_join", "escalate", "facts", "join_requests", "log", "members", "message", "read", "release", "rename_room", "reply", "rooms", "save", "send", "set_mode", "set_scopes", "sh", "status", "task_add", "task_update", "tasks", "wait_for_messages", "who"]);
+      // No admin tools, even on the owner's machine: a person lets people in and sets what they may do.
+      expect(tools).toEqual(["ask", "claim", "escalate", "facts", "log", "members", "message", "read", "release", "reply", "rooms", "save", "send", "sh", "status", "task_add", "task_update", "tasks", "wait_for_messages", "who"]);
 
       expect(await call("task_add", { title: "write docs" })).toMatch(/^added T\d+$/);
       expect(await call("claim", { paths: ["docs/"], ttl: "10m" })).toContain("docs/  @agent-a");

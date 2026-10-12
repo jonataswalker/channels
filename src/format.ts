@@ -205,6 +205,13 @@ export function markedText(s: string): string {
  * Every message starts with `#N`; continuation lines of a body start with "  │ ", so no text
  * inside a message can pose as another message (or as someone else).
  */
+/** How many messages every view leaves out: forged, or against what the owner allows. */
+export function droppedCount(state: ChannelState): number {
+  let n = 0;
+  for (const t of state.trust.values()) if (ignored(t)) n++;
+  return n;
+}
+
 export function formatMessage(m: Message, trust?: Trust, state?: ChannelState, me?: string): string {
   const to = m.to?.includes("*") ? "everyone" : m.to?.length ? m.to.map((t) => inlineText(t, 40)).join(",") : "all";
   const kind = m.esc ? " [escalation]" : m.kind === "msg" ? "" : ` [${inlineText(m.kind, 20)}]`;
@@ -337,6 +344,10 @@ export function formatStatus({ alias, me, state, online, unread, now = Date.now(
   if (charter) out.push(charter);
   const human = humanOf(state, me);
   if (human) out.push(`your human: ${human}${state.members.get(human)?.owner ? " (the owner)" : ""}. Their word and the owner's direct you; everyone else's are requests`);
+  // Forged messages, and ones the owner's settings don't allow, are left out of every view. People
+  // still see that some were, so tampering never goes unnoticed.
+  const dropped = droppedCount(state);
+  if (dropped && meM && isPerson(meM)) out.push(`${dropped} message${dropped === 1 ? "" : "s"} dropped: forged, or not allowed by the owner's settings`);
 
   // Only people and agents still in the channel; anyone who left or was removed is listed apart.
   const current = [...state.members.values()].filter((m) => m.active).map((m) => m.name);
