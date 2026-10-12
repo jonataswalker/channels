@@ -202,6 +202,21 @@ describe("kiwi tui <join code>", () => {
     await runIt(browser.fx.pairOpen(row.id, pairNonce(), slot));
     await expect(runIt(Channel.fx.pairCheck(relay, made_.code, mine, row.id, pairNonce(), null))).rejects.toThrow("committed to");
   });
+
+  test("a slot pairs one terminal, ever: after the pairing is picked up, the same command pairs nothing", async () => {
+    const owner = await generateIdentity("human");
+    const made_ = await Channel.create(relay, owner, { name: "human" });
+    const browser = new Channel(made_.access, relay, owner);
+    const slot = await runIt(browser.fx.pairSlot());
+    const t = await terminal(made_.code, relay, slot);
+    const { row, c } = await chooseAndCode(browser, made_.access.roomId, slot);
+    await runIt(browser.fx.pairAnswer(sealedTo(c, row), owner, slot));
+    await t.done();
+    expect(t.p.exitCode).toBe(0);
+    // The pairing row is gone once picked up; the slot stays spent.
+    const later = await generateIdentity("pair");
+    await expect(runIt(Channel.fx.pairAsk(relay, made_.code, later, pairNonce(), slot))).rejects.toThrow("already asked through that slot");
+  });
 });
 
 function readdirSyncSafe(dir: string): string[] {

@@ -726,7 +726,7 @@ function pairsTable(db: RoomDb): void {
   db.sql.run(
     "CREATE TABLE IF NOT EXISTS pairs (id TEXT PRIMARY KEY, pk TEXT NOT NULL UNIQUE, xpk TEXT NOT NULL, commit_to TEXT NOT NULL, wnonce TEXT, tnonce TEXT, box TEXT, ts INTEGER NOT NULL, label TEXT, slot TEXT NOT NULL UNIQUE)",
   );
-  db.sql.run("CREATE TABLE IF NOT EXISTS pair_slots (slot TEXT PRIMARY KEY, pk TEXT NOT NULL, ts INTEGER NOT NULL)");
+  db.sql.run("CREATE TABLE IF NOT EXISTS pair_slots (slot TEXT PRIMARY KEY, pk TEXT NOT NULL, ts INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)");
   db.sql.run("DELETE FROM pairs WHERE ts < ?", Date.now() - PAIR_TTL_MS);
   db.sql.run("DELETE FROM pair_slots WHERE ts < ?", Date.now() - 86_400_000);
 }
@@ -761,9 +761,11 @@ export const askPair = Effect.fn("Room.askPair")(function* (pk: string, body: { 
   pairsTable(db);
   const had = db.sql.all<{ id: string; slot: string }>("SELECT id, slot FROM pairs WHERE pk = ?", pk)[0];
   if (had) return had.slot === slot ? { id: had.id, fresh: false } : yield* new Conflict({ message: "this terminal key already asked through another slot" });
-  const open = db.sql.all<{ ts: number }>("SELECT ts FROM pair_slots WHERE slot = ?", slot)[0];
+  const open = db.sql.all<{ ts: number; used: number }>("SELECT ts, used FROM pair_slots WHERE slot = ?", slot)[0];
   if (!open || open.ts < Date.now() - PAIR_TTL_MS) return yield* new NotFound({ message: "that pairing slot is gone (it lasts 10 minutes): open Use in a terminal again" });
-  if (db.sql.all("SELECT 1 FROM pairs WHERE slot = ?", slot).length) return yield* new Conflict({ message: "another terminal already asked through that slot: open Use in a terminal again" });
+  // One terminal per slot, ever: spent the moment one asks, so a command left in shell history pairs nothing later.
+  if (open.used || db.sql.all("SELECT 1 FROM pairs WHERE slot = ?", slot).length) return yield* new Conflict({ message: "another terminal already asked through that slot: open Use in a terminal again" });
+  db.sql.run("UPDATE pair_slots SET used = 1 WHERE slot = ?", slot);
   const id = crypto.randomUUID();
   db.sql.run("INSERT INTO pairs (id, pk, xpk, commit_to, ts, label, slot) VALUES (?, ?, ?, ?, ?, ?, ?)", id, pk, xpk, commit, Date.now(), label, slot);
   return { id, fresh: true };
