@@ -4,7 +4,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { generateIdentity, sign, verify, type Identity } from "../src/identity.ts";
 import { wellFormed, type Event, type Kind, type Message } from "../src/protocol.ts";
-import { dmPlace, fold, placeFromKey, placeKey, threadMembers, type Roster } from "../src/state.ts";
+import { dmPlace, firstAgent, fold, placeFromKey, placeKey, threadMembers, type Roster } from "../src/state.ts";
 
 const ids: Record<string, Identity> = {};
 let seq = 0;
@@ -83,5 +83,21 @@ describe("places", () => {
     expect(wellFormed({ ...base, task: 12, dm: true })).toBe(true);
     expect(wellFormed({ ...base, task: -1 })).toBe(false);
     expect(wellFormed({ ...base, dm: "yes" })).toBe(false);
+  });
+});
+
+describe("who coordinates by default", () => {
+  test("only the owner's own agent, by sign-in: never someone else's, and nobody where nobody is signed in", () => {
+    const jon = { user: "user_jon", name: "Jon" };
+    const signed: Roster = [
+      { name: "jon", pk: ids.jon!.pk, owner: true, at: 0, active: true, kind: "human", sponsor: jon },
+      { name: "dev", pk: ids.dev!.pk, owner: false, at: 1, active: true, kind: "agent", sponsor: { user: "user_eve", name: "Eve" } },
+      { name: "dev2", pk: ids.dev2!.pk, owner: false, at: 2, active: true, kind: "agent", sponsor: jon },
+    ];
+    // dev joined first, but it's Eve's agent: dev2, Jon's own, coordinates.
+    expect(firstAgent(fold([], signed))).toBe("dev2");
+    expect(firstAgent(fold([], signed.filter((m) => m.name !== "dev2")))).toBeUndefined();
+    // No sign-in, so nobody provably the owner's.
+    expect(firstAgent(fold([], roster))).toBeUndefined();
   });
 });

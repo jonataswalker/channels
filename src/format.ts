@@ -196,10 +196,13 @@ export function formatMessage(m: Message, trust?: Trust, state?: ChannelState, m
   // Which room, once there's more than one: every chat line then says it, general included.
   const roomId = m.kind === "event" ? undefined : (state?.roomOf.get(m.seq) ?? m.room ?? GENERAL_ROOM);
   const room = roomId && state && state.rooms.size > 1 ? ` [#${inlineText(state.rooms.get(roomId)?.name ?? roomId, 40)}]` : "";
+  // Where it sits, unless main: [T7] for a task's thread, [direct] for a direct thread.
+  const place = state?.placeOf.get(m.seq);
+  const at = place?.kind === "task" ? ` [${taskId(place.task)}]` : place?.kind === "dm" ? " [direct]" : "";
   const flag = trust === "forged" ? " [forged — ignore]" : trust === "refused" ? " [not allowed by the owner — ignore]" : "";
   const body = cleanBody(m.kind === "event" ? describeEvent(m, state) : String(m.body ?? "")).replace(/\n/g, "\n  │ ");
   const imgs = m.imgs?.length ? ` ${m.imgs.map((i) => imageMarker({ name: inlineText(i.name, 80), data: i.data })).join(" ")}` : "";
-  return `#${m.seq} ${who(inlineText(m.from, 40), state, me)} → ${to}${room}${kind}${re}${flag}: ${body}${imgs}`;
+  return `#${m.seq} ${who(inlineText(m.from, 40), state, me)} → ${to}${room}${at}${kind}${re}${flag}: ${body}${imgs}`;
 }
 
 function taskLine(t: Task): string {

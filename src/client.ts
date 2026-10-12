@@ -78,6 +78,10 @@ export interface SendOptions {
   room?: string;
   /** An escalation: a decision handed to people (see Payload.esc). */
   esc?: boolean;
+  /** A chat message in this task's thread (see Payload.task). */
+  task?: number;
+  /** A chat message to exactly one member, in the pair's direct thread (see Payload.dm). */
+  dm?: boolean;
 }
 
 // ---------- what can go wrong ----------
@@ -1271,6 +1275,8 @@ export class Channel {
         ...(imgs?.length ? { imgs } : {}),
         ...(opts.room && opts.room !== GENERAL_ROOM && !opts.ev ? { room: opts.room } : {}),
         ...(opts.esc && !opts.ev ? { esc: true as const } : {}),
+        ...(opts.task && !opts.ev ? { task: opts.task } : {}),
+        ...(opts.dm && !opts.ev && opts.to?.length === 1 ? { dm: true as const } : {}),
         ts: Date.now(),
       };
       const signed = yield* Effect.promise(() => sign(this.identity, payload));

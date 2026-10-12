@@ -31,7 +31,7 @@ import { canPost, describeScopes, parseScopes, presetOf, SCOPES, type Scope } fr
 import { fingerprint, generateIdentity, type Identity } from "../identity.ts";
 import { PAIR_TTL_MS, pairNonce } from "../pair.ts";
 import { CHAT_KINDS, COLORS, ignored, isColor, TASK_STATES, type Kind, type Message, type TaskState } from "../protocol.ts";
-import { COORDINATOR, humanOf, parseTaskId, similarOpenTasks, taskId, type ChannelState } from "../state.ts";
+import { chooseThread, COORDINATOR, humanOf, parseTaskId, similarOpenTasks, taskId, wentTo, type ChannelState } from "../state.ts";
 import { VERSION } from "../version.ts";
 import { channelFiles, runSh, sessionViews } from "../sh.ts";
 import { forgetMachine, linkUrl, loadMachine, machineCode, machineFx, newMachine, saveMachine, vouchFor, type MachineFile } from "../machine.ts";
@@ -56,6 +56,8 @@ Agents
      --to a,b|role:x|all                         to them instead
      --re N                                      in message #N's thread
      --ask [--wait 10m]                          a question; with --wait, block until it's answered
+     --task T7 · --main · --dm NAME              in a task's thread, in the main conversation, or in your direct
+                                                 thread with NAME (while you're doing a task, it goes to its thread)
      --escalate [--re N]                         to your own human and the owner, in every mode and during a hold:
                                                  for anything outside the charter, destructive, or not yours
      --image f.png · --room R · --kind K
@@ -72,7 +74,8 @@ Agents
 
 People
   kiwi setup                                     set up this computer, once (link it to your account; Claude Code)
-  kiwi create [alias]                            make a channel you own; prints its join code
+  kiwi create [alias] [--open]                   make a channel you own; prints its join code. It starts coordinated
+                                                 (people talk with the coordinator); --open lets everyone talk with everyone
   kiwi tui [mc2-…]                               your seat in this terminal, like the web page; with the join code,
                                                  pair it by a code you approve in your browser (Use in a terminal)
   kiwi web [--sign-in]                           your dashboard link (it carries the owner key: keep it to yourself)
@@ -135,6 +138,10 @@ const { values: opt, positionals: args } = parseArgs({
     now: { type: "boolean" },
     ask: { type: "boolean" },
     escalate: { type: "boolean" },
+    task: { type: "string" },
+    dm: { type: "string" },
+    main: { type: "boolean" },
+    open: { type: "boolean" },
     model: { type: "string" },
     tools: { type: "string" },
     stay: { type: "boolean" },
@@ -522,7 +529,16 @@ const commands: Record<string, Command> = {
       if (machine?.relay === relay && machine.identity.xpk) {
         yield* Effect.ignoreCause(new Channel(access, relay, owner).fx.seatComputer({ pk: machine.identity.pk, xpk: machine.identity.xpk, label: machine.label }));
       }
-      yield* (yield* Cursor).write(alias, name, 0);
+      // A channel starts coordinated: people talk with the coordinator, agents work in their tasks' threads.
+      // The agent making it is the first one in, so it's the coordinator, unless it was given a role.
+      // --open: everyone talks with everyone, no coordinator (the owner can still make one later).
+      const ownerCh = new Channel(access, relay, owner);
+      if (!opt.open) {
+        yield* ownerCh.fx.startCoordinated();
+        if (!opt.role) yield* ownerCh.fx.send(`made ${name} ${COORDINATOR}`, { kind: "event", ev: { op: "role.set", member: name, role: COORDINATOR }, to: [name] });
+      }
+      // The channel's setting-up isn't news to the agent that set it up.
+      yield* (yield* Cursor).write(alias, name, yield* ownerCh.fx.head());
       const s = yield* openSession(alias, cfg.channels[alias]!, name);
       yield* s.hello(opt.role, opt.about);
       settleIn(alias, name);
@@ -916,6 +932,9 @@ const commands: Record<string, Command> = {
       }
       const admitted = yield* (yield* s.adminCh("let anyone in")).fx.approve(r, { name, role, about: r.about, ...(scopes ? { scopes } : {}) });
       out(`approved ${admitted.name} (${r.code})${scopes ? `; they may ${describeScopes(scopes)}` : ""}${askedCoordinator ? `; it asked to be the coordinator, which takes: kiwi approve ${r.code} --role coordinator` : ""}`);
+      // Coordinator mode with nobody coordinating yet: the first agent in takes it.
+      const coordinator = yield* s.ensureCoordinator().pipe(Effect.catchCause(() => Effect.succeed(null)));
+      if (coordinator) out(`${coordinator} is the coordinator: people talk with them (kiwi role ${coordinator} none to change that)`);
     }),
 
   deny: () =>
@@ -995,10 +1014,10 @@ const commands: Record<string, Command> = {
       const { state } = yield* s.state();
       yield* owner.fx.remove(m.pk);
       out(`removed ${name}; rotated the channel key so they can't read anything new`);
-      // Coordinator-only follows the role: with its holder gone, people talk with everyone again.
+      // The coordinator gone: the next agent in coordinates (with none, delivery is as usual until one arrives).
       if (state.coordinator === name && state.mode.coordinatorOnly) {
-        yield* s.setMode(false);
-        out("coordinator-only is off: nobody holds the coordinator role now");
+        const next = yield* s.ensureCoordinator().pipe(Effect.catchCause(() => Effect.succeed(null)));
+        out(next ? `${next} is the coordinator now` : "nobody coordinates now: make one with kiwi role NAME coordinator (meanwhile people talk with everyone)");
       }
     }),
 
@@ -1081,10 +1100,17 @@ const commands: Record<string, Command> = {
         if (extra.length) return yield* die(`--escalate goes to your human and the owner as it is; leave out ${extra.map((f) => `--${f}`).join(", ")}`);
         return yield* commands.escalate!();
       }
-      if ((opt.ask || opt.wait) && !opt.re) return yield* commands.ask!();
       const s = yield* session();
       const body = yield* text(1);
       if (!body.trim()) return yield* die("empty message");
+      // Where it goes: a direct thread (--dm NAME), a task's thread (--task T7), main (--main), the thread
+      // it answers (--re), or by default the task this agent is doing, when it's doing exactly one.
+      if (opt.dm && opt.to) return yield* die("--dm NAME names who it goes to; leave out --to");
+      const { state } = yield* s.state();
+      const named = opt.task === undefined ? undefined : (parseTaskId(opt.task) ?? (yield* die(`"${opt.task}" isn't a task id (like T12)`)));
+      const chosen = chooseThread(state, s.me, { ...(named !== undefined ? { task: named } : {}), main: opt.main, ...(opt.dm ? { dm: opt.dm } : {}), reply: !!opt.re });
+      if (typeof chosen === "string") return yield* die(chosen);
+      const to = chosen.to ?? list(opt.to);
       const kind = (opt.kind ?? "msg") as Kind;
       if (!CHAT_KINDS.includes(kind)) return yield* die(`kind must be one of: ${CHAT_KINDS.join(", ")}`);
       const re = list(opt.re)?.map((x) => Number(x.replace(/^#/, ""))).filter((n) => n > 0);
@@ -1093,26 +1119,19 @@ const commands: Record<string, Command> = {
       const asking = opt.ask || !!opt.wait;
       // Only a question that waits needs to know where the channel was, to catch an answer that comes at once.
       const head = asking && opt.wait ? yield* s.ch.fx.head() : 0;
-      const seq = yield* s.send(body, { to: list(opt.to), kind: asking && !opt.kind ? "ask" : kind, re, imgs, room: opt.room });
-      if (!asking || !opt.wait) return out(asking ? `asked #${seq}` : `sent #${seq}`);
+      const seq = yield* s.send(body, { to, kind: asking && !opt.kind ? "ask" : kind, re, imgs, room: opt.room, ...(chosen.task !== undefined ? { task: chosen.task } : {}), ...(chosen.dm ? { dm: true } : {}) });
+      if (!asking || !opt.wait) return out(`${asking ? "asked" : "sent"} #${seq}${wentTo(chosen)}`);
       const replies = yield* s.awaitReplies(seq, head, parseDuration(opt.wait));
       if (!replies.length) return yield* die(`no answer to #${seq} within ${opt.wait}; replies will still arrive when you listen`, 2);
       for (const r of replies) out(render(r));
     }),
 
-  ask: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const body = yield* text(1);
-      if (!body.trim()) return yield* die('usage: kiwi ask --to NAME "question" [--wait 10m]');
-      const waitSec = opt.wait ? parseDuration(opt.wait) : 0;
-      const kind = (opt.kind ?? "ask") as Kind;
-      const imgs = yield* images;
-      const { seq, replies } = yield* s.ask(body, { to: list(opt.to), kind, waitSec, imgs, room: opt.room });
-      if (!waitSec) return out(`asked #${seq}`);
-      if (!replies.length) return yield* die(`no answer to #${seq} within ${opt.wait}; replies will still arrive in tail/wait`, 2);
-      for (const r of replies) out(render(r));
-    }),
+  /** `kiwi ask`: a question, the same as send --ask (in the task you're doing, unless you say where). */
+  ask: () => {
+    opt.ask = true;
+    if (opt.kind === undefined) opt.kind = "ask";
+    return commands.send!();
+  },
 
   reply: () =>
     Effect.gen(function* () {
@@ -1514,8 +1533,21 @@ const commands: Record<string, Command> = {
       yield* s.adminCh("set roles");
       const clear = role.toLowerCase() === "none";
       if (!(yield* confirm(clear ? `Clear ${member}'s role?` : `Make ${member} ${role}?`))) return yield* die("changing a role needs your human's go-ahead; re-run with --yes");
+      const { state } = yield* s.state();
+      const wasCoordinator = state.coordinator === member;
+      const becomes = !clear && role.trim().toLowerCase() === COORDINATOR;
+      // Coordinator-only follows the role. Taking it away turns the mode off first, so there's never a moment
+      // of coordinator mode with nobody in it (when an owner page would hand the role to the next agent).
+      if (wasCoordinator && !becomes && state.mode.coordinatorOnly) {
+        yield* s.setMode(false);
+        out("coordinator-only is off: nobody holds the coordinator role now");
+      }
       yield* s.decideRole(member, { role: clear ? null : role, ...(opt.about !== undefined ? { about: opt.about } : {}) });
       out(clear ? `cleared ${member}'s role` : `made ${member} ${role}`);
+      if (becomes && !state.mode.coordinatorOnly) {
+        yield* s.setMode(true);
+        out("coordinator-only is on: people talk with the coordinator");
+      }
     }),
 
   web: () =>

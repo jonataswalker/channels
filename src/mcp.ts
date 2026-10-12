@@ -25,7 +25,7 @@ import { cardLine, formatFact, formatMessage, formatRooms, formatShown, formatSt
 import { SCOPES } from "./scopes.ts";
 import { CHAT_KINDS, ignored, type Kind, type Message } from "./protocol.ts";
 import { inlineText } from "./membership.ts";
-import { parseTaskId, similarOpenTasks, taskId } from "./state.ts";
+import { chooseThread, parseTaskId, similarOpenTasks, taskId, wentTo } from "./state.ts";
 import { detectCard } from "./card.ts";
 import { VERSION } from "./version.ts";
 import { channelFiles, runSh, sessionViews } from "./sh.ts";
@@ -238,10 +238,21 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
     tool(() => Effect.map(s.state(), ({ state }) => formatRooms(state))),
   );
 
+  /** Where a send or ask goes (state.ts chooseThread): one of task, main or dm, else the task the agent is doing. */
+  const where = (task: string | undefined, main: boolean | undefined, dm: string | undefined, to: string[] | undefined, reply: boolean) =>
+    Effect.gen(function* () {
+      if (dm && to?.length) return yield* new Rejected("dm names who it goes to; leave out to");
+      const named = task === undefined ? undefined : (parseTaskId(task) ?? (yield* new Rejected(`"${task}" isn't a task id (like T12)`)));
+      const { state } = yield* s.state();
+      const chosen = chooseThread(state, s.me, { ...(named !== undefined ? { task: named } : {}), main, ...(dm ? { dm } : {}), reply });
+      return typeof chosen === "string" ? yield* new Rejected(chosen) : chosen;
+    });
+
   server.registerTool(
     "send",
     {
-      description: "Post a message. Omit `to` to address everyone; `role:x` addresses everyone with that role. Example: send {\"text\":\"hello\",\"to\":[\"win\"]}.",
+      description:
+        "Post a message. Omit `to` to address everyone; `role:x` addresses everyone with that role. While you're doing a task it goes to that task's thread unless `main` or `dm`. Example: send {\"text\":\"hello\",\"to\":[\"win\"]}.",
       inputSchema: {
         text: z.string(),
         to: z.array(z.string()).optional(),
@@ -249,10 +260,17 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
         re: z.array(z.number().int()).optional(),
         images: z.array(z.string()).optional().describe("local image files to attach (png, jpg, gif, webp, ≤256KB each)"),
         room: z.string().optional().describe("the room's name or id; general if omitted (a reply defaults to its parent's room)"),
+        task: z.string().optional().describe("a task id (T7): post in that task's thread"),
+        main: z.boolean().optional().describe("post in the main conversation, even while doing a task"),
+        dm: z.string().optional().describe("a member's name: a direct message, in your direct thread with them"),
       },
     },
-    tool(({ text, to, kind, re, images, room }) =>
-      Effect.suspend(() => Effect.map(s.send(text, { to, kind, re, room, imgs: images?.length ? loadImages(images) : undefined }), (seq) => `sent #${seq}`)),
+    tool(({ text, to, kind, re, images, room, task, main, dm }) =>
+      Effect.gen(function* () {
+        const chosen = yield* where(task, main, dm, to, !!re?.length);
+        const seq = yield* s.send(text, { to: chosen.to ?? to, kind, re, room, imgs: images?.length ? loadImages(images) : undefined, ...(chosen.task !== undefined ? { task: chosen.task } : {}), ...(chosen.dm ? { dm: true } : {}) });
+        return `sent #${seq}${wentTo(chosen)}`;
+      }),
     ),
   );
 
@@ -266,11 +284,16 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
         wait_seconds: z.number().int().min(0).max(3600).optional(),
         blocking: z.boolean().optional(),
         room: z.string().optional().describe("the room's name or id; general if omitted"),
+        task: z.string().optional().describe("a task id (T7): ask in that task's thread"),
+        main: z.boolean().optional().describe("ask in the main conversation, even while doing a task"),
+        dm: z.string().optional().describe("a member's name: ask them directly, in your direct thread"),
       },
     },
-    tool(({ text, to, wait_seconds, blocking, room }) =>
-      Effect.map(s.ask(text, { to, kind: blocking ? "blocking" : "ask", waitSec: wait_seconds, room }), ({ seq, replies }) => {
-        if (!wait_seconds) return `asked #${seq}`;
+    tool(({ text, to, wait_seconds, blocking, room, task, main, dm }) =>
+      Effect.gen(function* () {
+        const chosen = yield* where(task, main, dm, to, false);
+        const { seq, replies } = yield* s.ask(text, { to: chosen.to ?? to, kind: blocking ? "blocking" : "ask", waitSec: wait_seconds, room, ...(chosen.task !== undefined ? { task: chosen.task } : {}), ...(chosen.dm ? { dm: true } : {}) });
+        if (!wait_seconds) return `asked #${seq}${wentTo(chosen)}`;
         if (!replies.length) return `no answer to #${seq} within ${wait_seconds}s; replies will still reach you`;
         return replies.map((r) => formatMessage(r)).join("\n");
       }),

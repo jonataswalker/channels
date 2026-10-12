@@ -120,7 +120,7 @@ describe("joining without --as", () => {
     await ok(b, ["send", "hello from b"], { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "sb", CLAUDE_PID: String(process.pid) });
     expect(await ok(owner, ["log"])).toContain("claude-2 → ");
     // The short join text: a handful of lines, not a manual.
-    expect(second.out.split("\n").filter(Boolean).length).toBeLessThan(10);
+    expect(second.out.split("\n").filter(Boolean).length).toBeLessThan(13);
   });
 
   test("two agents in one checkout each act as themselves; a restart takes its seat back", async () => {

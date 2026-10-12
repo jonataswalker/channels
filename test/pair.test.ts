@@ -191,7 +191,7 @@ describe("kiwi tui <join code>", () => {
     const slot = await runIt(browser.fx.pairSlot());
     // No slot, or a made-up one: refused, and nothing waits.
     const intruder = await generateIdentity("pair");
-    await expect(runIt(Channel.fx.pairAsk(relay, made_.code, intruder, pairNonce(), "AAAAAAAAAAAAAAAAAAAAAA"))).rejects.toThrow("slot is gone");
+    await expect(runIt(Channel.fx.pairAsk(relay, made_.code, intruder, pairNonce(), "0".repeat(32)))).rejects.toThrow("slot is gone");
     // The person's terminal asks through the slot; a second ask through it is refused.
     const mine = await generateIdentity("pair");
     await runIt(Channel.fx.pairAsk(relay, made_.code, mine, pairNonce(), slot, "me@here"));
