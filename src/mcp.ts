@@ -21,7 +21,7 @@ import { loadImages, saveImages } from "./attach.ts";
 import { loadSummary, memberLoad, showsLoad } from "./load.ts";
 import { Cursor, home, Keystore } from "./config.ts";
 import { ChannelGone, reason } from "./client.ts";
-import { cardLine, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, parseDuration, stateWord } from "./format.ts";
+import { cardLine, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, parseDuration, stateWord, taskStateWord } from "./format.ts";
 import { SCOPES } from "./scopes.ts";
 import { CHAT_KINDS, ignored, type Kind, type Message } from "./protocol.ts";
 import { inlineText } from "./membership.ts";
@@ -457,7 +457,7 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
                   ? yield* s.taskUpdate(id, { note: note ?? "" })
                   : yield* s.taskUpdate(id, { state: states[action], note });
         const t = state.tasks.get(id)!;
-        return `${taskId(id)} ${stateWord(t.state)}${t.owner ? ` @${t.owner}` : ""}: ${t.title}`;
+        return `${taskId(id)} ${taskStateWord(t)}${t.owner ? ` @${t.owner}` : ""}: ${t.title}`;
       }),
     ),
   );

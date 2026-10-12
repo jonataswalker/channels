@@ -774,19 +774,21 @@ export class AgentSession {
   readonly taskUpdate = Effect.fn("AgentSession.taskUpdate")({ self: this }, function* (
     this: AgentSession,
     id: number,
-    change: { state?: TaskState; owner?: string | null; title?: string; note?: string; review?: string | null },
+    change: { state?: TaskState | "cancelled"; owner?: string | null; title?: string; note?: string; review?: string | null },
   ) {
     const { state } = yield* this.state();
     const t = state.tasks.get(id);
     if (!t) return yield* new Rejected(`no task ${taskId(id)}`);
-    if (change.state && !TASK_STATES.includes(change.state)) return yield* new Rejected(`state must be one of ${TASK_STATES.join(", ")}`);
+    if (change.state && change.state !== "cancelled" && !TASK_STATES.includes(change.state)) return yield* new Rejected(`state must be one of ${TASK_STATES.join(", ")}`);
     const owner = change.owner ? (yield* this.resolveTo([change.owner], state))?.[0] : change.owner;
     const review = change.review ? yield* this.reviewer(state, change.review) : change.review;
     // Said here rather than left to every client's fold: the doer can't mark its own reviewed work done.
     const me = state.members.get(this.me);
     const gate = review === undefined ? t.review : review || undefined;
-    if (change.state === "done" && t.state !== "done" && gate && me && !isPerson(me) && (gate === "*" ? (owner ?? t.owner) === this.me || t.workedBy.includes(this.me) : gate !== this.me)) {
-      return yield* new Rejected(`${taskId(id)} needs review by ${gate === "*" ? "someone who hasn't worked on it" : gate} before it's done: send it for review (kiwi task review ${taskId(id)})`);
+    const finishing = change.state === "done" || change.state === "cancelled";
+    if (finishing && t.state !== "done" && gate && me && !isPerson(me) && (gate === "*" ? (owner ?? t.owner) === this.me || t.workedBy.includes(this.me) : gate !== this.me)) {
+      const what = change.state === "cancelled" ? "cancelled" : "done";
+      return yield* new Rejected(`${taskId(id)} needs review by ${gate === "*" ? "someone who hasn't worked on it" : gate} before it's ${what}: ${change.state === "cancelled" ? "ask a person or its reviewer to cancel it" : `send it for review (kiwi task review ${taskId(id)})`}`);
     }
     // Tell whoever this concerns: the new owner, the current owner if it isn't
     // us, and the creator when it's done.
@@ -796,7 +798,7 @@ export class AgentSession {
     // In review: whoever must approve it hears; a named reviewer, or the one just named.
     const reviewerName = (review ?? t.review) !== "*" ? (review ?? t.review) : undefined;
     if ((change.state === "review" || review) && reviewerName) notify.push(reviewerName);
-    if (change.state === "done") notify.push(t.createdBy);
+    if (finishing) notify.push(t.createdBy);
     const seq = yield* this.event(
       { op: "task.update", task: id, ...change, ...(owner !== undefined ? { owner } : {}), ...(review !== undefined ? { review } : {}) },
       `${taskId(id)} ${change.state ?? "updated"}`,

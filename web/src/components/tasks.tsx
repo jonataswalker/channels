@@ -9,6 +9,9 @@ import { Icon } from "./icon"
 import { Alert, Button, IconButton, errorText, toast } from "./kit"
 
 export const LABEL: Record<TaskState, string> = { doing: "In progress", review: "In review", todo: "Open", done: "Done" }
+
+/** A task's state as a label, saying when a done one was cancelled rather than finished. */
+export const labelOf = (t: Pick<Task, "state" | "cancelled">) => (t.state === "done" && t.cancelled ? "Done (cancelled)" : LABEL[t.state])
 const ORDER: TaskState[] = ["doing", "review", "todo", "done"]
 
 /** A task's state as a small circle: empty, half full, dashed, or checked. */
@@ -43,6 +46,7 @@ function TaskRow({ task, now, onOpen }: { task: Task; now: number; onOpen: () =>
         <span className={cx("block text-body leading-snug", task.state === "done" && "text-ink-2")}>{task.title}</span>
         <span className="mt-0.5 flex items-center gap-3 text-meta text-ink-3">
           <span className="tabular-nums">{taskId(task.id)}</span>
+          {task.cancelled && <span className="shrink-0">Cancelled</span>}
           <span className="truncate">{task.owner ?? "Unassigned"}</span>
           {task.notes.length > 0 && <span className="shrink-0">{task.notes.length === 1 ? "1 note" : `${task.notes.length} notes`}</span>}
           <span className="shrink-0">{formatAgo(task.updatedAt, now)}</span>
@@ -159,7 +163,7 @@ export function TaskCard({ task, state, now, onOpen, highlighted }: { task: Task
         <span className={cx("block text-body leading-snug", closed && "text-ink-2")}>{task.title}</span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-ink-3">
           <span className="tabular-nums">{taskId(task.id)}</span>
-          <span>{LABEL[task.state]}</span>
+          <span>{labelOf(task)}</span>
           <span className="truncate">{task.owner ? nameOf(task.owner) : "Unassigned"}</span>
           {review && <span className={cx(task.state === "review" && "font-medium text-ink-2")}>{review}</span>}
           <span className="shrink-0">{formatAgo(task.updatedAt, now)}</span>

@@ -83,6 +83,8 @@ export interface Task {
   review?: string;
   /** Who approved it, when a review let it be done. */
   approvedBy?: string;
+  /** Done because it was cancelled, not finished. */
+  cancelled?: boolean;
   /** Everyone who has owned it or moved it along: none of them may approve it under a "*" review. */
   workedBy: string[];
 }
@@ -656,23 +658,24 @@ export function fold(
             break;
           }
           const review = ev.review === undefined ? task.review : ev.review?.trim() || undefined;
-          // Older clients' states: blocked is still being done (the note says why), cancelled is done.
-          const state = ev.state && currentState(ev.state);
-          const note = ev.note || (ev.state === "blocked" ? "blocked" : ev.state === "cancelled" ? "cancelled" : undefined);
           // Done, with a review: only the reviewer (or for "*", anyone who hasn't worked on it) says so.
           // People may always. Handing it to someone first doesn't make the doer a reviewer.
-          // (An older client's "cancelled" never went through review, so it doesn't now either.)
-          if (ev.state === "done" && task.state !== "done" && review) {
-            const owner = ev.owner === undefined ? task.owner : ev.owner || undefined;
-            const ok = isPerson(member) || (review === "*" ? m.from !== owner && !task.workedBy.includes(m.from) : m.from === review);
-            if (!ok) {
-              reject(`${taskId(task.id)} needs review by ${review === "*" ? "someone who hasn't worked on it" : review} before it's done (send it for review)`);
-              break;
-            }
+          const owner = ev.owner === undefined ? task.owner : ev.owner || undefined;
+          const mayFinish = !review || isPerson(member) || (review === "*" ? m.from !== owner && !task.workedBy.includes(m.from) : m.from === review);
+          if (ev.state === "done" && task.state !== "done" && !mayFinish) {
+            reject(`${taskId(task.id)} needs review by ${review === "*" ? "someone who hasn't worked on it" : review} before it's done (send it for review)`);
+            break;
           }
+          // Cancelling finishes it, by whoever may finish it; from anyone else it's only a note saying so,
+          // so a cancel is never a way around review. Blocked (an older client's) is still being done.
+          const cancel = ev.state === "cancelled" && task.state !== "done";
+          const state = ev.state === "cancelled" ? (cancel && mayFinish ? "done" : undefined) : ev.state && currentState(ev.state);
+          const note = ev.note || (ev.state === "blocked" ? "blocked" : ev.state === "cancelled" ? "cancelled" : undefined);
           if (ev.review !== undefined) task.review = review;
           if (ev.state === "done" && task.state !== "done" && task.review) task.approvedBy = m.from;
           if (state && state !== "done") task.approvedBy = undefined;
+          if (state === "done" && task.state !== "done") task.cancelled = ev.state === "cancelled" || undefined;
+          if (state && state !== "done") task.cancelled = undefined;
           if (ev.owner !== undefined) task.owner = ev.owner || undefined;
           if (ev.owner) worked(task, ev.owner);
           // Moving it along as its owner, or sending it for review, is working on it; a reviewer sending it back isn't.

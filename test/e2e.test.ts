@@ -264,6 +264,14 @@ describe("agents coordinating through the CLI", () => {
     expect(await ok(win, "task", "assign", t2, "mac", "the socket code is on branch win/v2")).toBe(`${t2} is mac's now\n`);
     expect(await ok(win, "task", "show", t2)).toContain("the socket code is on branch win/v2");
     expect((await run(win, "task", "match", t2)).err).toContain("is gone");
+
+    // Cancelling finishes it, marked cancelled, but never around a review: its doer can't, someone else may.
+    const t3 = /added (T\d+)/.exec(await ok(lead, "task", "add", "Spike the old transport", "--review", "any"))![1]!;
+    await ok(win, "task", "claim", t3);
+    const refused = await run(win, "task", "cancel", t3, "not needed");
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("before it's cancelled");
+    expect(await ok(lead, "task", "cancel", t3, "not needed")).toBe(`${t3} done (cancelled) @win: Spike the old transport\n`);
   });
 
   test("claims are gone, and the old commands say so without failing", async () => {
@@ -285,7 +293,7 @@ describe("agents coordinating through the CLI", () => {
     const status = await ok(win, "status");
     expect(status).toContain("waiting on you (1)");
     expect(status).toContain("status of the v2 client?");
-    expect(status).toMatch(/tasks \(\d+ open, 1 done\)/);
+    expect(status).toMatch(/tasks \(\d+ open, 2 done \(1 cancelled\)\)/);
     expect(status).toContain("mac.ip = 192.168.1.21");
   });
 });

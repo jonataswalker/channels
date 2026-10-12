@@ -45,6 +45,11 @@ export function stateWord(state: TaskState): string {
   return state === "todo" ? "open" : state === "review" ? "in review" : state;
 }
 
+/** A task's state, saying when a done one was cancelled rather than finished. */
+export function taskStateWord(t: Pick<Task, "state" | "cancelled">): string {
+  return t.state === "done" && t.cancelled ? "done (cancelled)" : stateWord(t.state);
+}
+
 export function looksLikeLine(ids: number[]): string {
   return `looks like ${ids.map(taskId).join(", ")}`;
 }
@@ -196,7 +201,7 @@ export function formatMessage(m: Message, trust?: Trust, state?: ChannelState, m
 function taskLine(t: Task): string {
   const owner = t.owner ? ` @${inlineText(t.owner, 40)}` : "";
   const review = t.review && t.state !== "done" ? ` [${reviewPhrase(t.review)}]` : "";
-  return `  ${taskId(t.id).padEnd(5)} ${stateWord(t.state).padEnd(9)}${owner} ${inlineText(t.title, 200)}${review}`;
+  return `  ${taskId(t.id).padEnd(5)} ${(t.state === "done" && t.cancelled ? "cancelled" : stateWord(t.state)).padEnd(9)}${owner} ${inlineText(t.title, 200)}${review}`;
 }
 
 /** `build.cmd = cargo test  (win, 2h ago, 5h left)`. A value with several lines keeps its tail marked. */
@@ -344,7 +349,8 @@ export function formatStatus({ alias, me, state, online, unread, now = Date.now(
   const tasks = [...state.tasks.values()];
   const active = tasks.filter((t) => t.state !== "done");
   const done = tasks.filter((t) => t.state === "done").length;
-  out.push("", `tasks (${active.length} open${done ? `, ${done} done` : ""}):`);
+  const cancelled = tasks.filter((t) => t.state === "done" && t.cancelled).length;
+  out.push("", `tasks (${active.length} open${done ? `, ${done} done${cancelled ? ` (${cancelled} cancelled)` : ""}` : ""}):`);
   if (!active.length) out.push("  none — add one with: kiwi task add \"…\"");
   const order = ["doing", "review", "todo"];
   active.sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || a.id - b.id);
@@ -370,7 +376,7 @@ export function formatTasks(state: ChannelState, opts: { all?: boolean; owner?: 
 
 /** One task in full. `_state` is kept so callers needn't change (it used to resolve dependencies). */
 export function formatTask(_state: ChannelState, t: Task, now = Date.now()): string {
-  const out = [`${taskId(t.id)} ${inlineText(t.title, 200)}`, `  state: ${stateWord(t.state)}${t.owner ? ` · owner: ${inlineText(t.owner, 40)}` : " · unassigned"} · created by ${inlineText(t.createdBy, 40)} ${ago(t.createdAt, now)}`];
+  const out = [`${taskId(t.id)} ${inlineText(t.title, 200)}`, `  state: ${taskStateWord(t)}${t.owner ? ` · owner: ${inlineText(t.owner, 40)}` : " · unassigned"} · created by ${inlineText(t.createdBy, 40)} ${ago(t.createdAt, now)}`];
   if (t.review) out.push(`  ${reviewPhrase(t.review)}${t.approvedBy ? `; approved by ${inlineText(t.approvedBy, 40)}` : t.state === "review" ? "; waiting for it" : ""}`);
   if (t.detail) out.push("", markedText(t.detail));
   if (t.notes.length) {

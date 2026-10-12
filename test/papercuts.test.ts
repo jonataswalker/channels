@@ -2,7 +2,7 @@
 // warns, and an empty kiwi sh glob says so.
 
 import { describe, expect, test } from "bun:test";
-import { describeEvent, formatStatus, formatTasks } from "../src/format.ts";
+import { describeEvent, formatStatus, formatTask, formatTasks } from "../src/format.ts";
 import { memberLoad } from "../src/load.ts";
 import { wellFormedEvent, type Event, type Kind, type Message } from "../src/protocol.ts";
 import { runSh } from "../src/sh.ts";
@@ -34,7 +34,7 @@ describe("open, doing, done", () => {
     const claimed = await msg(a, "a", { op: "task.claim", task: added.seq });
     const cancelled = await msg(a, "a", { op: "task.update", task: added.seq, state: "cancelled" });
     const s = fold([added, claimed, cancelled]);
-    expect(s.tasks.get(added.seq)).toMatchObject({ state: "done", owner: "a" });
+    expect(s.tasks.get(added.seq)).toMatchObject({ state: "done", owner: "a", cancelled: true });
     expect(s.tasks.get(added.seq)?.notes.map((n) => n.text)).toEqual(["cancelled"]);
     expect(s.rejected.has(cancelled.seq)).toBe(false);
     expect(describeEvent(cancelled, s)).toContain("cancelled");
@@ -64,6 +64,16 @@ describe("open, doing, done", () => {
     // What older clients also sent rides along, and is ignored.
     expect(wellFormedEvent({ op: "task.update", task: 1, after: [2] })).toBe(true);
     expect(wellFormedEvent({ op: "task.add", title: "t", needs: ["windows"], after: [1] })).toBe(true);
+  });
+
+  test("a cancelled task reads as cancelled on the board, in status and in full", async () => {
+    const a = await member("a");
+    const t = await msg(a, "a", { op: "task.add", title: "not needed after all" });
+    const cancel = await msg(a, "a", { op: "task.update", task: t.seq, state: "cancelled" });
+    const s = fold([t, cancel]);
+    expect(formatTasks(s, { all: true })).toBe(`T${t.seq}   cancelled not needed after all`);
+    expect(formatTask(s, s.tasks.get(t.seq)!)).toContain("state: done (cancelled)");
+    expect(formatStatus({ alias: "c", me: "a", state: s, online: new Map(), unread: 0, now: T0 })).toContain("0 open, 1 done (1 cancelled)");
   });
 
   test("done tasks stay off the open board unless --all; the board says open", async () => {

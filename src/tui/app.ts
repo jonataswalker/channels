@@ -15,7 +15,7 @@ import { saveImages } from "../attach.ts";
 import { ChannelGone } from "../client.ts";
 import { home, writePrivate } from "../config.ts";
 import { fingerprint } from "../identity.ts";
-import { formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, mayDo, stateWord } from "../format.ts";
+import { formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, mayDo, stateWord, taskStateWord } from "../format.ts";
 import { inlineText, NAME_RE, type JoinRequest } from "../membership.ts";
 import { ignored, type Kind, type Message, type Presence, type TaskState } from "../protocol.ts";
 import { COORDINATOR, findRoom, isPerson, parseTaskId, taskId, type ChannelState } from "../state.ts";
@@ -1194,7 +1194,7 @@ class App {
     else if (verb === "note") state = note ? await this.busyWith("Saving", () => this.s.taskUpdate(id, { note })) : (this.out("usage: /task T7 note TEXT", bad), undefined);
     else return this.out(`unknown: /task ${taskId(id)} ${verb}`, bad);
     const t = state?.tasks.get(id);
-    if (t) this.out(`${taskId(id)} ${stateWord(t.state)}${t.owner ? ` @${t.owner}` : ""}: ${inlineText(t.title, 200)}`);
+    if (t) this.out(`${taskId(id)} ${taskStateWord(t)}${t.owner ? ` @${t.owner}` : ""}: ${inlineText(t.title, 200)}`);
   }
 }
 

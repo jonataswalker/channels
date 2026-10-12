@@ -9,7 +9,7 @@ import { Icon } from "./icon"
 import { Button, IconButton, Monogram } from "./kit"
 import { Markdown } from "./markdown"
 import { isAgent } from "./message"
-import { LABEL, StateMark } from "./tasks"
+import { labelOf, StateMark } from "./tasks"
 
 const ORDER = ["doing", "review", "todo", "done"] as const
 
@@ -118,7 +118,7 @@ function Properties({ task, state, now, items }: { task: Task; state: ChannelSta
     <dl className="grid grid-cols-2 gap-4 lg:block lg:space-y-4">
       <Prop label="Status">
         <StateMark state={task.state} />
-        {LABEL[task.state]}
+        {labelOf(task)}
       </Prop>
       <Prop label="Assignee">
         {task.owner ? (

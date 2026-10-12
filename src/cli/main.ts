@@ -26,7 +26,7 @@ import { Cursor, DEFAULT_RELAY, home, Keystore, type ChannelConfig } from "../co
 import { b64url, decodeJoinCode, fromB64url, newRoomId, type ChannelAccess } from "../crypto.ts";
 import { describeMember, freeAgentName, handleFor, type JoinRequest } from "../membership.ts";
 import { baseName, here, seatsNear } from "../seats.ts";
-import { ago, cardLine, charterLines, describeEvent, holdLine, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, stateWord, statusJson } from "../format.ts";
+import { ago, cardLine, charterLines, describeEvent, holdLine, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, stateWord, taskStateWord, statusJson } from "../format.ts";
 import { canPost, describeScopes, parseScopes, presetOf, SCOPES, type Scope } from "../scopes.ts";
 import { fingerprint, type Identity } from "../identity.ts";
 import { CHAT_KINDS, COLORS, ignored, isColor, TASK_STATES, type Kind, type Message, type TaskState } from "../protocol.ts";
@@ -1400,14 +1400,14 @@ const commands: Record<string, Command> = {
       else if (sub === "approve") state = yield* s.taskUpdate(id, { state: "done", note });
       else if (sub === "reject") state = yield* s.taskUpdate(id, { state: "doing", note: note ?? (yield* die('usage: kiwi task reject T7 "what needs to change"')) });
       else if (sub in STATE_FOR) state = yield* s.taskUpdate(id, { state: STATE_FOR[sub], note });
-      // Older names: blocked is a note on work in progress; cancelling is finishing it with a note saying so.
+      // Blocked (an older name) is a note on work in progress; cancelling finishes it, marked cancelled.
       else if (sub === "block") state = yield* s.taskUpdate(id, { note: `blocked${note ? `: ${note}` : ""}` });
-      else if (sub === "cancel") state = yield* s.taskUpdate(id, { state: "done", note: `cancelled${note ? `: ${note}` : ""}` });
+      else if (sub === "cancel") state = yield* s.taskUpdate(id, { state: "cancelled", note });
       else if (sub === "drop") state = yield* s.taskUpdate(id, { owner: null, note });
       else if (sub === "note") state = yield* s.taskUpdate(id, { note: note ?? (yield* die('usage: kiwi task note T7 "…"')) });
       else return yield* die(`unknown task command "${sub}"`);
       const t = state.tasks.get(id)!;
-      out(`${taskId(id)} ${stateWord(t.state)}${t.owner ? ` @${t.owner}` : ""}: ${t.title}`);
+      out(`${taskId(id)} ${taskStateWord(t)}${t.owner ? ` @${t.owner}` : ""}: ${t.title}`);
     }),
 
   tasks: () =>
