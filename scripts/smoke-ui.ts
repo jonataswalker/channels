@@ -328,6 +328,21 @@ try {
       await page.getByRole("menuitem", { name: item }).click()
     })
 
+  // One click makes bot the coordinator, and coordinator-only follows the role (T1389); another undoes both.
+  at = "Make coordinator"
+  // By its label's start: what follows "People, " changes with the mode.
+  const peopleButton = page.getByRole("button", { name: /^People, / })
+  await peopleButton.click()
+  await page.getByRole("button", { name: "More for bot" }).click()
+  await page.getByRole("menuitem", { name: "Make coordinator" }).click()
+  await page.getByText(/turned on coordinator-only/).first().waitFor({ timeout: 15000 })
+  await peopleButton.click()
+  await page.getByText(/People talk with .*, the coordinator/).waitFor()
+  await page.getByRole("button", { name: "More for bot" }).click()
+  await page.getByRole("menuitem", { name: "No longer coordinator" }).click()
+  await page.getByText(/turned off coordinator-only/).first().waitFor({ timeout: 15000 })
+  console.log(`ok  ${at}`)
+
   at = "Work"
   await page.getByRole("tab", { name: /^Work/ }).click()
   await page.getByRole("tab", { name: "Chat" }).click()

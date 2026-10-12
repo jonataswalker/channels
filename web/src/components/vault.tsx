@@ -13,6 +13,12 @@ import { Alert, Button, IconButton, Modal, Spinner, TextField, errorText, toast 
 // in is here. lib/vault.ts does the work; VaultCard and PasskeysSheet wire it up.
 
 const LATER = "mc.vault.later"
+const OFFER = "mc:vault-offer"
+
+/** The account menu's "Save channels to a passkey…": show the offer now, agent or not, even after "Later". */
+export function offerVault(): void {
+  window.dispatchEvent(new Event(OFFER))
+}
 
 function brought(n: number): string {
   return n === 0 ? "Your channels are unlocked" : n === 1 ? "1 channel added" : `${n} channels added`
@@ -49,8 +55,15 @@ export function VaultCard() {
   }
 
   // Setting one up waits until an agent has worked here: it's never in the way of the first one.
+  // The account menu asks for it any time.
   const worked = useAgentWorked()
-  const show = (vault.kind === "none" && supported && !later && worked) || vault.kind === "locked"
+  const [asked, setAsked] = useState(false)
+  useEffect(() => {
+    const on = () => (supported ? setAsked(true) : toast("This browser can’t make a passkey", "error"))
+    window.addEventListener(OFFER, on)
+    return () => window.removeEventListener(OFFER, on)
+  }, [supported])
+  const show = (vault.kind === "none" && supported && (asked || (!later && worked))) || vault.kind === "locked"
   return (
     <>
       {show && (
@@ -74,6 +87,7 @@ export function VaultCard() {
               ? () => {
                   localStorage.setItem(LATER, "1")
                   setLater(true)
+                  setAsked(false)
                 }
               : undefined
           }

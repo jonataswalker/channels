@@ -239,7 +239,7 @@ export function agentWorked(): boolean {
   }
 }
 
-function noteAgentWorked(): void {
+export function noteAgentWorked(): void {
   if (agentWorked()) return
   try {
     localStorage.setItem(AGENT_WORKED, "1")
@@ -829,7 +829,10 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
       orGone(
         follow(ch, {
           refresh: Effect.all([rosterStep, requestsStep], { concurrency: "unbounded", discard: true }),
-          cached: (cached) => setMessages((prev) => merged(prev, cached)),
+          cached: (cached) => {
+            setMessages((prev) => merged(prev, cached))
+            if (cached.some((m) => m.kind === "event" && m.ev?.op === "card")) noteAgentWorked()
+          },
           started: setStart,
           live,
           status: () => Effect.sync(() => setConnection("reconnecting")),

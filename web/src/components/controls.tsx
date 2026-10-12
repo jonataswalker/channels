@@ -1,6 +1,6 @@
 import { Dialog } from "@base-ui/react/dialog"
 import { Add01Icon, BookOpen01Icon, ComputerTerminal01Icon, Copy01Icon, Delete02Icon, Link01Icon, Logout01Icon, MoreHorizontalIcon, PauseIcon, PencilEdit01Icon, PlayIcon, UserAdd01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons"
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 
 import { loadLine, memberLoad, showsLoad, type Load } from "@mc/load.ts"
 import { cardLine } from "@mc/format.ts"
@@ -8,8 +8,9 @@ import { NAME_RE, type JoinRequest, type Member as RosterMember } from "@mc/memb
 import { MAX_CHARTER, type ChannelIcon, type Color, type Event } from "@mc/protocol.ts"
 import { TOO_MANY_REQUESTS } from "@mc/sas.ts"
 import { SCOPES, type Scope } from "@mc/scopes.ts"
-import { colorOf, taskId, type ChannelState, type Member } from "@mc/state.ts"
+import { colorOf, COORDINATOR, isPerson, taskId, type ChannelState, type Member } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
+import { noteAgentWorked } from "@/lib/channel"
 import { formatAgo, memberLine, memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { isSignInGone } from "@/lib/session"
@@ -89,8 +90,10 @@ interface Api {
   ask: (c: Confirm) => void
   openRequests: () => void
   openInvite: () => void
-  /** Owner: make an agent the coordinator, or not: coordinator-only follows, so nobody has a mode to learn. */
+  /** Owner: make a member the coordinator, or not: coordinator-only follows, so nobody has a mode to learn. */
   setCoordinator: (m: RosterMember, on: boolean) => Promise<void>
+  /** Owner: every role change goes through here, so coordinator-only always follows who holds the role. */
+  setRole: (ev: Extract<Event, { op: "role.set" | "role.refuse" }>) => Promise<void>
   editRole: (m: RosterMember) => void
   editScopes: (m: RosterMember) => void
   lastSeenOf: (name: string) => number | null
@@ -98,6 +101,8 @@ interface Api {
 }
 
 const Ctx = createContext<Api | null>(null)
+
+const isCoordinator = (role: string | null | undefined) => role?.trim().toLowerCase() === COORDINATOR
 const useControls = () => useContext(Ctx)!
 
 const LEVEL = { free: "Free", busy: "Busy", overloaded: "Overloaded" } as const
@@ -160,6 +165,39 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
     }
   }
 
+  /**
+   * A role change, then the mode it implies: coordinator-only is on exactly while someone holds the
+   * coordinator role (one holder: giving it moves it). If the mode change fails, the reconciler below
+   * puts it right the next time this owner's page sees the channel.
+   */
+  const setRole = async (ev: Extract<Event, { op: "role.set" | "role.refuse" }>) => {
+    await p.onRole(ev)
+    if (ev.op !== "role.set" || !p.onMode) return
+    const becomes = isCoordinator(ev.role)
+    const was = p.state.coordinator === ev.member
+    if (becomes && !p.state.mode.coordinatorOnly) await p.onMode(true, true)
+    else if (!becomes && was && p.state.mode.coordinatorOnly) await p.onMode(false, true)
+  }
+
+  // The owner's page turns coordinator-only off once nobody holds the role: a coordinator who left
+  // or was removed (no event says so in the log), or a mode change that failed, must not leave every
+  // other agent refused. Only that direction on its own: turning it on is always a person's click.
+  // Once per page, so a refused change doesn't loop.
+  // An agent with a card in this channel has worked here, however old the history (the vault waits for this).
+  const agentHere = [...p.state.members.values()].some((m) => m.active && !isPerson(m) && !!m.card)
+  useEffect(() => {
+    if (agentHere) noteAgentWorked()
+  }, [agentHere])
+
+  const tried = useRef(false)
+  const stuck = p.state.mode.coordinatorOnly && !p.state.coordinator
+  const { isOwner, onMode } = p
+  useEffect(() => {
+    if (!isOwner || !onMode || !stuck || tried.current) return
+    tried.current = true
+    void onMode(false, true).catch(() => {})
+  }, [isOwner, onMode, stuck])
+
   const api: Api = {
     p,
     busy,
@@ -172,16 +210,8 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
     openRequests: () => setSheet("requests"),
     openInvite: () => setSheet("invite"),
     setCoordinator: (m, on) =>
-      run(
-        async () => {
-          await p.onRole({ op: "role.set", member: m.name, role: on ? "coordinator" : null })
-          // People talk with the coordinator while there is one; with none left, as before.
-          const others = [...p.state.members.values()].some((x) => x.active && x.name !== m.name && x.role?.trim().toLowerCase() === "coordinator")
-          if (p.onMode && on && !p.state.mode.coordinatorOnly) await p.onMode(true, true)
-          if (p.onMode && !on && !others && p.state.mode.coordinatorOnly) await p.onMode(false, true)
-        },
-        on ? `${m.name} is the coordinator: people talk with them` : `${m.name} isn't the coordinator any more`,
-      ),
+      run(() => setRole({ op: "role.set", member: m.name, role: on ? COORDINATOR : null }), on ? `${m.name} is the coordinator: people talk with them` : `${m.name} isn't the coordinator any more`),
+    setRole,
     editRole: (m) => {
       const live = p.state.members.get(m.name)
       setRoleDraft({ role: live?.role ?? "", about: live?.about ?? "" })
@@ -234,7 +264,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
           onClick={() => {
             if (confirm?.kind !== "role") return
             const name = confirm.member.name
-            void run(() => p.onRole({ op: "role.set", member: name, role: roleDraft.role.trim() || null, about: roleDraft.about.trim() || null }), `Saved ${name}’s role`)
+            void run(() => setRole({ op: "role.set", member: name, role: roleDraft.role.trim() || null, about: roleDraft.about.trim() || null }), `Saved ${name}’s role`)
           }}
         >
           Save
@@ -374,7 +404,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
 
 /** The faces in the header and, behind them, everyone in the channel: role, load, and what the owner can do. */
 export function People({ here, subtitle, live }: { here: Member[]; subtitle: string; live: boolean }) {
-  const { p, busy, run, ask, editRole, editScopes, setCoordinator } = useControls()
+  const { p, busy, run, ask, editRole, editScopes, setCoordinator, setRole } = useControls()
   const [open, setOpen] = useState(false)
   const coordinator = p.state.coordinator
   const active = p.roster.filter((m) => m.active).sort((a, b) => Number(b.owner) - Number(a.owner) || Number(p.online.has(b.name)) - Number(p.online.has(a.name)))
@@ -404,11 +434,24 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
       <div className="max-h-[min(520px,70svh)] overflow-y-auto">
         <h2 className="sr-only">People</h2>
         {/* Who people talk with, when there's a coordinator. Nothing to switch: it follows the role. */}
-        {coordinator && (
-          <p className="mb-1 rounded-ctl bg-wash px-3 py-2.5 text-meta text-ink-2">
-            People talk with <span className="font-medium text-ink">{memberName(p.state.members.get(coordinator))}</span>, the coordinator, who passes things on.
-          </p>
-        )}
+        {coordinator &&
+          (p.state.mode.coordinatorOnly ? (
+            <p className="mb-1 rounded-ctl bg-wash px-3 py-2.5 text-meta text-ink-2">
+              People talk with <span className="font-medium text-ink">{memberName(p.state.members.get(coordinator))}</span>, the coordinator, who passes things on.
+            </p>
+          ) : (
+            // The role without the mode: a channel from before they went together, or a change that failed.
+            <div className="mb-1 flex items-center gap-3 rounded-ctl bg-wash px-3 py-2.5 text-meta text-ink-2">
+              <span className="min-w-0 flex-1">
+                <span className="font-medium text-ink">{memberName(p.state.members.get(coordinator))}</span> is the coordinator, but people still talk with everyone.
+              </span>
+              {p.isOwner && p.onMode && (
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(() => p.onMode!(true, true), "People talk with the coordinator now")}>
+                  Route through them
+                </Button>
+              )}
+            </div>
+          ))}
         {active.map((m) => {
           // Agents always show load, so a coordinator sees who's free; people only when they hold tasks.
           const load = memberLoad(p.state, m.name, p.now)
@@ -453,12 +496,11 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
                     }
                   >
                     <MenuItem onClick={act(() => editRole(m))}>Set role…</MenuItem>
-                    {m.kind !== "human" &&
-                      (p.state.coordinator === m.name ? (
-                        <MenuItem onClick={act(() => void setCoordinator(m, false))}>No longer coordinator</MenuItem>
-                      ) : (
-                        <MenuItem onClick={act(() => void setCoordinator(m, true))}>Make coordinator</MenuItem>
-                      ))}
+                    {p.state.coordinator === m.name ? (
+                      <MenuItem onClick={act(() => void setCoordinator(m, false))}>No longer coordinator</MenuItem>
+                    ) : (
+                      m.kind !== "human" && <MenuItem onClick={act(() => void setCoordinator(m, true))}>Make coordinator</MenuItem>
+                    )}
                     {p.onScopes && <MenuItem onClick={act(() => editScopes(m))}>What they can do…</MenuItem>}
                     <MenuSeparator />
                     <MenuItem tone="danger" onClick={act(() => ask({ kind: "remove", member: m }))}>
@@ -479,12 +521,12 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
                         size="sm"
                         disabled={busy}
                         onClick={() =>
-                          void run(() => p.onRole({ op: "role.set", member: m.name, role: asked.role ?? null, about: asked.about ?? null }), `${m.name} is now ${asked.role ?? "unassigned"}`)
+                          void run(() => setRole({ op: "role.set", member: m.name, role: asked.role ?? null, about: asked.about ?? null }), `${m.name} is now ${asked.role ?? "unassigned"}`)
                         }
                       >
                         Allow
                       </Button>
-                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(() => p.onRole({ op: "role.refuse", member: m.name }), `Kept ${m.name}'s role`)}>
+                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(() => setRole({ op: "role.refuse", member: m.name }), `Kept ${m.name}'s role`)}>
                         Refuse
                       </Button>
                     </span>
@@ -900,6 +942,7 @@ function CharterDialog({ text, onClose, onSave }: { text: string; onClose: () =>
   )
 }
 
+/** The owner renames the channel. Every member sees the new name; the relay never can. */
 function RenameDialog({ title, onClose, onSave }: { title: string; onClose: () => void; onSave: (name: string) => Promise<void> }) {
   const [name, setName] = useState(title)
   const [busy, setBusy] = useState(false)
