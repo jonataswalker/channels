@@ -141,9 +141,12 @@ describe("scopes in fold", () => {
     expect(readScopes(Array(40).fill("post"))).toBeNull();
     expect(wireScopes(["post", "ask", "tasks", "claims", "facts"])).toBeNull();
     expect(wireScopes([])).toEqual([]);
+    // Two levels to choose from: member or read-only. A list isn't offered any more.
     expect(parseScopes("read-only")).toEqual([]);
-    expect(parseScopes("post, claims")).toEqual(["post", "claims"]);
-    expect(parseScopes("post,root")).toBeNull();
+    expect(parseScopes("member")).toEqual(["post", "ask", "tasks", "claims", "facts"]);
+    expect(parseScopes("full")).toEqual(["post", "ask", "tasks", "claims", "facts"]);
+    expect(parseScopes("post, claims")).toBeNull();
+    expect(parseScopes("contributor")).toBeNull();
     expect(refusal([], { kind: "event", ev: { op: "release", paths: ["x"] } })).toBeNull();
   });
 
@@ -306,21 +309,6 @@ describe("scopes at the relay", () => {
     }
   })
 
-  test("a reclaimed seat keeps what the seat may do now", async () => {
-    const { id: oldKey, ch: oldCh } = await admit("seat", ["post", "claims"]);
-    await oldCh.send("here");
-    const newKey = await generateIdentity("seat");
-    const { requestId } = await Channel.requestJoin(relay, code, newKey, { name: "seat", reclaim: true });
-    const first = (await ownerCh.requests({ budget: memoryBudget() })).find((r) => r.id === requestId)!;
-    await ownerCh.checkRequest(first);
-    await Channel.joinStatus(relay, code, newKey, requestId);
-    const req = (await ownerCh.requests()).find((r) => r.id === requestId) as JoinRequest;
-    // The owner narrowed the seat since its record was signed: the fold's word is what moves.
-    await ownerCh.reclaim(req, { online: false, force: true, scopes: ["post"] });
-    const members = await ownerCh.members();
-    expect(members.find((m) => m.pk === newKey.pk)).toMatchObject({ name: "seat", active: true, scopes: ["post"] });
-    expect(members.find((m) => m.pk === oldKey.pk)!.active).toBe(false);
-  });
 });
 
 // ---------- what the agent is told ----------

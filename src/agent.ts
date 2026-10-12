@@ -589,29 +589,17 @@ export class AgentSession {
     return yield* this.event({ op: "hello", role, about }, `joined${role ? ` as ${role}` : ""}`);
   });
 
-  /**
-   * Owner: set a member's role and rules, give them the role they asked for, or
-   * refuse it. Sent as the owner, so every client checks it's the owner's word.
-   */
-  readonly decideRole = Effect.fn("AgentSession.decideRole")({ self: this }, function* (
-    this: AgentSession,
-    member: string,
-    decision: { role: string | null; about?: string | null } | "allow" | "refuse",
-  ) {
-    const owner = yield* this.adminCh("decide roles");
+  /** Owner: set a member's role and rules. Sent as the owner, so every client checks it's the owner's word. */
+  readonly decideRole = Effect.fn("AgentSession.decideRole")({ self: this }, function* (this: AgentSession, member: string, decision: { role: string | null; about?: string | null }) {
+    const owner = yield* this.adminCh("set roles");
     const { state } = yield* this.state();
     const m = state.members.get(member);
     if (!m?.active) return yield* new Rejected(`no member named ${member}`);
-    let ev: Event;
-    if (decision === "refuse") ev = { op: "role.refuse", member };
-    else if (decision === "allow") {
-      if (!m.roleRequest) return yield* new Rejected(`${member} hasn't asked for a role`);
-      ev = { op: "role.set", member, role: m.roleRequest.role ?? null, about: m.roleRequest.about ?? null };
-    } else ev = { op: "role.set", member, ...decision };
-    const seq = yield* owner.fx.send(ev.op === "role.refuse" ? `kept ${member}'s role` : `made ${member} ${ev.role ?? "unassigned"}`, { kind: "event", ev });
+    const ev = { op: "role.set" as const, member, ...decision };
+    const seq = yield* owner.fx.send(`made ${member} ${ev.role ?? "unassigned"}`, { kind: "event", ev });
     // Then the member's record says it too, for clients holding only the log's tail. If this fails,
     // the owner's next reconcile puts it right; the role.set already counts for every client.
-    if (ev.op === "role.set" && !m.owner) {
+    if (!m.owner) {
       const rec = (yield* owner.fx.members()).find((x) => x.active && x.name === member && x.pk === m.pk);
       if (rec) yield* Effect.ignoreCause(owner.fx.updateRole(rec, ev.role, ev.about, seq));
     }

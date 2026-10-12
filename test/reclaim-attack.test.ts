@@ -1,6 +1,6 @@
-// Adversarial cases for seat reclaim (T185). The happy path and the guards live
-// in reclaim.test.ts; this file is the attacks: every one of these must fail
-// closed, and the two at the bottom must succeed.
+// A seat never moves to a new key (T1426: reclaim is gone; a lost key means the owner
+// removes the old seat and the agent joins again). Asking under a taken name, even
+// with the old reclaim flag, is a plain join under the next free name.
 
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -39,21 +39,26 @@ async function seat(extra: { id: Identity; info: { name: string; kind?: "human" 
   return { owner, oldKey, code: made.code, ownerCh, oldCh };
 }
 
-/** A reclaim stays unchecked until a person starts the code check. The day's budget must not sign it. */
-async function ready(owner: Channel, code: string, joiner: Identity, requestId: string): Promise<JoinRequest> {
-  const first = (await owner.requests()).find((r) => r.id === requestId);
-  expect(first?.check).toBe("unchecked");
-  expect(first?.reclaims).toBeDefined();
-  await owner.checkRequest(first!);
-  await Channel.joinStatus(relay, code, joiner, requestId);
-  return (await owner.requests()).find((r) => r.id === requestId)!;
-}
-
 function active(members: { name: string; pk: string; active: boolean }[], name: string): string[] {
   return members.filter((m) => m.name === name && m.active).map((m) => m.pk);
 }
 
-describe("reclaim attacks", () => {
+describe("no seat moves to a new key", () => {
+  test("a new key asking under a taken name, even as a reclaim, is offered the next free name", async () => {
+    const { oldKey, code, ownerCh } = await seat();
+    const newbie = await generateIdentity("win");
+    const { requestId } = await Channel.requestJoin(relay, code, newbie, { name: "win", reclaim: true });
+    const first = (await ownerCh.requests()).find((r) => r.id === requestId)!;
+    expect(first.name).toBe("win-2");
+    expect(first.askedAs).toBe("win");
+    await ownerCh.checkRequest(first);
+    await Channel.joinStatus(relay, code, newbie, requestId);
+    await ownerCh.approve((await ownerCh.requests()).find((r) => r.id === requestId)!);
+    const members = await ownerCh.members();
+    expect(active(members, "win")).toEqual([oldKey.pk]);
+    expect(active(members, "win-2")).toEqual([newbie.pk]);
+  });
+
   test("a request with no owner approval grants nothing", async () => {
     const { oldKey, code, ownerCh } = await seat();
     const newbie = await generateIdentity("win");
@@ -61,108 +66,6 @@ describe("reclaim attacks", () => {
     expect((await Channel.joinStatus(relay, code, newbie, requestId)).status).toBe("pending");
     await expect(Channel.resume(relay, code, newbie)).rejects.toBeInstanceOf(RelayError);
     expect(active(await ownerCh.members(), "win")).toEqual([oldKey.pk]);
-  });
-
-  test("a plain approve cannot move a seat, and a non-owner cannot reclaim", async () => {
-    const { oldKey, code, ownerCh, oldCh } = await seat();
-    const newbie = await generateIdentity("win");
-    const { requestId } = await Channel.requestJoin(relay, code, newbie, { name: "win", reclaim: true });
-    const req = await ready(ownerCh, code, newbie, requestId);
-    await expect(ownerCh.approve(req)).rejects.toThrow(/already someone's name/);
-    await expect(oldCh.reclaim(req, { online: false })).rejects.toThrow(/only the channel owner/);
-    expect(active(await ownerCh.members(), "win")).toEqual([oldKey.pk]);
-    await ownerCh.deny(requestId);
-  });
-
-  test("the sponsor has to be the person behind the old seat", async () => {
-    const { code, ownerCh } = await seat();
-    const newbie = await generateIdentity("win");
-    const { requestId } = await Channel.requestJoin(relay, code, newbie, { name: "win", reclaim: true });
-    const req = await ready(ownerCh, code, newbie, requestId);
-    await expect(ownerCh.reclaim({ ...req, sponsoredBy: { user: "user_mallory", name: "Mallory" } }, { online: false })).rejects.toThrow(/refused/);
-    expect((await Channel.joinStatus(relay, code, newbie, requestId)).status).toBe("pending");
-  });
-
-  test("the owner's seat and a person's seat cannot be reclaimed", async () => {
-    const pat = await generateIdentity("pat");
-    const { owner, code, ownerCh } = await seat([{ id: pat, info: { name: "pat", kind: "human" } }]);
-    const asOwner = await generateIdentity("human");
-    const ownerAsk = await Channel.requestJoin(relay, code, asOwner, { name: "human", reclaim: true });
-    const ownerReq = await ready(ownerCh, code, asOwner, ownerAsk.requestId);
-    expect(ownerReq.reclaims).toMatchObject({ pk: owner.pk, owner: true });
-    await expect(ownerCh.reclaim(ownerReq, { online: false })).rejects.toThrow(/owner's seat/);
-
-    const asPat = await generateIdentity("pat");
-    const patAsk = await Channel.requestJoin(relay, code, asPat, { name: "pat", reclaim: true });
-    const patReq = await ready(ownerCh, code, asPat, patAsk.requestId);
-    await expect(ownerCh.reclaim(patReq, { online: false })).rejects.toThrow(/person's own seat/);
-    expect(active(await ownerCh.members(), "human")).toEqual([owner.pk]);
-    expect(active(await ownerCh.members(), "pat")).toEqual([pat.pk]);
-  });
-
-  test("an online old key needs force, and force is what the owner passes, not the requester", async () => {
-    const { code, ownerCh } = await seat();
-    const newbie = await generateIdentity("win");
-    const { requestId } = await Channel.requestJoin(relay, code, newbie, { name: "win", reclaim: true });
-    const req = await ready(ownerCh, code, newbie, requestId);
-    await expect(ownerCh.reclaim(req, { online: true })).rejects.toThrow(/ONLINE NOW/);
-    await expect(ownerCh.reclaim(req, { online: true, force: false })).rejects.toThrow(/ONLINE NOW/);
-    expect((await Channel.joinStatus(relay, code, newbie, requestId)).status).toBe("pending");
-  });
-
-  test("a denied request and a removed key cannot reclaim", async () => {
-    const { oldKey, code, ownerCh } = await seat();
-    const denied = await generateIdentity("win");
-    const ask = await Channel.requestJoin(relay, code, denied, { name: "win", reclaim: true });
-    const req = await ready(ownerCh, code, denied, ask.requestId);
-    await ownerCh.deny(ask.requestId);
-    expect((await Channel.joinStatus(relay, code, denied, ask.requestId)).status).toBe("denied");
-    await expect(Channel.resume(relay, code, denied)).rejects.toBeInstanceOf(RelayError);
-    await expect(ownerCh.reclaim(req, { online: false })).rejects.toThrow();
-
-    await ownerCh.remove(oldKey.pk);
-    await expect(Channel.resume(relay, code, oldKey)).rejects.toBeInstanceOf(RelayError);
-    await expect(Channel.requestJoin(relay, code, oldKey, { name: "win", reclaim: true })).rejects.toThrow(/removed/);
-  });
-
-  test("after a reclaim the old key cannot send, read or decrypt, and only one key is live", async () => {
-    const { oldKey, code, ownerCh, oldCh } = await seat();
-    const task = await oldCh.send("", { ev: { op: "task.add", title: "fix the PC edge", owner: "win" } });
-    await oldCh.send("", { ev: { op: "claim", paths: ["src/pc"], ttl: 3600 } });
-    await oldCh.send("still mine");
-    const newbie = await generateIdentity("win");
-    const { requestId } = await Channel.requestJoin(relay, code, newbie, { name: "win", reclaim: true });
-    const req = await ready(ownerCh, code, newbie, requestId);
-    await ownerCh.reclaim(req, { online: false });
-
-    const secret = `SECRET_${crypto.randomUUID()}`;
-    const st = await Channel.joinStatus(relay, code, newbie, requestId);
-    expect(st.status).toBe("approved");
-    if (st.status !== "approved") return;
-    const newCh = new Channel(st.access, relay, newbie);
-    await newCh.send(secret);
-
-    await expect(oldCh.send("still here")).rejects.toThrow();
-    await expect(oldCh.history(0)).rejects.toThrow();
-    await expect(Channel.resume(relay, code, oldKey)).rejects.toBeInstanceOf(RelayError);
-
-    const members = await newCh.members();
-    expect(active(members, "win")).toEqual([newbie.pk]);
-    const { messages } = await newCh.history(0);
-    const state = fold(
-      messages,
-      members.map((m) => ({ name: m.name, pk: m.pk, role: m.role, owner: m.owner, at: m.at, active: m.active, kind: m.kind })),
-    );
-    expect([...state.tasks.values()].map((t) => t.title)).toEqual(["fix the PC edge"]);
-    expect(messages.filter((m) => m.from === "win" && m.body === "still mine").every((m) => state.trust.get(m.seq) === "verified")).toBe(true);
-    expect(messages.some((m) => m.body === secret)).toBe(true);
-    expect(task).toBeGreaterThan(0);
-
-    const other = await generateIdentity("win");
-    const again = await Channel.requestJoin(relay, code, other, { name: "win", reclaim: true });
-    const second = await ready(ownerCh, code, other, again.requestId);
-    await expect(ownerCh.reclaim({ ...second, reclaims: { ...second.reclaims!, pk: oldKey.pk } }, { online: false })).rejects.toThrow();
-    expect(active(await ownerCh.members(), "win")).toEqual([newbie.pk]);
   });
 
   test("a seat.reclaim event that isn't from the owner is rejected and moves nothing", async () => {

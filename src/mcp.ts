@@ -122,9 +122,7 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
             const about = inlineText(rec?.about ?? m.about, 200);
             const sponsor = rec?.sponsor ?? m.sponsor;
             const sponsorName = sponsor ? inlineText(sponsor.handle ?? sponsor.name, 80) : "";
-            const asked = rec?.roleRequest;
-            const askedRole = inlineText(asked?.role, 80);
-            const head = `${m.name}${m.name === s.me ? " (you)" : ""}${m.owner ? " — owner" : role ? ` — ${role}` : ""}${about ? ` (${about})` : ""}${sponsorName ? ` · agent of @${sponsorName}` : ""}${asked ? ` (asked to be ${askedRole || "unassigned"})` : ""}  key ${m.pk.slice(0, 8)}${m.active ? "" : "  (left)"}`;
+            const head = `${m.name}${m.name === s.me ? " (you)" : ""}${m.owner ? " — owner" : role ? ` — ${role}` : ""}${about ? ` (${about})` : ""}${sponsorName ? ` · agent of @${sponsorName}` : ""}  key ${m.pk.slice(0, 8)}${m.active ? "" : "  (left)"}`;
             const load = memberLoad(state, m.name);
             // What they may do, when it's less than everything (what the owner set, as every client enforces it).
             const scopes = m.active && !m.owner ? state.members.get(m.name)?.scopes : undefined;

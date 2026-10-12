@@ -22,10 +22,13 @@ export const SCOPE_LABELS: Record<Scope, string> = {
   facts: "set and unset facts",
 };
 
-/** The presets the owner picks from. Full is everyone's today, and every member's without scopes in their record. */
+/**
+ * The two levels the owner picks from: a member may do everything, or only read. Records and scope.set
+ * events still carry the list, so a grant from before (some scopes, not all) keeps reading and binding
+ * exactly as it was; it just isn't offered any more.
+ */
 export const PRESETS = {
   "read-only": [] as Scope[],
-  contributor: ["post", "ask", "claims", "facts"] as Scope[],
   full: [...SCOPES] as Scope[],
 } as const;
 export type Preset = keyof typeof PRESETS;
@@ -103,16 +106,18 @@ export function presetOf(scopes: readonly Scope[]): Preset | null {
   return null;
 }
 
-/** "full", "read-only", or the list: "post, ask, claims". */
+/** "member", "read-only", or for a grant from before the two levels, what it still allows. */
 export function describeScopes(scopes: readonly Scope[]): string {
-  return presetOf(scopes) ?? scopes.join(", ");
+  const p = presetOf(scopes);
+  if (p === "full") return "member";
+  if (p === "read-only") return "read-only";
+  return `limited (an older setting: ${scopes.join(", ")})`;
 }
 
-/** What the owner typed: a preset ("read-only", "contributor", "full") or a comma list of scopes ("post,claims"). */
+/** What the owner typed: "member" (or "full"), or "read-only". */
 export function parseScopes(s: string): Scope[] | null {
   const t = s.trim().toLowerCase();
-  if (t in PRESETS) return [...PRESETS[t as Preset]];
-  const parts = t.split(/[\s,]+/).filter((p) => p && p !== "read");
-  if (!parts.every(isScope)) return null;
-  return SCOPES.filter((x) => parts.includes(x));
+  if (t === "member" || t === "full") return [...SCOPES];
+  if (t === "read-only" || t === "readonly") return [];
+  return null;
 }

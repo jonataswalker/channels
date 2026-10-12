@@ -78,8 +78,11 @@ describe("names", () => {
       const id = await generateIdentity("x");
       asks.push({ id, requestId: (await Channel.requestJoin(relay, code, id, { name })).requestId });
     }
-    // "human" and "HELPER" name current members, so they come as reclaims, checked only by hand.
-    for (const r of await checkedByHand(ownerCh, relay, code, asks)) await expect(ownerCh.approve(r)).rejects.toThrow(/valid name|reserved|already someone's name/);
+    // An invalid or reserved name is refused at approval; a taken one ("HELPER" is helper's) is offered the next free one.
+    const checked = await checkedByHand(ownerCh, relay, code, asks);
+    for (const r of checked.slice(0, 2)) await expect(ownerCh.approve(r)).rejects.toThrow(/valid name|reserved/);
+    expect(checked[2]!.name).toBe("HELPER-2");
+    expect(checked[2]!.askedAs).toBe("HELPER");
   });
 
   test("request text is kept to one safe line", () => {

@@ -72,7 +72,6 @@ export function describeEvent(m: Message, state?: ChannelState): string {
   switch (ev.op) {
     case "hello":
       // After joining, a hello that changes the role is a request the owner decides on.
-      if (state?.members.get(m.from)?.roleRequest?.seq === m.seq) return `asks to be ${ev.role ?? "unassigned"}${ev.about ? ` (${ev.about})` : ""}; the owner decides`;
       return `joined${ev.role ? ` as ${ev.role}` : ""}${ev.about ? ` (${ev.about})` : ""}${via(state?.members.get(m.from)?.viaName)}`;
     case "role.set":
       return ev.role ? `made ${ev.member} ${ev.role}${ev.about ? ` (${ev.about})` : ""}` : `cleared ${ev.member}'s role`;
@@ -251,8 +250,9 @@ export function formatRooms(state: ChannelState): string {
 /** "read only", or what the scopes cover: "write messages; claim paths (contributor)". */
 export function mayDo(scopes: readonly Scope[]): string {
   if (!scopes.length) return "read only";
-  const preset = presetOf(scopes);
-  return `read; ${scopes.map((s) => SCOPE_LABELS[s]).join("; ")}${preset ? ` (${preset})` : ""}`;
+  if (presetOf(scopes) === "full") return "do everything a member does";
+  // A grant from before the two levels: say what it still allows.
+  return `read; ${scopes.map((s) => SCOPE_LABELS[s]).join("; ")} (an older, limited setting)`;
 }
 
 /** `kiwi status --json`: the members a coordinator routes work between, by role and load. */

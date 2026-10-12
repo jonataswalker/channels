@@ -516,11 +516,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         await ch.approve(r, wireScopes(scopes) ? { scopes } : undefined)
         await Promise.all([refreshRequests(), refreshRoster()])
       }}
-      onReclaim={async (r, opts) => {
-        // The seat keeps what it may do now, scope.set events included (they name the old key).
-        await ch.reclaim(r, { ...opts, scopes: r.reclaims ? state.members.get(r.reclaims.name)?.scopes : undefined })
-        await Promise.all([refreshRequests(), refreshRoster()])
-      }}
       onScopes={async (m, scopes) => {
         const wire = wireScopes(scopes)
         const seq = await send(`set what ${m.name} may do: ${wire ? describeScopes(wire) : "full"}`, { kind: "event", ev: { op: "scope.set", member: m.name, pk: m.pk, scopes: wire } })
@@ -644,8 +639,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
               {/* What needs a person, and what agents noted: above the conversation, always in view. */}
               <div className="mx-auto w-full max-w-[760px] shrink-0 px-4 md:px-8">
                 <NeedsYou
-                  state={state}
-                  me={me}
                   now={now}
                   roomId={member.access.roomId}
                   escalations={escalations}

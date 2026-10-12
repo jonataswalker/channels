@@ -1,67 +1,39 @@
-import { useState } from "react"
+import { presetOf, SCOPES, type Scope } from "@mc/scopes.ts"
 
-import { PRESETS, presetOf, SCOPE_LABELS, SCOPES, type Preset, type Scope } from "@mc/scopes.ts"
-import { cx } from "@/lib/utils"
-import { SEGMENTED, SEGMENT_OFF, SEGMENT_ON } from "./kit"
+// What a member may do besides read: everything, or nothing but read. The owner signs the choice;
+// every client enforces it. A grant from before the two levels (some scopes, not all) keeps working
+// as it was, and reads as limited until it's changed.
 
-// What a member may do besides read: three presets, and each scope on its own
-// when none of them fits. The owner signs the choice; every client enforces it.
-
-const PRESET_LABEL: Record<Preset, string> = { full: "Everything", contributor: "No tasks", "read-only": "Read only" }
-const PRESET_NOTE: Record<Preset, string> = {
-  full: "Write, ask, run tasks, claim paths and set facts.",
-  contributor: "Everything but adding, claiming or updating tasks.",
-  "read-only": "Reads the channel; can't send anything.",
-}
-
-/** How a member's scopes read in a line: nothing for everything (the usual), else the preset or the list. */
+/** How a member's scopes read in a line: nothing for a member (the usual), else "read only" or "limited". */
 export function scopesLine(scopes: readonly Scope[]): string | null {
   const p = presetOf(scopes)
   if (p === "full") return null
   if (p === "read-only") return "read only"
-  if (p === "contributor") return "no tasks"
-  return `may ${scopes.map((s) => SCOPE_LABELS[s].split(" ")[0]).join(", ")}`
+  return "limited (an older setting)"
 }
 
+/** One switch: a member, or someone who can only read. */
 export function ScopePicker({ value, onChange, disabled }: { value: Scope[]; onChange: (s: Scope[]) => void; disabled?: boolean }) {
   const preset = presetOf(value)
-  const [custom, setCustom] = useState(preset === null)
-  const toggle = (s: Scope) => onChange(SCOPES.filter((x) => (x === s ? !value.includes(s) : value.includes(x))))
   return (
-    <div className="grid gap-2">
-      <div role="radiogroup" aria-label="What they can do" className={cx("grid grid-cols-3 gap-0.5", SEGMENTED)}>
-        {(Object.keys(PRESETS) as Preset[]).reverse().map((p) => (
-          <button
-            key={p}
-            type="button"
-            role="radio"
-            aria-checked={preset === p}
-            disabled={disabled}
-            onClick={() => (onChange([...PRESETS[p]]), setCustom(false))}
-            className={cx("h-7 rounded-row px-2 text-ui font-medium transition-colors", preset === p ? SEGMENT_ON : SEGMENT_OFF)}
-          >
-            {PRESET_LABEL[p]}
-          </button>
-        ))}
-      </div>
+    <div className="grid gap-1">
+      <label className="flex items-center gap-2 text-ui text-ink">
+        <input
+          type="checkbox"
+          checked={preset === "read-only"}
+          onChange={(e) => onChange(e.target.checked ? [] : [...SCOPES])}
+          disabled={disabled}
+          className="size-4 accent-[var(--accent)]"
+        />
+        Can only read
+      </label>
       <p className="text-meta leading-snug text-ink-3">
-        {preset ? PRESET_NOTE[preset] : "Your own mix."}{" "}
-        {!custom && (
-          <button type="button" className="font-medium text-ink-2 hover:text-ink" onClick={() => setCustom(true)} disabled={disabled}>
-            Choose each…
-          </button>
-        )}
+        {preset === "read-only"
+          ? "Reads the channel; can't send anything."
+          : preset === "full"
+            ? "A member: writes, asks, works on tasks and sets notes."
+            : "An older, limited setting. Choosing here replaces it."}
       </p>
-      {custom && (
-        <div className="grid gap-1">
-          {SCOPES.map((s) => (
-            <label key={s} className="flex items-center gap-2 text-ui text-ink">
-              <input type="checkbox" checked={value.includes(s)} onChange={() => toggle(s)} disabled={disabled} className="size-4 accent-[var(--accent)]" />
-              {SCOPE_LABELS[s][0]!.toUpperCase() + SCOPE_LABELS[s].slice(1)}
-            </label>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -73,12 +45,17 @@ const DEFAULT_KEY = (roomId: string) => `mc.scopes.${roomId}`
 export function defaultScopes(roomId: string): Scope[] {
   try {
     const raw = JSON.parse(localStorage.getItem(DEFAULT_KEY(roomId)) ?? "null") as unknown
-    return Array.isArray(raw) ? SCOPES.filter((s) => raw.includes(s)) : [...SCOPES]
+    // Two levels: an empty list is read-only; anything else (an older mix included) is a member.
+    return Array.isArray(raw) && raw.length === 0 ? [] : [...SCOPES]
   } catch {
     return [...SCOPES]
   }
 }
 
 export function saveDefaultScopes(roomId: string, scopes: Scope[]): void {
-  localStorage.setItem(DEFAULT_KEY(roomId), JSON.stringify(scopes))
+  try {
+    localStorage.setItem(DEFAULT_KEY(roomId), JSON.stringify(scopes))
+  } catch {
+    // A full or blocked store just forgets the preference.
+  }
 }

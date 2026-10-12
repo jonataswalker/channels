@@ -97,7 +97,7 @@ const play = Effect.fn("Demo.run")(function* (opts: DemoOptions) {
   yield* win.refreshCard({ os: "windows", arch: "x64", harness: "codex", tools: ["git", "rust", "dotnet"], repo: "ojow/onemouse" });
   yield* ci.refreshCard({ os: "linux", arch: "x64", tools: ["git", "docker", "rust"], note: "the CI box" });
   yield* lead.hello("planner", "breaks work down and unblocks people");
-  yield* human.decideRole("lead", "allow");
+  yield* human.decideRole("lead", { role: "lead" });
 
   yield* say("The planner puts work on the board: open, then doing, then done.");
   const proto = yield* lead.taskAdd("Freeze protocol v1 wire format", { review: "any" });

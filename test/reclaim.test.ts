@@ -28,17 +28,6 @@ afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-/** A reclaim's code check, as people run it: the owner's explicit check, then the joiner reveals. */
-async function readyRequest(owner: Channel, code: string, joiner: Identity, requestId: string): Promise<JoinRequest> {
-  const first = (await owner.requests({ budget: memoryBudget() })).find((r) => r.id === requestId)!;
-  expect(first.reclaims).toBeDefined();
-  // Never signed by the day's automatic share: a person starts it.
-  expect(first.check).toBe("unchecked");
-  await owner.checkRequest(first);
-  await Channel.joinStatus(relay, code, joiner, requestId);
-  return (await owner.requests()).find((r) => r.id === requestId)!;
-}
-
 describe("seat reclaim", () => {
   let owner: Identity;
   let oldKey: Identity;
@@ -65,58 +54,6 @@ describe("seat reclaim", () => {
     await expect(Channel.resume(relay, code, stranger)).rejects.toBeInstanceOf(RelayError);
   });
 
-  test("guards: another person's request, the owner's seat, a person's seat", async () => {
-    const newKey = await generateIdentity("win");
-    const { requestId } = await Channel.requestJoin(relay, code, newKey, { name: "win", reclaim: true });
-    const req = await readyRequest(ownerCh, code, newKey, requestId);
-    expect(req.reclaims).toMatchObject({ name: "win", pk: oldKey.pk, owner: false });
-    expect(req.reclaim).toBe(true);
-    await expect(ownerCh.reclaim({ ...req, sponsoredBy: { user: "user_mallory", name: "Mallory" } }, { online: false })).rejects.toThrow(/refused/);
-    await expect(ownerCh.reclaim({ ...req, reclaims: { name: "human", pk: owner.pk, owner: true } }, { online: false })).rejects.toThrow();
-    await expect(ownerCh.reclaim({ ...req, kind: "human" }, { online: false })).rejects.toThrow(/only an agent/);
-    // A plain approve can't take a current member's name either.
-    await expect(ownerCh.approve(req)).rejects.toThrow(/already someone's name/);
-    await ownerCh.deny(requestId);
-  });
-
-  test("while the old key is online it takes force; then the seat moves, and everything of it carries over", async () => {
-    const newKey = await generateIdentity("win");
-    const { requestId } = await Channel.requestJoin(relay, code, newKey, { name: "win", reclaim: true });
-    const req = await readyRequest(ownerCh, code, newKey, requestId);
-    await expect(ownerCh.reclaim(req, { online: true })).rejects.toThrow(/ONLINE NOW/);
-    const epochBefore = (await ownerCh.info()).epoch;
-    const moved = await ownerCh.reclaim(req, { online: true, force: true });
-    expect(moved).toMatchObject({ name: "win", role: "windows", about: "the PC side", pk: newKey.pk });
-
-    // The old key is out at once: no keys, no history, no sending, and it can't ask back in.
-    await expect(Channel.resume(relay, code, oldKey)).rejects.toBeInstanceOf(RelayError);
-    await expect(oldCh.send("still here?")).rejects.toThrow();
-    await expect(Channel.requestJoin(relay, code, oldKey, { name: "win", reclaim: true })).rejects.toThrow(/removed/);
-
-    // The new key is in, under the same name, with a rotated channel key it alone (with the rest) holds.
-    const st = await Channel.joinStatus(relay, code, newKey, requestId);
-    expect(st.status).toBe("approved");
-    const newCh = new Channel((st as { access: import("../src/crypto.ts").ChannelAccess }).access, relay, newKey);
-    expect((await ownerCh.info()).epoch).toBe(epochBefore + 1);
-    const members = await newCh.members();
-    expect(members.filter((m) => m.name === "win").map((m) => [m.pk, m.active])).toEqual([
-      [oldKey.pk, false],
-      [newKey.pk, true],
-    ]);
-
-    // Tasks and facts are the name's: they carry over. The old key's history still verifies.
-    const { messages } = await newCh.history(0);
-    const state = fold(messages, members.map((m) => ({ name: m.name, pk: m.pk, role: m.role, owner: m.owner, at: m.at, active: m.active, kind: m.kind })));
-    expect([...state.tasks.values()].map((t) => [t.title, t.owner])).toEqual([["fix the PC edge", "win"]]);
-    expect(state.facts.get("pc.ip")?.value).toBe("10.0.0.9");
-    expect(messages.filter((m) => m.from === "win").every((m) => state.trust.get(m.seq) === "verified")).toBe(true);
-    // And the owner signed a record of it.
-    const record = messages.find((m) => m.ev?.op === "seat.reclaim")!;
-    expect(state.trust.get(record.seq)).toBe("verified");
-    expect(record.from).toBe("human");
-    expect(describeEvent(record, state)).toContain(`${oldKey.pk.slice(0, 8)} → ${newKey.pk.slice(0, 8)}`);
-    expect(await newCh.send("back")).toBeGreaterThan(0);
-  });
 });
 
 describe("kiwi join, again", () => {
@@ -163,50 +100,31 @@ describe("kiwi join, again", () => {
     }
   };
 
-  test("the same key resumes; a lost key reclaims the seat through the owner, with --force while it looks online", async () => {
-    const owner = home();
-    const made = await run(owner, "create", "proj", "--as", "lead");
-    const code = /join code: (\S+)/.exec(made.out)![1]!;
-    expect(code).toBeTruthy();
+});
 
-    // Re-running join with a key that's already in resumes: no request, nothing granted.
-    const again = await run(owner, "join", code, "--as", "lead");
-    expect(again.code).toBe(0);
-    expect(again.out).toContain("resumed, nothing new was granted");
-
-    // win joins from its own computer, says something, then loses its key (a new home).
-    const first = home();
-    const joining = spawn(first, "join", code, "--as", "win", "--role", "windows");
-    // The owner's machine opens the request (signing its half) once it has arrived; then the joiner shows the code.
-    await until(async () => /\bwin\b/.test((await run(owner, "-c", "proj", "--as", "human", "requests")).out));
-    let shown = await waitFor(joining, /verification code (\d{3}-\d{3})/, []);
-    expect((await run(owner, "-c", "proj", "--as", "human", "approve", shown[1]!, "--yes")).code).toBe(0);
-    expect(await joining.exited).toBe(0);
-    expect((await run(first, "-c", "proj", "--as", "win", "send", "last words from the old key")).code).toBe(0);
-    expect((await run(owner, "-c", "proj", "--as", "lead", "send", "--to", "win", "are you there?")).code).toBe(0);
-
-    const second = home();
-    const reclaiming = spawn(second, "join", code, "--as", "win", "--reclaim");
-    let listed = { out: "" };
-    await until(async () => /RECLAIMS win's seat/.test((listed = await run(owner, "-c", "proj", "--as", "human", "requests")).out));
-    expect(listed.out).toMatch(/unchecked RECLAIMS win's seat · old key \S+, last seen/);
-    const newKey = /new key (\S+)/.exec(listed.out)![1]!;
-    expect((await run(owner, "-c", "proj", "--as", "human", "check", newKey, "--yes")).code).toBe(0);
-    shown = await waitFor(reclaiming, /verification code (\d{3}-\d{3})/, []);
-
-    // win spoke a moment ago: the old key may be live, so it takes --force.
-    const refused = await run(owner, "-c", "proj", "--as", "human", "approve", shown[1]!, "--yes");
-    expect(refused.code).not.toBe(0);
-    expect(refused.err).toContain("IS ONLINE NOW");
-    const moved = await run(owner, "-c", "proj", "--as", "human", "approve", shown[1]!, "--yes", "--force");
-    expect(moved.out).toContain("moved win's seat to key");
-    expect(await reclaiming.exited).toBe(0);
-
-    // The new key reads what reached win after the old key last spoke, keeps its role, and the old key is out.
-    const unread = await run(second, "-c", "proj", "--as", "win", "read");
-    expect(unread.out).toContain("are you there?");
-    expect((await run(second, "-c", "proj", "--as", "win", "status")).out).toContain("you are win (windows)");
-    const old = await run(first, "-c", "proj", "--as", "win", "send", "hello?");
-    expect(old.code).not.toBe(0);
+describe("a lost key, without reclaim", () => {
+  test("the owner removes the old seat, and the agent joins again under its name", async () => {
+    const owner = await generateIdentity("human");
+    const oldKey = await generateIdentity("win");
+    const made = await Channel.create(relay, owner, { name: "human", kind: "human" }, [{ ...oldKey, info: { name: "win", kind: "agent" } }]);
+    const ownerCh = new Channel(made.access, relay, owner);
+    // The key is lost: asking again under the same name, from a new key, is offered the next free name.
+    const newKey = await generateIdentity("win");
+    const first = await Channel.requestJoin(relay, made.code, newKey, { name: "win" });
+    expect((await ownerCh.requests({ budget: memoryBudget() })).find((r) => r.id === first.requestId)?.name).toBe("win-2");
+    await ownerCh.deny(first.requestId);
+    // So the owner removes the old seat; then the same name is free for a new key.
+    await ownerCh.remove(oldKey.pk);
+    const again = await generateIdentity("win");
+    const ask = await Channel.requestJoin(relay, made.code, again, { name: "win" });
+    const r = (await ownerCh.requests({ budget: memoryBudget() })).find((x) => x.id === ask.requestId)!;
+    expect(r.name).toBe("win");
+    if (r.check !== "ready") {
+      await Channel.joinStatus(relay, made.code, again, ask.requestId);
+    }
+    await ownerCh.approve((await ownerCh.requests()).find((x) => x.id === ask.requestId)!);
+    const members = await ownerCh.members();
+    expect(members.filter((m) => m.name === "win" && m.active).map((m) => m.pk)).toEqual([again.pk]);
+    expect(members.find((m) => m.pk === oldKey.pk)?.active).toBe(false);
   });
 });
