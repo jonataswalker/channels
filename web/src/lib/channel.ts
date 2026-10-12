@@ -267,6 +267,8 @@ export interface Recent {
   text: string
   ts: number
   people: string[]
+  /** The last message was the coordinator's: the list shows its head. */
+  byCoordinator?: boolean
 }
 
 const RECENT_KEY = (code: string) => `mc.recent.${code}`
@@ -544,6 +546,11 @@ export async function createChannel(name: string, token: string | null, me: Pers
   const { code, access } = await Channel.create(location.origin, owner, info, [], roomId, token, name)
   const m: StoredMember = { code, identity: owner, access, at: Date.now(), name }
   saveMember(m)
+  // A new channel starts in coordinator mode: people talk with the coordinator, agents in their tasks'
+  // conversations. Best effort: the channel is made either way, and the owner can turn it on later.
+  await new Channel(access, location.origin, owner, (a) => saveMember({ ...m, access: a }), async () => token)
+    .startCoordinated()
+    .catch(() => {})
   return m
 }
 

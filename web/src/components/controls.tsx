@@ -1,34 +1,29 @@
 import { Dialog } from "@base-ui/react/dialog"
-import { Add01Icon, BookOpen01Icon, ComputerTerminal01Icon, Copy01Icon, Delete02Icon, Link01Icon, Logout01Icon, MoreHorizontalIcon, PauseIcon, PencilEdit01Icon, UserAdd01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons"
+import { Add01Icon, Copy01Icon, PauseIcon } from "@hugeicons/core-free-icons"
 import { createContext, useContext, useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 
-import { loadLine, memberLoad, showsLoad, type Load } from "@mc/load.ts"
-import { cardLine } from "@mc/format.ts"
+import { memberLoad, showsLoad, type Load } from "@mc/load.ts"
 import { NAME_RE, type JoinRequest, type Member as RosterMember } from "@mc/membership.ts"
 import { MAX_CHARTER, type ChannelIcon, type Color, type Event } from "@mc/protocol.ts"
 import { decodeJoinCode } from "@mc/crypto.ts"
 import { browserCode, pairNonce, sealedTo, type Chosen, type PairRow } from "@mc/pair.ts"
 import { TOO_MANY_REQUESTS } from "@mc/sas.ts"
 import { SCOPES, type Scope } from "@mc/scopes.ts"
-import { colorOf, COORDINATOR, firstAgent, isPerson, taskId, type ChannelState, type Member } from "@mc/state.ts"
+import { COORDINATOR, firstAgent, isPerson, taskId, type ChannelState } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
 import { noteAgentWorked, useClock } from "@/lib/channel"
 import { formatAgo, memberLine, memberName } from "@/lib/format"
-import { cx } from "@/lib/utils"
 import { isSignInGone } from "@/lib/session"
 import { defaultScopes, saveDefaultScopes, ScopePicker, scopesLine } from "./scopes"
 import { Icon } from "./icon"
 import { Alert, Button, IconButton, Modal, Monogram, Tabs, TextField, errorText, toast } from "./kit"
 import { Menu, MenuItem, MenuSeparator } from "./ui/menu"
-import { Popover } from "./ui/popover"
 
 // Everything about a channel that isn't the conversation, each where you'd
 // look for it: people behind the faces in the header, Invite as a button,
 // join requests behind the banner, and leaving or closing in the ⋯ menu.
 // ChannelControls holds the shared state and every confirm dialog; the
 // pieces below read it from context.
-
-export type Filter = { kind: "from"; name: string } | { kind: "open" } | { kind: "mine" } | { kind: "coordinator" }
 
 type Confirm =
   | { kind: "approve"; req: JoinRequest }
@@ -49,7 +44,6 @@ export interface ControlsProps {
   online: Map<string, unknown>
   state: ChannelState
   now: number
-  onFilter: (f: Filter) => void
   /** `scopes`: what they may do besides read; left out, everything. */
   onApprove: (r: JoinRequest, scopes?: Scope[]) => Promise<void>
   onDeny: (r: JoinRequest) => Promise<void>
@@ -104,6 +98,8 @@ interface Api {
   editScopes: (m: RosterMember) => void
   lastSeenOf: (name: string) => number | null
   onlineNow: (name: string) => boolean
+  /** The channel's own dialogs, from wherever they're offered (the info panel). */
+  openDialog: (d: "rename" | "charter" | "terminal") => void
 }
 
 const Ctx = createContext<Api | null>(null)
@@ -148,6 +144,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
   const [confirm, setConfirm] = useState<Confirm>(null)
   const [sheet, setSheet] = useState<"requests" | "invite" | null>(null)
   const [busy, setBusy] = useState(false)
+  const [dialog, setDialog] = useState<"rename" | "charter" | "terminal" | null>(null)
   const [roleDraft, setRoleDraft] = useState({ role: "", about: "" })
   const [scopeDraft, setScopeDraft] = useState<Scope[]>([...SCOPES])
   const active = p.roster.filter((m) => m.active)
@@ -237,11 +234,16 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
     },
     lastSeenOf,
     onlineNow,
+    openDialog: setDialog,
   }
 
   return (
     <Ctx.Provider value={api}>
       {children}
+
+      {p.onRename && dialog === "rename" && <RenameDialog title={p.title ?? ""} onClose={() => setDialog(null)} onSave={p.onRename} />}
+      {dialog === "charter" && <CharterDialog text={p.state.charter?.text ?? ""} onClose={() => setDialog(null)} onSave={p.isOwner ? p.onCharter : undefined} />}
+      {dialog === "terminal" && p.pairing && <TerminalDialog pairing={p.pairing} onClose={() => setDialog(null)} />}
 
       <Modal open={sheet === "requests" && confirm === null} onClose={() => setSheet(null)} wide>
         <Requests onDone={() => setSheet(null)} />
@@ -377,130 +379,47 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
 
 // ---------- people ----------
 
-/** The faces in the header and, behind them, everyone in the channel: role, load, and what the owner can do. */
-export function People({ here, subtitle, live }: { here: Member[]; subtitle: string; live: boolean }) {
-  const { p, busy, run, ask, editRole, editScopes, setCoordinator } = useControls()
-  const [open, setOpen] = useState(false)
-  const coordinator = p.state.coordinator
-  const active = p.roster.filter((m) => m.active).sort((a, b) => Number(b.owner) - Number(a.owner) || Number(p.online.has(b.name)) - Number(p.online.has(a.name)))
-  const former = p.roster.filter((m) => !m.active)
-  const act = (fn: () => void) => () => (setOpen(false), fn())
-
+/** The owner's actions on one member, behind whatever opens them (a member's tile in the info panel). */
+export function MemberActions({ m, trigger, onMessage }: { m: RosterMember; trigger: Parameters<typeof Menu>[0]["trigger"]; onMessage?: () => void }) {
+  const { p, ask, editRole, editScopes, setCoordinator } = useControls()
+  const now = p.state.members.get(m.name)
   return (
-    <Popover
-      open={open}
-      onOpenChange={setOpen}
-      className="w-[340px] p-1.5"
-      trigger={
-        <button type="button" aria-label={`People, ${subtitle}`} className="flex h-7 max-w-full items-center gap-1.5 rounded-full px-2 text-left transition-colors hover:bg-wash data-popup-open:bg-wash">
-          {live && here.length > 0 && (
-            <span className="flex shrink-0 -space-x-1" aria-hidden>
-              {here.slice(0, 5).map((m) => (
-                <span key={m.name} className="flex rounded-full bg-canvas p-px">
-                  <Monogram name={memberName(m)} agent={m.kind !== "human"} color={colorOf(p.state, m.name)} working={m.kind !== "human" && memberLoad(p.state, m.name, p.now).current.length > 0} size={16} />
-                </span>
-              ))}
-            </span>
-          )}
-          <span className="truncate text-meta leading-tight text-ink-2">{subtitle}</span>
-        </button>
-      }
-    >
-      <div className="max-h-[min(520px,70svh)] overflow-y-auto">
-        <h2 className="sr-only">People</h2>
-        {/* Who people talk with, when there's a coordinator. Nothing to switch: it follows the role. */}
-        {coordinator &&
-          (p.state.mode.coordinatorOnly ? (
-            <p className="mb-1 rounded-ctl bg-wash px-3 py-2.5 text-meta text-ink-2">
-              People talk with <span className="font-medium text-ink">{memberName(p.state.members.get(coordinator))}</span>, the coordinator, who passes things on.
-            </p>
-          ) : (
-            // The role without the mode: a channel from before they went together, or a change that failed.
-            <div className="mb-1 flex items-center gap-3 rounded-ctl bg-wash px-3 py-2.5 text-meta text-ink-2">
-              <span className="min-w-0 flex-1">
-                <span className="font-medium text-ink">{memberName(p.state.members.get(coordinator))}</span> is the coordinator, but people still talk with everyone.
-              </span>
-              {p.isOwner && p.onMode && (
-                <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(() => p.onMode!(true, true), "People talk with the coordinator now")}>
-                  Route through them
-                </Button>
-              )}
-            </div>
-          ))}
-        {active.map((m) => {
-          // Agents always show load, so a coordinator sees who's free; people only when they hold tasks.
-          const load = memberLoad(p.state, m.name, p.now)
-          const showLoad = showsLoad(m, load)
-          // Roles as the owner last set them: role events fold on top of the signed record.
-          const now = p.state.members.get(m.name)
-          return (
-            <div key={m.pk} className="rounded-ctl px-2 py-1.5 hover:bg-wash">
-              <div className="flex items-center gap-2.5">
-                <Monogram name={memberName(m)} agent={m.kind !== "human"} size={26} online={p.online.has(m.name)} color={colorOf(p.state, m.name)} working={m.kind !== "human" && load.current.length > 0} />
-                <button type="button" className="min-w-0 flex-1 text-left" onClick={act(() => p.onFilter({ kind: "from", name: m.name }))} title="Show only their messages">
-                  <p className="truncate text-ui font-medium">
-                    {memberName(m)}
-                    {m.pk === p.myKey && <span className="font-normal text-ink-2"> (you)</span>}
-                  </p>
-                  <p className="truncate text-meta text-ink-2" title={`${now?.about ? `Rules: ${now.about}\n` : ""}Key ${m.pk.slice(0, 16)}`}>
-                    {showLoad && load.level !== "free" ? loadLine(load) : memberLine(now ?? m)}
-                    {now && !m.owner && scopesLine(now.scopes) && <span> · {scopesLine(now.scopes)}</span>}
-                  </p>
-                  {now?.card && (
-                    <p className="truncate text-meta text-ink-3" title={cardLine(now.card)}>
-                      {cardLine(now.card)}
-                    </p>
-                  )}
-                </button>
-                {showLoad && (
-                  <span
-                    title={loadDetail(load)}
-                    className={cx("shrink-0 rounded-full px-2 py-0.5 text-meta font-medium shadow-[inset_0_0_0_1px_var(--line)]", load.level === "overloaded" ? "text-alert" : "text-ink-2")}
-                  >
-                    {LEVEL[load.level]}
-                  </span>
-                )}
-                {p.isOwner && !m.owner && (
-                  <Menu
-                    align="end"
-                    trigger={
-                      <IconButton label={`More for ${memberName(m)}`} className="size-7">
-                        <Icon icon={MoreHorizontalIcon} size={16} />
-                      </IconButton>
-                    }
-                  >
-                    <MenuItem onClick={act(() => editRole(m))}>Set role…</MenuItem>
-                    {p.state.coordinator === m.name ? (
-                      <MenuItem onClick={act(() => void setCoordinator(m, false))}>No longer coordinator</MenuItem>
-                    ) : (
-                      m.kind !== "human" && <MenuItem onClick={act(() => void setCoordinator(m, true))}>Make coordinator</MenuItem>
-                    )}
-                    {p.onScopes && (
-                      <MenuItem onClick={act(() => editScopes(m))}>
-                        {now && scopesLine(now.scopes) === "read only" ? "Let them write…" : now && scopesLine(now.scopes) ? "Let them do everything…" : "Make read-only…"}
-                      </MenuItem>
-                    )}
-                    <MenuSeparator />
-                    <MenuItem tone="danger" onClick={act(() => ask({ kind: "remove", member: m }))}>
-                      Remove from channel…
-                    </MenuItem>
-                  </Menu>
-                )}
-              </div>
-            </div>
-          )
-        })}
-        {/* A name in use again (a lost key: removed, then joined anew) reads as the earlier key, never as a second one of them. */}
-        {former.length > 0 && (
-          <p className="px-2 pt-1.5 pb-1 text-meta text-ink-2">
-            Left: {[...new Set(former.map((m) => (active.some((a) => a.name === m.name) ? `${m.name} (an earlier key)` : m.name)))].join(", ")}
-          </p>
-        )}
-      </div>
-      <div className="mt-1 border-t border-line px-2 pt-2 pb-1 text-meta text-ink-2">Choose a name to see only their messages.</div>
-    </Popover>
+    <Menu align="center" trigger={trigger}>
+      {onMessage && (
+        <>
+          <MenuItem onClick={onMessage}>Message privately</MenuItem>
+          <MenuSeparator />
+        </>
+      )}
+      <MenuItem onClick={() => editRole(m)}>Set role…</MenuItem>
+      {p.state.coordinator === m.name ? (
+        <MenuItem onClick={() => void setCoordinator(m, false)}>No longer coordinator</MenuItem>
+      ) : (
+        m.kind !== "human" && <MenuItem onClick={() => void setCoordinator(m, true)}>Make coordinator</MenuItem>
+      )}
+      {p.onScopes && (
+        <MenuItem onClick={() => editScopes(m)}>
+          {now && scopesLine(now.scopes) === "read only" ? "Let them write…" : now && scopesLine(now.scopes) ? "Let them do everything…" : "Make read-only…"}
+        </MenuItem>
+      )}
+      <MenuSeparator />
+      <MenuItem tone="danger" onClick={() => ask({ kind: "remove", member: m })}>
+        Remove from channel…
+      </MenuItem>
+    </Menu>
   )
 }
+
+/** One member's line under their face: their load when an agent is busy, else who they are. */
+export function memberDetail(p: ControlsProps, m: RosterMember): string {
+  const load = memberLoad(p.state, m.name, p.now)
+  const now = p.state.members.get(m.name)
+  if (showsLoad(m, load) && load.level !== "free") return LEVEL[load.level]
+  if (p.state.coordinator === m.name) return "Coordinator"
+  return memberLine(now ?? m)
+}
+
+export { loadDetail }
 
 // ---------- invite ----------
 
@@ -697,59 +616,6 @@ function Requests({ onDone }: { onDone: () => void }) {
         </Button>
       </div>
     </div>
-  )
-}
-
-// ---------- the ⋯ menu ----------
-
-/** Things you do to the channel itself, the dangerous ones last and in red. */
-export function ChannelMenu() {
-  const { p, ask, openInvite, openRequests } = useControls()
-  const auth = useAuth()
-  const [renaming, setRenaming] = useState(false)
-  const [charterOpen, setCharterOpen] = useState(false)
-  const [pairing, setPairing] = useState(false)
-  return (
-    <>
-      <Menu
-        align="end"
-        className="w-56"
-        trigger={
-          <IconButton label="Channel menu" round>
-            <Icon icon={MoreHorizontalIcon} size={18} />
-          </IconButton>
-        }
-      >
-        {/* Inviting is the owner's, as it was in the old panel: they approve everyone who asks. */}
-        {p.isOwner && <MenuItem icon={Link01Icon} onClick={() => navigator.clipboard.writeText(inviteLink(p.code)).then(() => toast("Invite link copied"))}>Copy invite link</MenuItem>}
-        {p.isOwner && <MenuItem icon={UserAdd01Icon} onClick={openInvite}>Invite…</MenuItem>}
-        {p.isOwner && p.requests.length > 0 && (
-          <MenuItem icon={UserMultipleIcon} onClick={auth.status === "signed-out" ? auth.signIn : openRequests}>
-            {auth.status === "signed-out" ? "Sign in to review join requests" : `Join requests (${p.requests.length})`}
-          </MenuItem>
-        )}
-        {p.isOwner && p.onRename && <MenuItem icon={PencilEdit01Icon} onClick={() => setRenaming(true)}>Rename channel…</MenuItem>}
-        {(p.isOwner || p.state.charter) && <MenuItem icon={BookOpen01Icon} onClick={() => setCharterOpen(true)}>{p.isOwner ? "Charter…" : "Charter"}</MenuItem>}
-        {p.pairing && (
-          <MenuItem icon={ComputerTerminal01Icon} onClick={() => setPairing(true)}>
-            Use in a terminal…
-          </MenuItem>
-        )}
-        <MenuSeparator />
-        {p.isOwner ? (
-          <MenuItem tone="danger" icon={Delete02Icon} onClick={() => ask({ kind: "close" })}>
-            Close channel…
-          </MenuItem>
-        ) : (
-          <MenuItem tone="danger" icon={Logout01Icon} onClick={() => ask({ kind: "leave" })}>
-            Leave channel…
-          </MenuItem>
-        )}
-      </Menu>
-      {p.onRename && renaming && <RenameDialog title={p.title ?? ""} onClose={() => setRenaming(false)} onSave={p.onRename} />}
-      {charterOpen && <CharterDialog text={p.state.charter?.text ?? ""} onClose={() => setCharterOpen(false)} onSave={p.isOwner ? p.onCharter : undefined} />}
-      {pairing && p.pairing && <TerminalDialog pairing={p.pairing} onClose={() => setPairing(false)} />}
-    </>
   )
 }
 

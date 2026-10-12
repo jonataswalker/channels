@@ -23,6 +23,7 @@
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "robot-heads": "0.3.0",
     "tailwindcss": "^4",
     "uqr": "0.1.3"
   },

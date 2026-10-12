@@ -1,11 +1,14 @@
-// A channel's icon: emoji or a small image, or the title's first letter when there is none.
-// The tile is always the same size, so a row doesn't jump when an icon arrives.
+// A channel's avatar: emoji or a small image, or the title's first letter when there is none, on a
+// round grey tile like a Messages contact. The tile is always the same size, so a row doesn't jump
+// when an icon arrives.
 
 import type { ChannelIcon } from "@mc/protocol.ts"
 import { cx } from "@/lib/utils"
 
-export function ChannelIconTile({ icon, title, size }: { icon: ChannelIcon | null; title: string; size: 20 | 28 }) {
-  const box = size === 28 ? "size-7 rounded-ctl" : "size-5 rounded-row"
+const SIZE: Record<number, string> = { 20: "size-5 text-meta", 28: "size-7 text-ui", 40: "size-10 text-title", 64: "size-16 text-display" }
+
+export function ChannelIconTile({ icon, title, size }: { icon: ChannelIcon | null; title: string; size: 20 | 28 | 40 | 64 }) {
+  const box = cx("rounded-full", SIZE[size])
   if (icon?.kind === "image") {
     return (
       <span className={cx(box, "block shrink-0 overflow-hidden bg-wash-2")}>
@@ -13,10 +16,17 @@ export function ChannelIconTile({ icon, title, size }: { icon: ChannelIcon | nul
       </span>
     )
   }
-  const glyph = icon?.kind === "emoji" ? icon.emoji : letterOf(title)
+  const emoji = icon?.kind === "emoji"
   return (
-    <span aria-hidden className={cx(box, "flex shrink-0 items-center justify-center bg-wash-2 font-medium text-ink-2", size === 28 ? "text-title" : "text-meta")}>
-      {glyph}
+    <span
+      aria-hidden
+      className={cx(
+        box,
+        "flex shrink-0 items-center justify-center font-semibold select-none",
+        emoji ? "bg-wash-2" : "bg-[linear-gradient(180deg,var(--avatar-top),var(--avatar-bottom))] text-white"
+      )}
+    >
+      {emoji ? icon.emoji : letterOf(title)}
     </span>
   )
 }

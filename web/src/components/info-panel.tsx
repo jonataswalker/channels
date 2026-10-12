@@ -1,0 +1,261 @@
+import { Add01Icon, ArrowRight01Icon, BookOpen01Icon, Cancel01Icon, ComputerTerminal01Icon, Link01Icon, PauseIcon, PencilEdit01Icon, PlayIcon, UserMultipleIcon } from "@hugeicons/core-free-icons"
+import type { ReactNode } from "react"
+
+import type { ChannelIcon } from "@mc/protocol.ts"
+import { colorOf } from "@mc/state.ts"
+import { memberLoad } from "@mc/load.ts"
+import { memberName } from "@/lib/format"
+import { cx } from "@/lib/utils"
+import type { Mood } from "@/lib/coordinator-mood"
+import { ChannelIconTile } from "./channel-icon"
+import { CoordinatorHead } from "./coordinator-head"
+import { MemberActions, loadDetail, memberDetail, useControls } from "./controls"
+import { Icon, type IconSvgElement } from "./icon"
+import { IconButton, Monogram, errorText, toast } from "./kit"
+
+// The channel's details, as Messages shows a conversation's Info: the channel's face and name, a few
+// round actions, everyone in it as faces, then grouped rows for what the channel is (its charter, its
+// notes), how to reach it from a terminal, and leaving or closing it at the foot, in red.
+
+export function InfoPanel({
+  title,
+  icon,
+  subtitle,
+  onClose,
+  onPause,
+  conversations,
+  notes,
+  onMessage,
+  mood,
+}: {
+  title: string
+  icon: ChannelIcon | null
+  subtitle: string
+  onClose: () => void
+  /** Owner: open the pause dialog (the conversation holds it). */
+  onPause?: () => void
+  /** The channel's conversations, for a phone (the list beside it isn't there). */
+  conversations?: ReactNode
+  /** What agents noted: the channel's Notes block. */
+  notes?: ReactNode
+  /** Open the direct conversation with a member. */
+  onMessage?: (name: string) => void
+  /** What the coordinator is doing, for its head. */
+  mood?: Mood
+}) {
+  const { p, ask, openInvite, openRequests, openDialog } = useControls()
+  const active = p.roster
+    .filter((m) => m.active)
+    .sort((a, b) => Number(b.owner) - Number(a.owner) || Number(a.kind !== "human") - Number(b.kind !== "human") || Number(p.online.has(b.name)) - Number(p.online.has(a.name)))
+  const former = p.roster.filter((m) => !m.active)
+  const hold = p.state.hold
+  const coordinator = p.state.coordinator
+
+  return (
+    <aside
+      aria-label="Details"
+      className="animate-slide-in flex h-full w-full flex-col bg-rail shadow-[inset_1px_0_0_var(--line)] md:w-[340px]"
+      onKeyDown={(e) => e.key === "Escape" && onClose()}
+    >
+      <header className="flex h-13 shrink-0 items-center px-3">
+        <IconButton label="Close details" round className="size-8" onClick={onClose}>
+          <Icon icon={Cancel01Icon} size={16} />
+        </IconButton>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-4 pb-6">
+        <div className="flex flex-col items-center text-center">
+          {/* The channel's face is its coordinator, when it has one: the one people talk with. */}
+          {coordinator ? <CoordinatorHead size={112} mood={mood} live interactive seed={0.5} /> : <ChannelIconTile icon={icon} title={title} size={64} />}
+          <h2 className="mt-2.5 max-w-full truncate text-display font-bold tracking-[-0.02em]">{title}</h2>
+          <p className="mt-0.5 text-meta text-ink-3">{subtitle}</p>
+        </div>
+
+        {/* A few round actions, as Messages has call and mail under the name. */}
+        <div className="mt-4 flex justify-center gap-5">
+          {p.isOwner && <RoundAction icon={Add01Icon} label="Invite" onClick={openInvite} />}
+          {p.isOwner && onPause && p.onHold && (
+            <RoundAction
+              icon={hold ? PlayIcon : PauseIcon}
+              label={hold ? "Resume" : "Pause"}
+              tone={hold ? "alert" : undefined}
+              onClick={() => (hold ? void p.onHold!(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error")) : onPause())}
+            />
+          )}
+          {p.pairing && <RoundAction icon={ComputerTerminal01Icon} label="Terminal" onClick={() => openDialog("terminal")} />}
+        </div>
+
+        {/* On a phone the list beside the conversation isn't there, so its conversations are here. */}
+        {conversations && (
+          <div className="md:hidden">
+            <Section label="Conversations">{conversations}</Section>
+          </div>
+        )}
+
+        {p.isOwner && p.requests.length > 0 && (
+          <Section>
+            <Row icon={UserMultipleIcon} onClick={openRequests} trailing={<span className="rounded-full bg-accent px-1.5 text-meta font-semibold text-accent-ink tabular-nums">{p.requests.length}</span>}>
+              {p.requests.length === 1 ? `${p.requests[0]!.name} wants to join` : `${p.requests.length} want to join`}
+            </Row>
+          </Section>
+        )}
+
+        {/* Everyone, as faces: people round, agents as characters, with what each is doing under them. */}
+        <Section label={`${active.length} ${active.length === 1 ? "member" : "members"}`}>
+          <div className="grid grid-cols-3 gap-x-1 gap-y-3 px-1 py-3">
+            {active.map((m) => {
+              const face = (
+                <Face
+                  head={coordinator === m.name ? <CoordinatorHead size={52} mood={mood} seed={0.2} /> : undefined}
+                  name={memberName(m)}
+                  agent={m.kind !== "human"}
+                  online={p.online.has(m.name)}
+                  color={colorOf(p.state, m.name)}
+                  working={m.kind !== "human" && memberLoad(p.state, m.name, p.now).current.length > 0}
+                  line={m.pk === p.myKey ? "You" : memberDetail(p, m)}
+                  strong={coordinator === m.name}
+                  title={m.kind !== "human" ? loadDetail(memberLoad(p.state, m.name, p.now)) : undefined}
+                />
+              )
+              const mine = m.pk === p.myKey
+              return p.isOwner && !m.owner ? (
+                <MemberActions
+                  key={m.pk}
+                  m={m}
+                  onMessage={onMessage && !mine ? () => onMessage(m.name) : undefined}
+                  trigger={
+                    <button type="button" aria-label={`More for ${memberName(m)}`} className="rounded-card py-1 transition-colors hover:bg-wash data-popup-open:bg-wash">
+                      {face}
+                    </button>
+                  }
+                />
+              ) : onMessage && !mine ? (
+                <button key={m.pk} type="button" aria-label={`Message ${memberName(m)} privately`} onClick={() => onMessage(m.name)} className="rounded-card py-1 transition-colors hover:bg-wash">
+                  {face}
+                </button>
+              ) : (
+                <div key={m.pk} className="py-1">
+                  {face}
+                </div>
+              )
+            })}
+            {p.isOwner && (
+              <button type="button" onClick={openInvite} className="flex flex-col items-center rounded-card py-1 transition-colors hover:bg-wash">
+                <span className="flex size-[52px] items-center justify-center rounded-full bg-wash-2 text-ink-2">
+                  <Icon icon={Add01Icon} size={22} />
+                </span>
+                <span className="mt-1.5 text-meta font-medium">Add</span>
+              </button>
+            )}
+          </div>
+          {/* A name in use again (a lost key: removed, then joined anew) reads as the earlier key, never as a second one of them. */}
+          {former.length > 0 && (
+            <p className="border-t border-line px-3 py-2 text-meta text-ink-3">
+              Left: {[...new Set(former.map((m) => (active.some((a) => a.name === m.name) ? `${m.name} (an earlier key)` : m.name)))].join(", ")}
+            </p>
+          )}
+        </Section>
+
+        {/* Who people talk with: it follows the coordinator role, so there's nothing to switch. */}
+        <Section>
+          <p className="px-3 py-2.5 text-ui leading-snug text-ink-2">
+            {coordinator ? (
+              p.state.mode.coordinatorOnly ? (
+                <>
+                  People talk with <span className="font-semibold text-ink">{memberName(p.state.members.get(coordinator))}</span>, the coordinator. Other agents work in their tasks’ conversations.
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-ink">{memberName(p.state.members.get(coordinator))}</span> is the coordinator, but people still talk with everyone.
+                  {p.isOwner && p.onMode && (
+                    <button type="button" onClick={() => void p.onMode!(true, true).then(() => toast("People talk with the coordinator now"), (err) => toast(errorText(err), "error"))} className="ml-1 font-medium text-accent hover:underline">
+                      Route through them
+                    </button>
+                  )}
+                </>
+              )
+            ) : (
+              <>No coordinator yet. {p.isOwner ? "Choose an agent above and make it the coordinator: people then talk with it, and it passes things on." : "The owner can make one agent the coordinator."}</>
+            )}
+          </p>
+        </Section>
+
+        <Section>
+          {(p.isOwner || p.state.charter) && (
+            <Row icon={BookOpen01Icon} onClick={() => openDialog("charter")} detail={p.state.charter?.text}>
+              Charter
+            </Row>
+          )}
+          {p.isOwner && p.onRename && (
+            <Row icon={PencilEdit01Icon} onClick={() => openDialog("rename")}>
+              Rename channel
+            </Row>
+          )}
+          {p.isOwner && (
+            <Row icon={Link01Icon} onClick={() => void navigator.clipboard.writeText(`${location.origin}/#${p.code}`).then(() => toast("Invite link copied"))}>
+              Copy invite link
+            </Row>
+          )}
+          {p.pairing && (
+            <Row icon={ComputerTerminal01Icon} onClick={() => openDialog("terminal")}>
+              Use in a terminal…
+            </Row>
+          )}
+        </Section>
+
+        {notes}
+
+        <Section>
+          <button type="button" onClick={() => ask(p.isOwner ? { kind: "close" } : { kind: "leave" })} className="w-full px-3 py-2.5 text-left text-ui font-medium text-alert transition-colors hover:bg-wash">
+            {p.isOwner ? "Close channel…" : "Leave this channel…"}
+          </button>
+        </Section>
+
+        <p className="mt-3 px-3 text-stamp leading-[15px] text-ink-3">Everything here is end-to-end encrypted: the relay sees only ciphertext, and only members hold the keys.</p>
+      </div>
+    </aside>
+  )
+}
+
+function RoundAction({ icon, label, onClick, tone }: { icon: IconSvgElement; label: string; onClick: () => void; tone?: "alert" }) {
+  return (
+    <button type="button" onClick={onClick} aria-label={label === "Pause" ? "Pause agents" : label === "Resume" ? "Resume agents" : label} className="group flex w-14 flex-col items-center gap-1">
+      <span className={cx("flex size-10 items-center justify-center rounded-full bg-raised shadow-[0_0_0_1px_var(--line)] transition-colors group-hover:bg-wash-2", tone === "alert" ? "text-alert" : "text-ink")}>
+        <Icon icon={icon} size={18} />
+      </span>
+      <span className="text-stamp font-medium text-ink-2">{label}</span>
+    </button>
+  )
+}
+
+function Section({ label, children }: { label?: string; children: ReactNode }) {
+  return (
+    <section className="mt-4">
+      {label && <h3 className="mb-1 px-3 text-meta font-semibold text-ink-3">{label}</h3>}
+      <div className="overflow-hidden rounded-card bg-raised shadow-[0_0_0_1px_var(--line)] [&>*+*]:border-t [&>*+*]:border-line">{children}</div>
+    </section>
+  )
+}
+
+function Row({ icon, children, detail, trailing, onClick }: { icon: IconSvgElement; children: ReactNode; detail?: string; trailing?: ReactNode; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-wash">
+      <Icon icon={icon} size={16} className="shrink-0 text-accent" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-ui">{children}</span>
+        {detail && <span className="mt-0.5 line-clamp-2 block text-meta text-ink-3">{detail}</span>}
+      </span>
+      {trailing ?? <Icon icon={ArrowRight01Icon} size={14} className="shrink-0 text-ink-3" />}
+    </button>
+  )
+}
+
+function Face({ head, name, agent, online, color, working, line, strong, title }: { head?: ReactNode; name: string; agent: boolean; online: boolean; color: ReturnType<typeof colorOf>; working: boolean; line: string; strong: boolean; title?: string }) {
+  return (
+    <span className="flex min-w-0 flex-col items-center px-1" title={title}>
+      {head ?? <Monogram name={name} agent={agent} size={52} online={online} color={color} working={working} />}
+      <span className="mt-1.5 max-w-full truncate text-meta font-medium">{name}</span>
+      <span className={cx("max-w-full truncate text-stamp", strong ? "font-semibold text-accent" : "text-ink-3")}>{line}</span>
+    </span>
+  )
+}

@@ -2,7 +2,7 @@ import { Dialog } from "@base-ui/react/dialog"
 import { Component, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref } from "react"
 
 import type { Color } from "@mc/protocol.ts"
-import { CENTER, PALETTE, VIEWBOX, shapeFor } from "@/lib/characters"
+import { PALETTE } from "@/lib/characters"
 import { initials } from "@/lib/format"
 import { noteSignInGone } from "@/lib/session"
 import { cx } from "@/lib/utils"
@@ -93,14 +93,12 @@ export function TextField({ className, ...props }: InputHTMLAttributes<HTMLInput
 }
 
 /**
- * Who someone is, at a glance. Agents are characters (a body shape picked by
- * name, two eyes) and people are circles with their initials, so shape tells
- * a person from an agent. Colour is the person's pick, and their agents wear
- * it; no pick means neutral. `working` gives an agent's eyes a slow blink.
+ * Who someone is, at a glance: a circle with their initials in white, as Messages draws a contact
+ * without a picture. People and agents look alike; their colour is the person's pick (their agents
+ * wear it), and no pick is Messages' soft grey. `working` puts a slow ring around an agent's.
  */
 export function Monogram({
   name,
-  agent,
   size = 28,
   online,
   color,
@@ -108,6 +106,7 @@ export function Monogram({
   className,
 }: {
   name: string
+  /** Kept for callers; agents and people share one look now. */
   agent?: boolean
   size?: number
   online?: boolean
@@ -119,22 +118,16 @@ export function Monogram({
   const letters = initials(name)
   return (
     <span className={cx("relative inline-flex shrink-0", className)} style={{ width: size, height: size }}>
-      {agent ? (
-        <svg viewBox={VIEWBOX} width={size} height={size} aria-hidden className={cx("block overflow-visible", working && "character-working")}>
-          <path d={shapeFor(name)} fill={tone?.fill ?? "var(--char)"} />
-          <g fill={tone?.ink ?? "var(--char-ink)"} className="character-eyes">
-            <ellipse cx={CENTER - 29} cy={CENTER - 8} rx={11} ry={14} />
-            <ellipse cx={CENTER + 29} cy={CENTER - 8} rx={11} ry={14} />
-          </g>
-        </svg>
-      ) : (
-        <span
-          className={cx("flex size-full items-center justify-center rounded-full font-semibold select-none", !tone && "bg-[color-mix(in_srgb,var(--ink)_12%,var(--canvas))] text-ink-2")}
-          style={{ ...(tone && { background: tone.fill, color: tone.text }), fontSize: Math.round(size * (letters.length > 1 ? 0.36 : 0.42)), letterSpacing: "-0.01em" }}
-        >
-          {letters}
-        </span>
-      )}
+      <span
+        className={cx(
+          "flex size-full items-center justify-center rounded-full font-semibold tracking-[-0.01em] text-white select-none",
+          !tone && "bg-[linear-gradient(180deg,var(--avatar-top),var(--avatar-bottom))]",
+          working && "shadow-[0_0_0_1.5px_var(--canvas),0_0_0_3px_var(--accent)]"
+        )}
+        style={{ ...(tone && { background: `linear-gradient(180deg, ${tone.fill}, color-mix(in srgb, ${tone.fill} 72%, black))`, color: tone.ink }), fontSize: Math.round(size * (letters.length > 1 ? 0.38 : 0.44)) }}
+      >
+        {letters}
+      </span>
       {online && (
         <span
           className="absolute -right-0.5 -bottom-0.5 rounded-full bg-live shadow-[0_0_0_2px_var(--canvas)]"
