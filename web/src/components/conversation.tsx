@@ -16,7 +16,7 @@ import { markSeen, setOpenNews } from "@/lib/news"
 import { useIcons, useLiveIcon } from "@/lib/icons"
 import { excerpt, memberName } from "@/lib/format"
 import { usePlaceSlot } from "@/lib/place-slot"
-import { coordinatorMood, ERROR_MS, SPEAKING_MS, type Mood } from "@/lib/coordinator-mood"
+import { coordinatorMood, ERROR_MS, moodInputs, SPEAKING_MS, type Mood } from "@/lib/coordinator-mood"
 import { dmPlace, markSeenIn, MAIN, placeFromKey, placeKey, seenIn, sendFrom, useSeen, threadMembers, type Place, type PlaceSummary } from "@/lib/threads"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
@@ -213,42 +213,17 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
 
   // ---------- the coordinator's face: what it's doing right now ----------
   const coord = state.coordinator
-  const said = useMemo(() => {
-    if (!coord) return { saidAt: null as number | null, failedAt: null as number | null, last: 0 }
-    let saidAt: number | null = null
-    let failedAt: number | null = null
-    let last = 0
-    for (const m of messages) {
-      if (m.from !== coord) continue
-      const at = m.rts ?? m.ts
-      if (state.rejected.has(m.seq) || ignored(state.trust.get(m.seq))) failedAt = at
-      else if (m.kind !== "event") {
-        saidAt = at
-        last = m.seq
-      }
-    }
-    return { saidAt, failedAt, last }
-  }, [coord, messages, state.rejected, state.trust])
+  const said = useMemo(() => (coord ? moodInputs(state, messages, online, coord) : null), [coord, state, messages, online])
   // A fresh message or refusal shows for a few seconds: wake the clock when that window closes.
   const [clock, setClock] = useState(() => Date.now())
   useEffect(() => {
     // Read the clock as soon as something new is said, and again when its moment is over.
     const now = Date.now()
-    const ends = [said.saidAt !== null ? said.saidAt + SPEAKING_MS : 0, said.failedAt !== null ? said.failedAt + ERROR_MS : 0].filter((t) => t > now)
+    const ends = [said?.saidAt != null ? said.saidAt + SPEAKING_MS : 0, said?.failedAt != null ? said.failedAt + ERROR_MS : 0].filter((t) => t > now)
     const timers = [setTimeout(() => setClock(Date.now()), 0), ...(ends.length ? [setTimeout(() => setClock(Date.now()), Math.min(...ends) - now + 50)] : [])]
     return () => timers.forEach(clearTimeout)
   }, [said])
-  const mood: Mood | undefined = coord
-    ? coordinatorMood({
-        online: online.has(coord),
-        hold: !!state.hold,
-        now: clock,
-        saidAt: said.saidAt,
-        failedAt: said.failedAt,
-        answering: state.openAsks.some((m) => m.to?.includes(coord) && (m.esc || !isAgent(state.members.get(m.from)))),
-        working: [...state.tasks.values()].some((t) => t.state === "doing"),
-      })
-    : undefined
+  const mood: Mood | undefined = coord && said ? coordinatorMood({ ...said, online: online.has(coord), hold: !!state.hold, now: clock }) : undefined
 
   // ---------- places: main, each task's conversation, direct ones ----------
   const { placeOf, places } = state
@@ -277,14 +252,26 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     firstVisit.current = false
     markSeenIn(roomId, Object.fromEntries([...places].map(([k, v]) => [k, v.last])))
   }, [messages.length, places, roomId])
+  /**
+   * What's new in a place since this browser looked: a count when it's for me (main, a direct
+   * conversation I'm in, a task I belong to, or a message that names me), else just that there's news.
+   */
   const unreadIn = useCallback(
-    (key: string) => {
+    (key: string): { n: number; forMe: boolean } => {
       const since = seen[key] ?? 0
+      const p = placeFromKey(key) ?? MAIN
+      const mine = p.kind === "main" || (p.kind === "dm" ? p.with.includes(me) : threadMembers(state, p).includes(me))
       let n = 0
-      for (const m of messages) if (m.seq > since && m.kind !== "event" && m.from !== me && placeKey(placeOf.get(m.seq) ?? MAIN) === key && (key !== "main" || reaches(m)) && !ignored(state.trust.get(m.seq))) n++
-      return n
+      let named = 0
+      for (const m of messages) {
+        if (m.seq <= since || m.kind === "event" || m.from === me || placeKey(placeOf.get(m.seq) ?? MAIN) !== key || ignored(state.trust.get(m.seq))) continue
+        if (key === "main" && !reaches(m)) continue
+        n++
+        if (m.to?.includes(me)) named++
+      }
+      return mine ? { n, forMe: n > 0 } : { n: named || n, forMe: named > 0 }
     },
-    [seen, messages, me, placeOf, reaches, state.trust]
+    [seen, messages, me, placeOf, reaches, state]
   )
   const lastHere = places.get(hereKey)?.last ?? 0
   useEffect(() => {
@@ -450,7 +437,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       thread={search || anchor ? undefined : summaryOf(m.seq)}
       onOpenThread={setThreadRoot}
       // The coordinator's runs end on its head; only the latest one moves.
-      face={coord && m.from === coord ? <CoordinatorHead size={28} mood={mood} live={m.seq >= said.last && !anchor} seed={0.3} /> : undefined}
+      face={coord && m.from === coord ? <CoordinatorHead size={28} mood={mood} live={m.seq >= (said?.last ?? 0) && !anchor} seed={0.3} /> : undefined}
     />
   )
   const rows: ReactNode[] = []
@@ -534,8 +521,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   const placeTitle = place.kind === "main" ? title : place.kind === "task" ? (task ? `${taskId(task.id)} ${task.title}` : "Task") : place.with.includes(me) ? nameOf(place.with.find((n) => n !== me) ?? me) : place.with.map(nameOf).join(" & ")
   // A direct conversation is between its two; anyone else reads it.
   const mayWrite = place.kind !== "dm" || place.with.includes(me)
-  // A task's thread goes to whoever works it; a direct one to the other one.
-  const extra = place.kind === "main" ? undefined : place.kind === "task" ? { ...sendFrom(state, place, me), to: inHere.filter((n) => n !== me) } : sendFrom(state, place, me)
+  // A task's thread reaches whoever works it on its own (state.ts threadMembers); only an @ names anyone. A direct one goes to the other one.
+  const extra = place.kind === "main" ? undefined : sendFrom(state, place, me)
 
   // Just the main conversation (a new channel): nothing to choose between yet.
   const several = places.size > 1 || place.kind !== "main" || state.tasks.size > 0
@@ -889,7 +876,7 @@ function PlaceList({
   current: string
   state: ChannelState
   nameOf: (n: string) => string
-  unreadIn: (key: string) => number
+  unreadIn: (key: string) => { n: number; forMe: boolean }
   onPick: (p: Place) => void
   onBoard: () => void
 }) {
@@ -901,7 +888,7 @@ function PlaceList({
   const row = (key: string, info: PlaceSummary) => {
     const p = info.place
     const t = p.kind === "task" ? state.tasks.get(p.task) : undefined
-    const unread = key === current ? 0 : unreadIn(key)
+    const { n: unread, forMe } = key === current ? { n: 0, forMe: false } : unreadIn(key)
     return (
       <button
         key={key}
@@ -910,7 +897,7 @@ function PlaceList({
         onClick={() => onPick(p)}
         className={cx(
           "flex h-7 w-full items-center gap-2 rounded-ctl pr-2 pl-2.5 text-left text-ui transition-colors",
-          key === current ? "bg-wash-2 font-semibold text-ink" : unread ? "font-semibold text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink"
+          key === current ? "bg-wash-2 font-semibold text-ink" : unread && forMe ? "font-semibold text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink"
         )}
       >
         {p.kind === "main" ? (
@@ -933,7 +920,13 @@ function PlaceList({
             "Task"
           )}
         </span>
-        {unread > 0 && <span className="shrink-0 rounded-full bg-accent px-1.5 text-stamp font-semibold text-accent-ink tabular-nums">{unread}</span>}
+        {unread > 0 &&
+          (forMe ? (
+            <span className="shrink-0 rounded-full bg-accent px-1.5 text-stamp font-semibold text-accent-ink tabular-nums">{unread}</span>
+          ) : (
+            // News that isn't for you: a quiet dot, not a count that reads like mail.
+            <span aria-label="New messages" className="size-1.5 shrink-0 rounded-full bg-ink-3" />
+          ))}
       </button>
     )
   }

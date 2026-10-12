@@ -139,9 +139,12 @@ try {
   // atlas coordinates: people talk with it, and the channel is in coordinator mode from the start.
   const details = () => owner.getByRole("button", { name: /^Details:/ })
   await details().click()
-  await owner.getByRole("button", { name: "More for atlas" }).click()
-  await owner.getByRole("menuitem", { name: "Make coordinator" }).click()
-  await owner.getByText(/People talk with/).first().waitFor({ timeout: 15000 })
+  // The first agent in becomes the coordinator on its own; make sure it's atlas.
+  await owner.getByText(/People talk with/).first().waitFor({ timeout: 5000 }).catch(async () => {
+    await owner.getByRole("button", { name: "More for atlas" }).click()
+    await owner.getByRole("menuitem", { name: "Make coordinator" }).click()
+    await owner.getByText(/People talk with/).first().waitFor({ timeout: 15000 })
+  })
   await owner.getByRole("button", { name: "Close details" }).click()
   await admit(["kiwi-w", "--as", "win", "--role", "frontend"])
   // The passkey offer waits for an agent's first card; save the channels to it, so the list stays quiet.
