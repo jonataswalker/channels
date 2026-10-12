@@ -72,11 +72,11 @@ function EventLine({ mark, actor, at, now, state, note, children }: { mark: Reac
 function ThreadCard({ messages, room, state, now }: { messages: Message[]; room?: string; state: ChannelState; now: number }) {
   const roomName = room && state.rooms.size > 1 ? state.rooms.get(room)?.name : undefined
   return (
-    <div className="my-2 overflow-hidden rounded-card border border-edge bg-raised">
+    <div className="my-2 overflow-hidden rounded-card bg-field">
       {messages.map((m, i) => {
         const author = state.members.get(m.from)
         return (
-          <article key={m.seq} id={`f${m.seq}`} className={cx("px-4 py-3", i > 0 && "border-t border-edge")}>
+          <article key={m.seq} id={`f${m.seq}`} className={cx("px-4 py-3", i > 0 && "shadow-[inset_0_1px_0_var(--line)]")}>
             <header className="mb-1 flex items-center gap-2">
               <Monogram name={m.from} agent={isAgent(author)} size={20} color={colorOf(state, m.from)} />
               <Meta name={m.from} at={m.rts ?? m.ts} now={now} state={state} />

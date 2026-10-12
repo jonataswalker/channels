@@ -3,7 +3,11 @@
 // first (a coordinator and an agent working a task, messages, a thread, a task's conversation, a
 // direct one, notes, a pending join request), the same way scripts/smoke-ui.ts walks the flows.
 //
-//   bun run web:build && bun scripts/shoot-ui.ts [outdir]
+//   bun run web:build && bun scripts/shoot-ui.ts [outdir] [--only channel,task-thread,…] [--wide] [--theme dark|light]
+//
+// Shots are taken at 2x (Retina), as most people see the dashboard. --only keeps the screens whose
+// name contains one of the words (and skips the signed-out ones unless named), --wide skips the phone
+// size, --theme keeps one theme: for a quick look at a few screens while working on them.
 //
 // Needs Playwright's Chromium: bunx playwright-core install --only-shell chromium
 // (or set SMOKE_CHROMIUM to a Chrome binary).
@@ -15,7 +19,15 @@ import { join, resolve } from "node:path"
 import { chromium, type Page } from "playwright-core"
 
 const ROOT = resolve(import.meta.dir, "..")
-const OUT = resolve(process.argv[2] ?? join(tmpdir(), "kiwi-shots"))
+const args = process.argv.slice(2)
+const flag = (name: string) => {
+  const i = args.indexOf(name)
+  return i < 0 ? undefined : (args.splice(i, 2)[1] ?? "")
+}
+const only = flag("--only")?.split(",").filter(Boolean)
+const themeOnly = flag("--theme")
+const wideOnly = args.includes("--wide") ? (args.splice(args.indexOf("--wide"), 1), true) : false
+const OUT = resolve(args[0] ?? join(tmpdir(), "kiwi-shots"))
 mkdirSync(OUT, { recursive: true })
 const PORT = 20000 + Math.floor(Math.random() * 20000)
 const BASE = `http://localhost:${PORT}/`
@@ -58,6 +70,9 @@ const browser = await chromium.launch({ executablePath: process.env.SMOKE_CHROMI
 const WIDE = { width: 1440, height: 900 }
 const NARROW = { width: 390, height: 844 }
 const shots: string[] = []
+/** Retina, as the owner sees it: the crispness of type and edges is half of what the shots are for. */
+const page = (viewport: { width: number; height: number }) => browser.newPage({ viewport, deviceScaleFactor: 2 })
+const wanted = (name: string) => !only || only.some((w) => name.includes(w))
 
 async function signIn(page: Page, name: string) {
   await page.getByRole("button", { name: "Sign in" }).first().click()
@@ -82,6 +97,7 @@ async function setTheme(page: Page, theme: "dark" | "light") {
 
 /** One named screen: get there, wait for it to settle, shoot it, put things back. */
 async function shoot(page: Page, tag: string, name: string, open?: () => Promise<void>, close: () => Promise<void> = async () => void (await page.keyboard.press("Escape"))) {
+  if (!wanted(name)) return
   try {
     if (open) await open()
     await page.waitForTimeout(350)
@@ -99,7 +115,7 @@ async function shoot(page: Page, tag: string, name: string, open?: () => Promise
 
 try {
   // ---------- seed: the owner, a channel, an agent on a linked computer, a pending request ----------
-  const owner = await browser.newPage({ viewport: WIDE })
+  const owner = await page(WIDE)
   owner.on("pageerror", (e) => console.log(`page error: ${e.message}`))
   await owner.goto(BASE)
   await signIn(owner, "Jonatas")
@@ -130,6 +146,9 @@ try {
     const joining = kiwi(["join", code, ...args, "--relay", BASE], (o) => void (pendingOut = o))
     const letIn = needs.getByRole("button", { name: "It matches: let in" })
     const showCode = needs.getByRole("button", { name: "Show code" })
+    const banner = needs.getByRole("button", { name: /needs? you/ }).first()
+    await banner.waitFor({ timeout: 30000 })
+    if ((await banner.getAttribute("aria-expanded")) !== "true") await banner.click()
     await letIn.or(showCode).first().waitFor({ timeout: 30000 })
     if (await showCode.count()) await showCode.click()
     await letIn.click({ timeout: 30000 })
@@ -201,6 +220,7 @@ try {
   // An agent asking to join, left pending (its CLI waits in the background).
   void kiwi(["join", code, "kiwi-2", "--relay", BASE, "--as", "scout", "--role", "frontend"], (o) => void (pendingOut = o)).catch(() => {})
   await needs.getByText(/scout/).first().waitFor({ timeout: 30000 }).catch(() => console.log(`no pending request to show: ${pendingOut.trim().split("\n").pop()}`))
+  await owner.keyboard.press("Escape")
 
   // A second channel, still empty: it opens on how to add an agent.
   await plus.click()
@@ -211,8 +231,8 @@ try {
   const fresh = owner.url()
 
   // ---------- shoot ----------
-  for (const theme of ["dark", "light"] as const) {
-    for (const [vp, size] of [["wide", WIDE], ["narrow", NARROW]] as const) {
+  for (const theme of (["dark", "light"] as const).filter((t) => !themeOnly || t === themeOnly)) {
+    for (const [vp, size] of ([["wide", WIDE], ["narrow", NARROW]] as const).filter(([v]) => !wideOnly || v === "wide")) {
       const tag = `${theme}-${vp}`
       await owner.setViewportSize(size)
       await owner.goto(channel)
@@ -242,6 +262,10 @@ try {
       }, async () => {
         await owner.getByRole("button", { name: "Close task" }).click()
         await toPlace(/^Main/)
+      })
+      await shoot(owner, tag, "15-needs-you", async () => {
+        await toPlace(/^Main/)
+        await owner.getByRole("region", { name: "Needs you" }).getByRole("button", { name: /needs? you/ }).first().click()
       })
       await shoot(owner, tag, "07-details", () => detailsBtn().click(), () => owner.getByRole("button", { name: "Close details" }).click())
       await shoot(owner, tag, "08-direct", () => toPlace(/atlas/), async () => {
@@ -283,7 +307,8 @@ try {
       await shoot(owner, tag, "16-add-agent")
 
       // Signed out, and someone opening the invite link who isn't in yet.
-      const out = await browser.newPage({ viewport: size })
+      if (only && !["20-signed-out", "21-join-with-code", "22-invite-preview", "23-signed-in-empty"].some(wanted)) continue
+      const out = await page(size)
       await out.goto(BASE)
       await setTheme(out, theme)
       await shoot(out, tag, "20-signed-out")

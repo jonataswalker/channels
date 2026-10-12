@@ -27,7 +27,7 @@ interface Tones {
   trim: string
 }
 
-const read = (): Tones => ({ shell: resolve("--accent"), screen: resolve("--head-screen"), trim: resolve("--head-trim") })
+const read = (): Tones => ({ shell: resolve("--head-shell"), screen: resolve("--head-screen"), trim: resolve("--head-trim") })
 
 /** The head's colours from the tokens, following the theme (the system's, or the one picked in Settings). */
 function useTones(): Tones {
@@ -96,5 +96,21 @@ export function CoordinatorHead({
       />
       </span>
     </Suspense>
+  )
+}
+
+/**
+ * The coordinator as a contact: its head inside a round avatar, on a soft green field. At the sizes a
+ * face is in a list, a bubble's foot or a header, a head on its own reads as a blob; in a circle it
+ * reads as someone. Still unless `live`.
+ */
+export function CoordinatorAvatar({ size, mood, live = false, seed, className, label }: { size: number; mood?: Mood; live?: boolean; seed?: number; className?: string; label?: string }) {
+  return (
+    <span
+      className={cx("relative inline-flex shrink-0 items-end justify-center overflow-hidden rounded-full bg-[linear-gradient(180deg,var(--head-bg-top),var(--head-bg-bottom))]", className)}
+      style={{ width: size, height: size }}
+    >
+      <CoordinatorHead size={Math.round(size * 0.86)} mood={mood} live={live} seed={seed} label={label} className="translate-y-[6%]" />
+    </span>
   )
 }

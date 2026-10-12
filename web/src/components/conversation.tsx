@@ -1,4 +1,4 @@
-import { ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Mail01Icon, Message01Icon, PauseIcon, PlayIcon, Search01Icon, TaskDone01Icon } from "@hugeicons/core-free-icons"
+import { ArrowDown01Icon, ArrowLeft01Icon, PauseIcon, PlayIcon, Search01Icon, SidebarRightIcon } from "@hugeicons/core-free-icons"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 
@@ -20,7 +20,7 @@ import { coordinatorMood, ERROR_MS, moodInputs, SPEAKING_MS, type Mood } from "@
 import { dmPlace, markSeenIn, MAIN, placeFromKey, placeKey, seenIn, sendFrom, useSeen, threadMembers, type Place, type PlaceSummary } from "@/lib/threads"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
-import { CoordinatorHead } from "./coordinator-head"
+import { CoordinatorAvatar } from "./coordinator-head"
 import { Composer } from "./composer"
 import { AddAgent } from "./add-agent"
 import { ChannelControls, HoldBanner, HoldDialog } from "./controls"
@@ -32,6 +32,9 @@ import { NeedsYou, type JoinedVia } from "./needs-you"
 import { TaskPage } from "./task-page"
 import { Notes, StateMark, TaskCard, Tasks } from "./tasks"
 import { ThreadPanel } from "./thread"
+
+/** A task's state in a word, beside its row in the list. */
+const SHORT = { todo: "Open", doing: "Doing", review: "Review", done: "Done" } as const
 
 /** Messages this close together from one sender read as one run. */
 const RUN_GAP = 5 * 60_000
@@ -329,6 +332,14 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   const bySeq = useMemo(() => new Map(messages.map((m) => [m.seq, m])), [messages])
   const quoted = useCallback((seq: number) => bySeq.get(seq), [bySeq])
 
+  // ---------- motion: what arrives while you look lands with a little life; history doesn't ----------
+  const newest = messages.at(-1)?.seq ?? 0
+  // Where this conversation stood when it opened: only what comes after counts as arriving.
+  const [baseline, setBaseline] = useState<{ key: string; seq: number } | null>(null)
+  // Set while rendering (React's way to keep state in step with a prop), not in an effect.
+  if (newest && baseline?.key !== hereKey) setBaseline({ key: hereKey, seq: newest })
+  const isFresh = (seq: number) => baseline !== null && baseline.key === hereKey && seq > baseline.seq
+
   // ---------- scrolling: stick to the bottom unless the reader scrolled up ----------
   const scroller = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
@@ -339,7 +350,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     if (!el) return
     const added = visible.length - lastCount.current
     lastCount.current = visible.length
-    if (atBottom.current) el.scrollTop = el.scrollHeight
+    // A new message glides into view; the first paint just starts at the bottom.
+    if (atBottom.current) el.scrollTo({ top: el.scrollHeight, behavior: added > 0 && added < 4 ? "smooth" : "instant" })
     else if (added > 0) setBehind((b) => b + added)
   }, [visible, board])
   // A new place opens at its latest message.
@@ -427,6 +439,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       direct={state.direct.has(m.seq) ? (state.coordinator ?? undefined) : undefined}
       first={first}
       last={last}
+      fresh={!anchor && isFresh(m.seq)}
       group={group}
       adjacentReply={(m.re?.length ?? 0) === 1 && (prev?.seq === m.re![0] || bySeq.get(m.re![0]!)?.kind === "event")}
       highlighted={highlight === m.seq}
@@ -436,17 +449,17 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       onJump={jump}
       thread={search || anchor ? undefined : summaryOf(m.seq)}
       onOpenThread={setThreadRoot}
-      // The coordinator's runs end on its head; only the latest one moves.
-      face={coord && m.from === coord ? <CoordinatorHead size={28} mood={mood} live={m.seq >= (said?.last ?? 0) && !anchor} seed={0.3} /> : undefined}
+      // The coordinator's runs end on its face; only the latest one moves.
+      face={coord && m.from === coord ? <CoordinatorAvatar size={28} mood={mood} live={m.seq >= (said?.last ?? 0) && !anchor} seed={0.3} /> : undefined}
     />
   )
   const rows: ReactNode[] = []
   const dropped = isOwner ? droppedCount(state) : 0
   if (dropped && hereKey === "main")
     rows.push(
-      <p key="dropped" className="mt-3 text-center text-stamp text-ink-3">
+      <p key="dropped" className="mt-3 pl-9 text-stamp text-ink-3">
         {dropped === 1 ? "1 message" : `${dropped} messages`} left out: forged, or not allowed by your settings.{" "}
-        <button type="button" onClick={() => setShowDropped((v) => !v)} className="font-medium text-accent hover:underline">
+        <button type="button" onClick={() => setShowDropped((v) => !v)} className="font-medium text-accent-text hover:underline">
           {showDropped ? "Hide them" : "Show them"}
         </button>
       </p>
@@ -492,7 +505,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       const first = !prev || prev.from !== m.from || m.ts - prev.ts > RUN_GAP
       const last = !next || next.from !== m.from || next.ts - m.ts > RUN_GAP
       threadRows.push(bubble(m, first, last, prev, "t"))
-      if (i === 0 && replies.length) threadRows.push(<div key="split" className="my-3 text-center text-stamp text-ink-3">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</div>)
+      if (i === 0 && replies.length) threadRows.push(<div key="split" className="my-3 pl-9 text-stamp text-ink-3">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</div>)
     })
   }
 
@@ -503,6 +516,28 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         ? "Reconnecting…"
         : (online.size ? `${memberCount} members, ${online.size} online` : `${memberCount} ${memberCount === 1 ? "member" : "members"}`) +
           (state.mode.coordinatorOnly ? (state.coordinator ? " · coordinator mode" : " · coordinator mode, no coordinator yet") : "")
+  // What's going on, in one live line under the name: who coordinates, who's working, what needs you.
+  const working = active.filter((m) => isAgent(m) && memberLoad(state, m.name, now).current.length > 0).length
+  const needsMe = escalations.length + reviews.length + (isOwner ? requests.length : 0)
+  const headline =
+    connection === "connecting" || connection === "reconnecting"
+      ? subtitle
+      : place.kind === "task"
+        ? task
+          ? // Where it stands is in the strip under this; here, who's in it.
+            [taskId(task.id), threadMembers(state, place).filter((n) => n !== me).map(nameOf).join(", ") || "nobody on it yet"].join(" · ")
+          : "Task"
+        : place.kind === "dm"
+          ? place.with.includes(me)
+            ? "Just the two of you; anyone in the channel can read along"
+            : `Between ${place.with.map(nameOf).join(" and ")}`
+          : [
+          state.coordinator && state.coordinator !== me ? `${nameOf(state.coordinator)} coordinating` : null,
+          working ? `${working} working` : null,
+          needsMe ? `${needsMe} ${needsMe === 1 ? "needs" : "need"} you` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || subtitle
   const hold = isOwner
     ? async (on: boolean, note?: string) => {
         const ev = { op: "hold.set" as const, on, ...(note ? { note } : {}) }
@@ -512,13 +547,24 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       }
     : undefined
 
-  // Who's in this conversation, for the header's faces and the composer's @.
-  const inHere = threadMembers(state, place)
-  const faces = (place.kind === "main" ? active.filter((m) => m.name !== me) : inHere.map((n) => state.members.get(n)).filter((m): m is NonNullable<typeof m> => !!m && m.name !== me)).sort(
-    (a, b) => Number(online.has(b.name)) - Number(online.has(a.name))
-  )
+  // The face beside the name: the coordinator for Main, the task's state for a task, the other one for a direct conversation.
+  const placeFace =
+    place.kind === "main" ? (
+      coord ? (
+        <CoordinatorAvatar size={32} mood={mood} live seed={0.7} />
+      ) : (
+        <ChannelIconTile icon={icon} title={title} size={32} />
+      )
+    ) : place.kind === "task" ? (
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-field">{task ? <StateMark state={task.state} /> : null}</span>
+    ) : (
+      (() => {
+        const other = place.with.find((n) => n !== me) ?? place.with[0]!
+        return other === coord ? <CoordinatorAvatar size={32} mood={mood} live seed={0.7} /> : <Monogram name={nameOf(other)} agent={isAgent(state.members.get(other))} color={colorOf(state, other)} size={32} />
+      })()
+    )
   // A direct conversation you're in is named for the other one, as Messages names a chat.
-  const placeTitle = place.kind === "main" ? title : place.kind === "task" ? (task ? `${taskId(task.id)} ${task.title}` : "Task") : place.with.includes(me) ? nameOf(place.with.find((n) => n !== me) ?? me) : place.with.map(nameOf).join(" & ")
+  const placeTitle = place.kind === "main" ? title : place.kind === "task" ? (task ? task.title : "Task") : place.with.includes(me) ? nameOf(place.with.find((n) => n !== me) ?? me) : place.with.map(nameOf).join(" & ")
   // A direct conversation is between its two; anyone else reads it.
   const mayWrite = place.kind !== "dm" || place.with.includes(me)
   // A task's thread reaches whoever works it on its own (state.ts threadMembers); only an @ names anyone. A direct one goes to the other one.
@@ -628,56 +674,45 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       <PlaceSlot>{placeList()}</PlaceSlot>
       <div className="flex h-full min-w-0 flex-1">
         <div className={cx("relative flex min-w-0 flex-1 flex-col bg-canvas", (root || info) && "hidden md:flex")}>
-          {/* As in Messages: the faces and the name in the middle; tap them for the details. */}
-          <header className="relative flex h-16 shrink-0 items-center gap-1 bg-canvas/85 px-2 shadow-[inset_0_-1px_0_var(--line)] backdrop-blur-xl md:px-3">
-            <IconButton label="Channels" className="md:hidden" onClick={onBack}>
-              <Icon icon={ArrowLeft01Icon} size={20} />
-            </IconButton>
-            <span className="flex-1" />
-            <button
-              type="button"
-              onClick={() => (setInfo((v) => !v), setThreadRoot(null))}
-              aria-expanded={info}
-              aria-label={`Details: ${placeTitle}, ${subtitle}`}
-              className="group absolute top-1/2 left-1/2 flex max-w-[60%] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5"
-            >
-              <span className="flex h-[30px] items-center -space-x-2.5" aria-hidden>
-                {coord && (place.kind === "main" || (place.kind === "dm" && place.with.includes(coord))) ? (
-                  <CoordinatorHead size={30} mood={mood} live seed={0.7} />
-                ) : place.kind === "main" && !faces.length ? (
-                  <ChannelIconTile icon={icon} title={title} size={28} />
+          {/* Who you're talking with, on the conversation's column: a face, the name, and what's going on. */}
+          <header className="shrink-0 bg-canvas">
+            <div className="mx-auto flex h-14 w-full max-w-[792px] items-center gap-1 px-2 md:px-4">
+              <IconButton label="Channels" className="md:hidden" onClick={onBack}>
+                <Icon icon={ArrowLeft01Icon} size={20} />
+              </IconButton>
+              <button
+                type="button"
+                onClick={() => (setInfo((v) => !v), setThreadRoot(null))}
+                aria-expanded={info}
+                aria-label={`Details: ${placeTitle}, ${subtitle}`}
+                className="-ml-1.5 flex min-w-0 items-center gap-2.5 rounded-ctl py-1 pr-2 pl-1.5 text-left transition-colors hover:bg-wash"
+              >
+                {placeFace}
+                <span className="min-w-0">
+                  <span className="block truncate text-title font-semibold">{placeTitle}</span>
+                  <span className="block truncate text-meta text-ink-3">{headline}</span>
+                </span>
+              </button>
+              <span className="flex-1" />
+              {/* The owner's stop button: every agent, at once. */}
+              {hold &&
+                (!quiet || state.hold) &&
+                (state.hold ? (
+                  <IconButton label="Resume agents" active onClick={() => void hold(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error"))}>
+                    <Icon icon={PlayIcon} size={17} className="text-alert" />
+                  </IconButton>
                 ) : (
-                  faces.slice(0, 3).map((m) => (
-                    <span key={m.name} className="flex rounded-full bg-canvas p-0.5">
-                      {m.name === coord ? (
-                        <CoordinatorHead size={24} mood={mood} />
-                      ) : (
-                        <Monogram name={memberName(m)} agent={isAgent(m)} color={colorOf(state, m.name)} size={24} working={isAgent(m) && memberLoad(state, m.name, now).current.length > 0} />
-                      )}
-                    </span>
-                  ))
-                )}
-              </span>
-              <span className={cx("flex max-w-full items-center gap-0.5 rounded-full px-2.5 py-0.5 text-meta font-semibold transition-colors", info ? "bg-accent text-accent-ink" : "bg-wash-2 group-hover:bg-[color-mix(in_srgb,var(--ink)_13%,transparent)]")}>
-                <span className="truncate">{placeTitle}</span>
-                <Icon icon={ArrowRight01Icon} size={11} className={cx("shrink-0", info ? "text-accent-ink" : "text-ink-3")} />
-              </span>
-            </button>
-            {/* The owner's stop button: every agent, at once. */}
-            {hold &&
-              (!quiet || state.hold) &&
-              (state.hold ? (
-                <IconButton label="Resume agents" round active onClick={() => void hold(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error"))}>
-                  <Icon icon={PlayIcon} size={16} className="text-alert" />
-                </IconButton>
-              ) : (
-                <IconButton label="Pause agents" round onClick={() => setPausing(true)}>
-                  <Icon icon={PauseIcon} size={16} />
-                </IconButton>
-              ))}
-            <IconButton label="Search" round active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={board}>
-              <Icon icon={Search01Icon} size={16} />
-            </IconButton>
+                  <IconButton label="Pause agents" onClick={() => setPausing(true)}>
+                    <Icon icon={PauseIcon} size={17} />
+                  </IconButton>
+                ))}
+              <IconButton label="Search" active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={board}>
+                <Icon icon={Search01Icon} size={17} />
+              </IconButton>
+              <IconButton label={info ? "Hide details" : "Show details"} active={info} onClick={() => (setInfo((v) => !v), setThreadRoot(null))}>
+                <Icon icon={SidebarRightIcon} size={17} />
+              </IconButton>
+            </div>
           </header>
 
           <HoldBanner />
@@ -700,7 +735,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
           ) : (
             <>
               {search !== null && (
-                <div className="mx-auto w-full max-w-[900px] shrink-0 px-4 pt-3 md:px-6">
+                <div className="mx-auto w-full max-w-[792px] shrink-0 px-4 pt-1">
                   <TextField
                     autoFocus
                     value={search}
@@ -721,7 +756,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   if (atBottom.current && behind) setBehind(0)
                 }}
               >
-                <div className="mx-auto w-full max-w-[900px] px-4 pb-4 md:px-8">
+                <div className="relative mx-auto w-full max-w-[792px] px-4 pb-6">
                   {/* What needs a person: at the top of the main conversation, as system cards. */}
                   {hereKey === "main" && (
                     <NeedsYou
@@ -746,7 +781,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   ) : hereKey === "main" && noAgents && !search ? (
                     <>
                       <AddAgent code={member.code} isOwner={isOwner} />
-                      {rows}
+                      {/* A brand-new channel's own setup lines (coordinator mode on) aren't worth reading yet. */}
+                      {!quiet && rows}
                     </>
                   ) : visible.length === 0 && !task ? (
                     <Centered>
@@ -765,7 +801,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 <button
                   type="button"
                   onClick={toBottom}
-                  className="animate-rise absolute bottom-20 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-raised py-1.5 pr-3.5 pl-2.5 text-ui font-medium text-accent shadow-pop"
+                  className="animate-rise absolute bottom-20 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-raised py-1.5 pr-3.5 pl-2.5 text-ui font-medium text-accent-text shadow-pop"
                 >
                   <Icon icon={ArrowDown01Icon} size={15} />
                   {behind === 1 ? "1 new message" : `${behind} new messages`}
@@ -857,7 +893,8 @@ function PlaceSlot({ children }: { children: ReactNode }) {
 
 /**
  * The channel's conversations: main (people and the coordinator), one per open task (the agents
- * working it), then direct ones; finished tasks fold under Earlier.
+ * working it), then direct ones; finished tasks fold under Earlier. One row each, a status dot for a
+ * task, a small face for a direct one.
  */
 function PlaceList({
   places,
@@ -867,7 +904,7 @@ function PlaceList({
   unreadIn,
   onPick,
   onBoard,
-  className = "mt-1 mb-2 ml-[54px] mr-1",
+  className = "mt-0.5 mb-2 ml-[56px] mr-1",
   me,
 }: {
   className?: string
@@ -885,76 +922,77 @@ function PlaceList({
   const tasks = all.filter(([, i]) => i.place.kind === "task" && !i.done).sort((a, b) => b[1].last - a[1].last)
   const done = all.filter(([, i]) => i.place.kind === "task" && i.done).sort((a, b) => b[1].last - a[1].last)
   const dms = all.filter(([, i]) => i.place.kind === "dm").sort((a, b) => b[1].last - a[1].last)
+  const rowClass = (on: boolean, strong: boolean) =>
+    cx("flex h-7 w-full items-center gap-2 rounded-ctl pr-2 pl-1.5 text-left text-ui transition-colors", on ? "bg-pick font-semibold text-ink" : strong ? "font-semibold text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink")
   const row = (key: string, info: PlaceSummary) => {
     const p = info.place
     const t = p.kind === "task" ? state.tasks.get(p.task) : undefined
     const { n: unread, forMe } = key === current ? { n: 0, forMe: false } : unreadIn(key)
+    const other = p.kind === "dm" ? (p.with.includes(me) ? (p.with.find((n) => n !== me) ?? me) : null) : null
     return (
-      <button
-        key={key}
-        type="button"
-        aria-current={key === current ? "page" : undefined}
-        onClick={() => onPick(p)}
-        className={cx(
-          "flex h-7 w-full items-center gap-2 rounded-ctl pr-2 pl-2.5 text-left text-ui transition-colors",
-          key === current ? "bg-wash-2 font-semibold text-ink" : unread && forMe ? "font-semibold text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink"
-        )}
-      >
-        {p.kind === "main" ? (
-          <Icon icon={Message01Icon} size={14} className="shrink-0 text-ink-3" />
-        ) : t ? (
-          <span className="flex scale-[0.85]">
+      <button key={key} type="button" aria-current={key === current ? "page" : undefined} onClick={() => onPick(p)} className={rowClass(key === current, unread > 0 && forMe)}>
+        {/* The row is named by its words; the dot or face beside them is decoration. */}
+        <span aria-hidden className="flex w-4 shrink-0 justify-center">
+          {t ? (
             <StateMark state={t.state} />
-          </span>
-        ) : (
-          <Icon icon={Mail01Icon} size={14} className="shrink-0 text-ink-3" />
-        )}
+          ) : p.kind === "dm" ? (
+            (other ?? p.with[0]!) === state.coordinator ? (
+              <CoordinatorAvatar size={16} />
+            ) : (
+              <Monogram name={nameOf(other ?? p.with[0]!)} agent={isAgent(state.members.get(other ?? p.with[0]!))} color={colorOf(state, other ?? p.with[0]!)} size={16} />
+            )
+          ) : null}
+        </span>
         <span className="min-w-0 flex-1 truncate">
-          {p.kind === "main" ? "Main" : t ? (
+          {p.kind === "main" ? (
+            "Main"
+          ) : t ? (
             <>
               <span className="text-ink-3 tabular-nums">{taskId(t.id)}</span> {t.title}
             </>
           ) : p.kind === "dm" ? (
-            p.with.includes(me) ? nameOf(p.with.find((n) => n !== me) ?? me) : p.with.map(nameOf).join(" ↔ ")
+            other ? nameOf(other) : p.with.map(nameOf).join(" ↔ ")
           ) : (
             "Task"
           )}
         </span>
-        {unread > 0 &&
-          (forMe ? (
+        {unread > 0 ? (
+          forMe ? (
             <span className="shrink-0 rounded-full bg-accent px-1.5 text-stamp font-semibold text-accent-ink tabular-nums">{unread}</span>
           ) : (
             // News that isn't for you: a quiet dot, not a count that reads like mail.
             <span aria-label="New messages" className="size-1.5 shrink-0 rounded-full bg-ink-3" />
-          ))}
+          )
+        ) : t && t.state !== "todo" ? (
+          <span className="shrink-0 text-stamp font-normal text-ink-3">{SHORT[t.state]}</span>
+        ) : null}
       </button>
     )
   }
+  const head = (text: string) => <p className="px-1.5 pt-2.5 pb-1 text-stamp font-semibold tracking-[0.04em] text-ink-3 uppercase">{text}</p>
   return (
     <nav aria-label="Conversations" className={cx("space-y-px", className)}>
       {row("main", places.get("main") ?? { place: MAIN, last: 0, count: 0 })}
+      {(tasks.length > 0 || state.tasks.size > 0) && head("Tasks")}
       {tasks.map(([k, i]) => row(k, i))}
-      {state.tasks.size > 0 && (
-        <button
-          type="button"
-          aria-current={current === "board" ? "page" : undefined}
-          onClick={onBoard}
-          className={cx("flex h-7 w-full items-center gap-2 rounded-ctl px-2.5 text-left text-ui transition-colors", current === "board" ? "bg-wash-2 font-semibold" : "text-ink-3 hover:bg-wash hover:text-ink")}
-        >
-          <Icon icon={TaskDone01Icon} size={14} className="shrink-0" />
-          All tasks
-        </button>
-      )}
       {done.length > 0 && (
         <>
-          <button type="button" aria-expanded={earlier} onClick={() => setEarlier(!earlier)} className="flex h-6 w-full items-center gap-1 rounded-ctl px-2.5 text-left text-stamp font-semibold text-ink-3 hover:text-ink-2">
-            Earlier · {done.length}
-            <Icon icon={ArrowDown01Icon} size={11} className={cx("transition-transform", !earlier && "-rotate-90")} />
+          <button type="button" aria-expanded={earlier} onClick={() => setEarlier(!earlier)} className="flex h-7 w-full items-center gap-2 rounded-ctl pr-2 pl-1.5 text-left text-ui text-ink-3 hover:bg-wash hover:text-ink-2">
+            <span className="flex w-4 shrink-0 justify-center">
+              <Icon icon={ArrowDown01Icon} size={12} className={cx("transition-transform", !earlier && "-rotate-90")} />
+            </span>
+            Earlier <span className="tabular-nums">{done.length}</span>
           </button>
           {earlier && done.map(([k, i]) => row(k, i))}
         </>
       )}
-      {dms.length > 0 && <p className="px-2.5 pt-1.5 pb-0.5 text-stamp font-semibold text-ink-3">Direct</p>}
+      {state.tasks.size > 0 && (
+        <button type="button" aria-current={current === "board" ? "page" : undefined} onClick={onBoard} className={cx(rowClass(current === "board", false), current !== "board" && "text-ink-3")}>
+          <span className="w-4 shrink-0" />
+          All tasks
+        </button>
+      )}
+      {dms.length > 0 && head("Direct")}
       {dms.map(([k, i]) => row(k, i))}
     </nav>
   )

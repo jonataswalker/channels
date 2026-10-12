@@ -11,9 +11,9 @@ import { lockVault, useVault } from "@/lib/vault"
 import { setPlaceSlot } from "@/lib/place-slot"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
-import { CoordinatorHead } from "./coordinator-head"
+import { CoordinatorAvatar } from "./coordinator-head"
 import { Icon } from "./icon"
-import { Button, IconButton, Monogram, Wordmark } from "./kit"
+import { Button, IconButton, Wordmark } from "./kit"
 import { Menu, MenuItem, MenuNote, MenuSeparator } from "./ui/menu"
 import { usageLine } from "./usage"
 import { offerVault, VaultCard } from "./vault"
@@ -70,15 +70,15 @@ export function Sidebar({
   useMemberIcons(rows.filter((c) => c.state === "member").map((c) => c.code))
 
   return (
-    <aside className={cx("h-full w-full shrink-0 flex-col bg-rail md:w-[300px] md:shadow-[inset_-1px_0_0_var(--line)]", className)}>
-      {/* Who you are, then go-to and new: the list's one row of chrome. */}
-      <header className="flex h-13 shrink-0 items-center gap-1 pt-1 pr-2.5 pl-3">
+    <aside className={cx("h-full w-full shrink-0 flex-col bg-rail md:w-[300px]", className)}>
+      {/* Kiwi's mark, who you are, then new: the list's one row of chrome. */}
+      <header className="flex h-14 shrink-0 items-center gap-1.5 pr-2.5 pl-3.5">
+        <CoordinatorAvatar size={26} label="Kiwi" />
         {auth.status === "signed-in" ? (
           <Menu
             className="w-60"
             trigger={
-              <button type="button" className="flex min-w-0 items-center gap-2 rounded-ctl py-1 pr-1.5 pl-1 transition-colors hover:bg-wash data-popup-open:bg-wash">
-                <Monogram name={displayName(auth.user)} size={22} />
+              <button type="button" className="flex min-w-0 items-center gap-1 rounded-ctl py-1 pr-1.5 pl-1.5 transition-colors hover:bg-wash data-popup-open:bg-wash">
                 <span className="truncate text-ui font-semibold">{displayName(auth.user)}</span>
                 <Icon icon={ArrowDown01Icon} size={14} className="shrink-0 text-ink-3" />
               </button>
@@ -104,7 +104,7 @@ export function Sidebar({
             className="w-52"
             trigger={
               <IconButton label="New channel or join" round className="size-8">
-                <Icon icon={PencilEdit02Icon} size={16} />
+                <Icon icon={PencilEdit02Icon} size={17} />
               </IconButton>
             }
           >
@@ -117,7 +117,7 @@ export function Sidebar({
       {/* Search, as in Messages: a pill at the top of the list. ⌘K goes anywhere. */}
       {(auth.status !== "signed-out" || rows.length > 0) && (
         <div className="flex shrink-0 items-center gap-1.5 px-3 pt-1 pb-2">
-          <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-ctl bg-wash-2 px-2.5 text-ink-3">
+          <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-ctl bg-wash-2 px-2.5 text-ink-3 focus-within:shadow-[0_0_0_3px_var(--accent-wash)]">
             <Icon icon={Search01Icon} size={14} className="shrink-0" />
             <input
               value={query}
@@ -134,7 +134,7 @@ export function Sidebar({
         </div>
       )}
 
-      <nav aria-label="Channels" className="flex-1 overflow-y-auto px-2 pb-3">
+      <nav aria-label="Channels" className="flex-1 overflow-y-auto px-2 pt-1 pb-3">
         {shown.map((c) => {
           const selected = c.code === active
           const reachable = c.state === "member"
@@ -149,35 +149,33 @@ export function Sidebar({
                 aria-current={selected ? "page" : undefined}
                 title={rowNote(c)}
                 className={cx(
-                  "group relative flex w-full items-start gap-2.5 rounded-card py-2.5 pr-2.5 pl-4 text-left transition-colors",
-                  selected ? "bg-pick text-accent-ink" : "hover:bg-wash"
+                  "group relative flex w-full items-center gap-3 rounded-card px-2.5 py-2 text-left transition-colors",
+                  // The open channel is a step of tone; once its conversations show under it, the open one of those is.
+                  selected ? "bg-pick [&:has(+div>nav)]:bg-transparent" : "hover:bg-wash"
                 )}
               >
-                {c.recent?.byCoordinator && reachable ? <CoordinatorHead size={40} label="The coordinator spoke last" /> : <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={40} />}
+                {c.recent?.byCoordinator && reachable ? <CoordinatorAvatar size={40} label="The coordinator spoke last" /> : <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={40} />}
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
-                    <span className={cx("min-w-0 flex-1 truncate text-ui font-semibold", !selected && !reachable && "text-ink-2")}>{c.title}</span>
+                    <span className={cx("min-w-0 flex-1 truncate text-ui", selected || fresh || n?.needs ? "font-semibold text-ink" : "font-medium", !selected && !reachable && "text-ink-2")}>{c.title}</span>
                     {n?.needs ? (
-                      <span
-                        aria-label={n.needs === 1 ? "A question for you" : `${n.needs} questions for you`}
-                        className={cx("shrink-0 rounded-full px-1.5 text-meta font-semibold tabular-nums", selected ? "bg-accent-ink text-accent" : "bg-accent text-accent-ink")}
-                      >
+                      <span aria-label={n.needs === 1 ? "A question for you" : `${n.needs} questions for you`} className="shrink-0 rounded-full bg-accent px-1.5 text-stamp font-semibold text-accent-ink tabular-nums">
                         {n.needs}
                       </span>
                     ) : reachable ? (
-                      <span className={cx("shrink-0 text-meta tabular-nums", selected ? "text-accent-ink/80" : "text-ink-3")}>{formatShort(c.ts)}</span>
+                      <span className="shrink-0 text-stamp text-ink-3 tabular-nums">{formatShort(c.ts)}</span>
                     ) : c.state !== "pending" ? (
-                      <Icon icon={LockIcon} size={12} className={cx("shrink-0", selected ? "text-accent-ink/80" : "text-ink-3")} />
+                      <Icon icon={LockIcon} size={12} className="shrink-0 text-ink-3" />
                     ) : null}
                   </span>
-                  <span className={cx("mt-px line-clamp-2 text-ui leading-[17px]", selected ? "text-accent-ink/85" : fresh ? "text-ink" : "text-ink-3")}>{rowNote(c)}</span>
+                  <span className={cx("mt-px block truncate text-meta", fresh ? "text-ink-2" : "text-ink-3")}>{rowNote(c)}</span>
                 </span>
-                {/* Unread: the blue dot left of the avatar, as in Messages (last in the row, so the row is still named for its channel). */}
-                {(fresh || !!n?.needs) && !selected && <span aria-label="New messages" className="absolute top-1/2 left-1 size-2 -translate-y-1/2 rounded-full bg-accent" />}
+                {/* Unread: a dot at the row's edge (last in the row, so the row is still named for its channel). */}
+                {fresh && !n?.needs && !selected && <span aria-label="New messages" className="absolute top-1/2 left-0.5 size-1.5 -translate-y-1/2 rounded-full bg-accent" />}
               </button>
               {/* The open channel's conversations nest here (rendered by the conversation). */}
               {selected && <div ref={setPlaceSlot} />}
-              {!selected && <div className="mr-2.5 ml-[66px] h-px bg-line" />}
+
             </div>
           )
         })}

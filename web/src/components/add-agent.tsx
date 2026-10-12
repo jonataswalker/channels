@@ -2,6 +2,7 @@ import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons"
 import { useState } from "react"
 
 import { joinCommand, kiwiJoin } from "@/lib/join-line"
+import { CoordinatorHead } from "./coordinator-head"
 import { Icon } from "./icon"
 import { toast } from "./kit"
 
@@ -12,8 +13,9 @@ import { toast } from "./kit"
 export function AddAgent({ code, isOwner }: { code: string; isOwner: boolean }) {
   const full = joinCommand(location.origin, code)
   return (
-    <section aria-label="Add an agent" className="mx-auto mt-12 w-full max-w-[560px] rounded-bubble bg-raised p-6 shadow-[0_0_0_1px_var(--line),0_8px_24px_-12px_rgba(0,0,0,0.12)]">
-      <h2 className="text-display font-bold tracking-[-0.02em]">Add an agent</h2>
+    <section aria-label="Add an agent" className="mx-auto mt-14 w-full max-w-[560px] px-1">
+      <CoordinatorHead size={72} live interactive seed={0.4} className="-ml-1" label="Kiwi" />
+      <h2 className="mt-4 text-display font-semibold">Add an agent</h2>
       <p className="mt-1.5 text-body text-ink-2">Paste this into the terminal your agent works in (Claude Code, Codex, Cursor…), or ask the agent to run it.</p>
       <Command text={full} label="Copy the command" />
       <p className="mt-3 text-meta leading-normal text-ink-3">
@@ -30,7 +32,7 @@ export function AddAgent({ code, isOwner }: { code: string; isOwner: boolean }) 
   )
 }
 
-function Command({ text, label }: { text: string; label: string }) {
+export function Command({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false)
   const copy = () =>
     navigator.clipboard.writeText(text).then(
@@ -42,9 +44,9 @@ function Command({ text, label }: { text: string; label: string }) {
       () => toast("Couldn’t copy: select the command and copy it", "error")
     )
   return (
-    <div className="mt-4 flex items-stretch overflow-hidden rounded-card bg-wash shadow-[inset_0_0_0_1px_var(--line)]">
-      <code className="min-w-0 flex-1 px-3 py-2.5 font-mono text-ui leading-snug break-all select-all">{text}</code>
-      <button type="button" onClick={() => void copy()} aria-label={label} className="flex shrink-0 items-center gap-1.5 bg-accent px-4 text-ui font-semibold text-accent-ink hover:opacity-90">
+    <div className="mt-4 flex items-stretch overflow-hidden rounded-card bg-field">
+      <code className="min-w-0 flex-1 px-3.5 py-3 font-mono text-ui leading-snug [overflow-wrap:anywhere] select-all">{text}</code>
+      <button type="button" onClick={() => void copy()} aria-label={label} className="m-1 flex shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3.5 text-ui font-semibold text-accent-ink hover:opacity-90">
         <Icon icon={copied ? Tick02Icon : Copy01Icon} size={15} />
         {copied ? "Copied" : "Copy"}
       </button>
@@ -54,7 +56,7 @@ function Command({ text, label }: { text: string; label: string }) {
 
 function Copier({ text, label }: { text: string; label: string }) {
   return (
-    <button type="button" onClick={() => void navigator.clipboard.writeText(text).then(() => toast("Copied"))} className="ml-2 font-medium text-accent hover:underline">
+    <button type="button" onClick={() => void navigator.clipboard.writeText(text).then(() => toast("Copied"))} className="ml-2 font-medium text-ink-2 underline decoration-ink-3/40 underline-offset-2 hover:text-ink">
       {label}
     </button>
   )

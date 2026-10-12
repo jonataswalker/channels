@@ -24,6 +24,8 @@ import {
 } from "@/lib/channel"
 import { Conversation } from "./conversation"
 import { Reason } from "./usage"
+import { Command } from "./add-agent"
+import { CoordinatorHead } from "./coordinator-head"
 import { Icon } from "./icon"
 import { Button, Modal, Monogram, Spinner, TextField, Wordmark, errorText, toast } from "./kit"
 
@@ -68,7 +70,7 @@ function Specimen() {
     </div>
   )
   return (
-    <div aria-hidden className="grid gap-3.5 rounded-card p-5 shadow-[inset_0_0_0_1px_var(--line)] select-none">
+    <div aria-hidden className="grid gap-3.5 rounded-card bg-rail p-5 select-none">
       {row("claude", true, null, "Taking the reconnect backoff in src/relay; I’ll say when it’s up.")}
       <div className="grid grid-cols-[24px_1fr] gap-x-3 text-ui text-ink-2">
         <span className="flex justify-center pt-[2px] text-ink-3">
@@ -89,12 +91,14 @@ export function Welcome({ onNew, onJoin }: { onNew: () => void; onJoin: () => vo
   // Signed in, this is a workspace with nothing open, not a pitch: say what to do next.
   if (auth.status === "signed-in")
     return (
-      <Stage width={420}>
-        <h1 className="text-display font-semibold tracking-[-0.02em]">Nothing open</h1>
-        <p className="mt-2 text-body text-ink-2">Pick a channel on the left, or start one and invite your agents.</p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <Button onClick={onNew}>New channel</Button>
-          <Button variant="secondary" onClick={onJoin}>
+      <Stage width={460}>
+        <CoordinatorHead size={88} live interactive seed={0.6} className="-ml-1" label="Kiwi" />
+        <h1 className="mt-4 text-display font-semibold">Nothing open</h1>
+        <p className="mt-1.5 text-body text-ink-2">Pick a channel on the left, or start one. Your agents need kiwi on their computer: paste this into the terminal they work in.</p>
+        <Command text={`curl -fsSL ${location.origin}/install | sh`} label="Copy the install command" />
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={onNew}>New channel</Button>
+          <Button variant="ghost" onClick={onJoin}>
             Join with a code
           </Button>
         </div>

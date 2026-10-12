@@ -1,4 +1,4 @@
-import { ArrowDown01Icon, Cancel01Icon, Note01Icon, Tick02Icon } from "@hugeicons/core-free-icons"
+import { ArrowDown01Icon, Cancel01Icon, Note01Icon } from "@hugeicons/core-free-icons"
 import { useState } from "react"
 
 import type { TaskState } from "@mc/protocol.ts"
@@ -15,24 +15,12 @@ export const labelOf = (t: Pick<Task, "state" | "cancelled">) => (t.state === "d
 const ORDER: TaskState[] = ["doing", "review", "todo", "done"]
 
 /** A task's state as a small circle: empty, half full, dashed, or checked. */
+/** Where a task stands, as one small dot: grey open, blue in progress, amber in review, green done. */
 export function StateMark({ state }: { state: TaskState }) {
-  if (state === "done") {
-    return (
-      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-ink text-canvas">
-        <Icon icon={Tick02Icon} size={11} strokeWidth={2.6} />
-      </span>
-    )
-  }
   return (
-    <span
-      title={LABEL[state]}
-      className={cx(
-        "block size-4 shrink-0 rounded-full border-[1.5px]",
-        state === "todo" && "border-ink-3",
-        state === "doing" && "border-ink-2 bg-[conic-gradient(var(--ink-2)_0_50%,transparent_50%_100%)]",
-        state === "review" && "border-dashed border-ink-2"
-      )}
-    />
+    <span title={LABEL[state]} className="flex size-4 shrink-0 items-center justify-center">
+      <span className={cx("block size-2 rounded-full", state === "todo" && "bg-ink-3/55", state === "doing" && "bg-doing", state === "review" && "bg-decide", state === "done" && "bg-live")} />
+    </span>
   )
 }
 
@@ -79,7 +67,7 @@ export function Notes({ state, now, onClear }: { state: ChannelState; now: numbe
     }
   }
   return (
-    <section aria-label="Notes" className="mt-4 overflow-hidden rounded-card bg-raised shadow-[0_0_0_1px_var(--line)]">
+    <section aria-label="Notes" className="mt-4 overflow-hidden rounded-card bg-raised">
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-ui">
         <Icon icon={Note01Icon} size={15} className="shrink-0 text-ink-3" />
         <span className="font-medium">Notes</span>
@@ -145,30 +133,30 @@ export function reviewLine(task: Task, nameOf: (n: string) => string): string | 
 export function TaskCard({ task, state, now, onOpen, highlighted }: { task: Task; state: ChannelState; now: number; onOpen: () => void; highlighted?: boolean }) {
   const nameOf = (n: string) => memberName(state.members.get(n), n)
   const review = reviewLine(task, nameOf)
-  const closed = task.state === "done"
+  // The header already names the task: this strip says where it stands, and opens it.
   return (
     <button
       type="button"
       id={`m${task.id}`}
       onClick={onOpen}
-      className={cx(
-        "mx-auto my-3 flex w-full max-w-[480px] items-start gap-3 rounded-bubble bg-raised px-4 py-3 text-left shadow-[0_0_0_1px_var(--line),0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:bg-wash",
-        highlighted && "ring-2 ring-[var(--accent)]"
-      )}
+      aria-label={`${task.title} ${taskId(task.id)}`}
+      className={cx("mt-3 mb-1 flex w-full items-center gap-2.5 rounded-card bg-field px-3.5 py-2.5 text-left text-meta text-ink-2 transition-colors hover:bg-wash-2", highlighted && "outline-2 outline-offset-2 outline-[var(--ring)]")}
     >
-      <span className="flex pt-[3px]">
-        <StateMark state={task.state} />
+      <StateMark state={task.state} />
+      <span className="min-w-0 flex-1 truncate">
+        <span className="font-medium text-ink">{labelOf(task)}</span>
+        {" · "}
+        {task.owner ? nameOf(task.owner) : "Unassigned"}
+        {review && (
+          <>
+            {" · "}
+            <span className={cx(task.state === "review" && "font-medium text-decide")}>{review}</span>
+          </>
+        )}
+        {" · "}
+        {formatAgo(task.updatedAt, now)}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className={cx("block text-body leading-snug font-semibold tracking-[-0.015em]", closed && "text-ink-2")}>{task.title}</span>
-        <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-ink-3">
-          <span className="tabular-nums">{taskId(task.id)}</span>
-          <span>{labelOf(task)}</span>
-          <span className="truncate">{task.owner ? nameOf(task.owner) : "Unassigned"}</span>
-          {review && <span className={cx(task.state === "review" && "font-medium text-ink-2")}>{review}</span>}
-          <span className="shrink-0">{formatAgo(task.updatedAt, now)}</span>
-        </span>
-      </span>
+      <span className="shrink-0 font-medium text-ink-2">Open task ›</span>
     </button>
   )
 }
