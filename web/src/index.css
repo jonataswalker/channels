@@ -2,67 +2,73 @@
 @import "@fontsource-variable/inter/opsz.css";
 
 /*
- * Channels reads like Messages: a conversation of bubbles, yours in blue on the
- * right, everyone else's in grey on the left, the system's own words small and
- * centred between them. White by day, near-black by night; blue is the one
- * accent (your bubbles, the open conversation, the thing to do next), red and
- * green only when they mean something. Every member is a circle with their
- * initials, as a contact without a picture; the coordinator alone has a face.
+ * Kiwi's look. The conversation is the product and everything else stays out of its way: flat,
+ * opaque surfaces in three neutral levels, one type family set with care, and one colour of our own.
  *
- * The palette follows rakazo (github.com/elie222/rakazo, Apache-2.0); see NOTICE.
- * Each token is written once as light-dark(day, night). The system picks the
- * side, unless lib/theme.ts has set data-theme because the person chose one.
+ * The accent is kiwi green, a deep, slightly cool green (not the lime of an SMS bubble): it marks
+ * what's yours and what's new, and nothing else. Your bubbles, the send button, unread counts, and
+ * the one primary action on a page. Never more than three on a screen. Red is for alerts, amber for
+ * a decision someone is waiting on; neither decorates.
+ *
+ * Surfaces: canvas (the conversation), rail (the list and the details beside it), raised (cards,
+ * popovers). No hairlines between areas: a step in tone separates them. Others' bubbles sit on the
+ * canvas as the "field" tone, the same as the composer, so talking reads as one material.
+ *
+ * Each token is written once as light-dark(day, night). The system picks the side, unless
+ * lib/theme.ts has set data-theme because the person chose one.
  */
 :root {
   color-scheme: light dark;
-  /* The conversation (canvas), the list beside it (rail), and what's raised on either. */
   --canvas: light-dark(#ffffff, #161618);
-  --rail: light-dark(#f3f3f5, #1f1f23);
-  --raised: light-dark(#ffffff, #2a2a2e);
-  --ink: light-dark(#1c1c1e, #f2f2f4);
-  /* Quiet text still clears 4.5:1 on canvas, rail, and raised. ink-3 is that floor; ink-2 stays a step stronger. */
-  --ink-2: light-dark(#55555c, #b0b0b8);
-  --ink-3: light-dark(#6b6b72, #8e8e96);
-  --line: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
-  --wash: light-dark(rgba(0, 0, 0, 0.045), rgba(255, 255, 255, 0.06));
-  --wash-2: light-dark(rgba(0, 0, 0, 0.075), rgba(255, 255, 255, 0.1));
-  /* The one accent: Apple's system blue, a step brighter by night. */
-  --accent: light-dark(#007aff, #0a84ff);
+  --rail: light-dark(#f6f6f7, #1c1c1f);
+  --raised: light-dark(#ffffff, #232327);
+  --field: light-dark(#ededf0, #26262a);
+  --ink: light-dark(#18181b, #ededf0);
+  /* Quiet text still clears 4.5:1 on canvas, rail, raised and field. ink-3 is that floor; ink-2 a step stronger. */
+  --ink-2: light-dark(#4f4f57, #b4b4bc);
+  --ink-3: light-dark(#6b6b73, #8f8f98);
+  --line: light-dark(rgba(24, 24, 27, 0.07), rgba(255, 255, 255, 0.07));
+  --wash: light-dark(rgba(24, 24, 27, 0.04), rgba(255, 255, 255, 0.05));
+  --wash-2: light-dark(rgba(24, 24, 27, 0.07), rgba(255, 255, 255, 0.08));
+  /* Kiwi green. White text on it clears 4.5:1; as text on the dark canvas it lightens to stay legible. */
+  --accent: #13854a;
   --accent-ink: #ffffff;
-  --accent-wash: light-dark(rgba(0, 122, 255, 0.12), rgba(10, 132, 255, 0.2));
-  --link: light-dark(#0066d6, #4aa3ff);
-  --ring: light-dark(#007aff, #0a84ff);
-  --alert: light-dark(#e5372b, #ff5147);
-  --live: light-dark(#28a745, #32d74b);
-  --warn: light-dark(#b7791f, #ffd60a);
-  --overlay: light-dark(rgba(20, 20, 22, 0.4), rgba(0, 0, 0, 0.66));
-  /* Bubbles: yours in blue, everyone else's in grey. An escalation is tinted red, never shouted. */
-  --bubble-me: light-dark(#007aff, #0a84ff);
+  --accent-text: light-dark(#13854a, #3ccf7f);
+  --accent-wash: light-dark(rgba(19, 133, 74, 0.1), rgba(60, 207, 127, 0.14));
+  --link: light-dark(#0f7a43, #4fd68c);
+  --ring: light-dark(rgba(19, 133, 74, 0.55), rgba(60, 207, 127, 0.55));
+  --alert: light-dark(#d1342a, #ff6259);
+  --decide: light-dark(#a35a00, #f5b041);
+  --decide-wash: light-dark(rgba(214, 125, 0, 0.12), rgba(245, 176, 65, 0.14));
+  --live: light-dark(#1f9a55, #3ccf7f);
+  /* A task in progress: the one status colour that isn't green, amber or red. */
+  --doing: light-dark(#2f6fe4, #5b9bff);
+  --warn: light-dark(#a35a00, #f5b041);
+  --overlay: light-dark(rgba(20, 20, 22, 0.32), rgba(0, 0, 0, 0.6));
+  --bubble-me: var(--accent);
   --bubble-me-ink: #ffffff;
-  --bubble-them: light-dark(#e9e9eb, #36363a);
+  --bubble-them: var(--field);
   --bubble-them-ink: var(--ink);
-  --bubble-alert: light-dark(#fdeceb, #3d2523);
-  /*
-   * The app shell's surfaces: the list beside the conversation, the conversation itself, and
-   * anything raised (cards, popovers). Hairlines, not shadows, separate them; one shadow is kept
-   * for popovers and dialogs.
-   */
   --frame: var(--rail);
   --panel: var(--canvas);
-  --edge: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
-  --edge-strong: light-dark(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.16));
-  /* The open conversation in the list: a blue row with white text, as in Messages. */
-  --pick: var(--accent);
+  --edge: var(--line);
+  --edge-strong: light-dark(rgba(24, 24, 27, 0.14), rgba(255, 255, 255, 0.14));
+  /* The open channel in the list: a neutral step, not a block of colour. */
+  --pick: light-dark(rgba(24, 24, 27, 0.065), rgba(255, 255, 255, 0.075));
   --pick-edge: transparent;
-  /* The coordinator's head: its shell is the accent; the screen a pale tint of it, the trim a quiet steel. */
-  --head-screen: light-dark(#eaf3ff, #d6e8ff);
-  --head-trim: light-dark(#d4d9e1, #9aa1ab);
-  /* A contact without a picture: Messages' soft grey gradient. */
-  --avatar-top: light-dark(#a9a9b0, #7c7c84);
-  --avatar-bottom: light-dark(#87878e, #5b5b62);
-  --pop-edge: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.08));
-  --pop-shade: light-dark(rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0.7));
-  --shadow-pop: 0 0 0 1px var(--pop-edge), 0 14px 36px -8px var(--pop-shade);
+  /* The coordinator's head: a kiwi-green shell, its screen a pale tint, the trim a quiet steel. */
+  --head-shell: light-dark(#13854a, #1f9a55);
+  --head-screen: light-dark(#e9f7ef, #dcf5e7);
+  --head-trim: light-dark(#cfd6d2, #9aa39e);
+  /* Behind the head in a round avatar: a soft green field, like a contact photo's backdrop. */
+  --head-bg-top: light-dark(#e3f3ea, #24372c);
+  --head-bg-bottom: light-dark(#c7e6d4, #1a2a21);
+  /* A contact without a picture: a soft neutral gradient. Agents get a hue of their own (kit.tsx). */
+  --avatar-top: light-dark(#a3a3ab, #6f6f78);
+  --avatar-bottom: light-dark(#86868e, #55555d);
+  --pop-edge: light-dark(rgba(24, 24, 27, 0.08), rgba(255, 255, 255, 0.08));
+  --pop-shade: light-dark(rgba(24, 24, 27, 0.14), rgba(0, 0, 0, 0.6));
+  --shadow-pop: 0 0 0 1px var(--pop-edge), 0 12px 32px -10px var(--pop-shade);
 }
 
 :root[data-theme="light"] {
@@ -74,8 +80,12 @@
 }
 
 @theme inline {
-  /* The system's own face first (SF Pro on Apple devices, as Messages has it); Inter where there's none. */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter Variable", system-ui, sans-serif;
+  /*
+   * Inter, everywhere: the same letters on a Mac, Windows and Linux (the system stacks differ a lot
+   * there), a variable optical size (Inter Display at the big sizes, Text at the small ones), and
+   * tabular figures for times and counts. The system face stands in only until it loads.
+   */
+  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   /*
    * Six type steps and nothing between them (scripts/ui-tokens.ts keeps it that way):
@@ -89,17 +99,18 @@
   --text-meta--line-height: 16px;
   --text-ui: 13px;
   --text-ui--line-height: 18px;
-  --text-body: 15px;
+  --text-body: 14px;
   --text-body--line-height: 20px;
-  --text-title: 16px;
-  --text-title--line-height: 21px;
-  --text-display: 24px;
-  --text-display--line-height: 29px;
+  --text-title: 15px;
+  --text-title--line-height: 20px;
+  --text-display: 22px;
+  --text-display--line-height: 28px;
   --radius-row: 6px;
   --radius-ctl: 8px;
   --radius-card: 12px;
-  /* A message bubble: rounder than anything else, so a conversation reads as one at a glance. */
+  /* A message bubble: rounder than anything else, so a conversation reads as one at a glance; 6px where a run stacks. */
   --radius-bubble: 18px;
+  --radius-stack: 6px;
   --color-frame: var(--frame);
   --color-panel: var(--panel);
   --color-edge: var(--edge);
@@ -120,6 +131,7 @@
   --color-ring: var(--ring);
   --color-alert: var(--alert);
   --color-live: var(--live);
+  --color-doing: var(--doing);
   --color-warn: var(--warn);
   --color-overlay: var(--overlay);
   --color-pick: var(--pick);
@@ -127,7 +139,10 @@
   --color-bubble-me-ink: var(--bubble-me-ink);
   --color-bubble-them: var(--bubble-them);
   --color-bubble-them-ink: var(--bubble-them-ink);
-  --color-bubble-alert: var(--bubble-alert);
+  --color-field: var(--field);
+  --color-accent-text: var(--accent-text);
+  --color-decide: var(--decide);
+  --color-decide-wash: var(--decide-wash);
   --shadow-pop: var(--shadow-pop);
 }
 
@@ -142,11 +157,12 @@ body {
   background: var(--rail);
   color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 15px;
-  line-height: 1.35;
-  font-feature-settings: "calt", "kern";
+  font-size: 14px;
+  line-height: 20px;
+  /* Inter's open digits and a tailed l: easier to tell 1, l and I apart in names and keys. */
+  font-feature-settings: "calt", "kern", "cv05", "cv08";
   font-optical-sizing: auto;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.006em;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -162,48 +178,12 @@ time,
 .bubble-text {
   text-wrap: pretty;
   overflow-wrap: anywhere;
-  letter-spacing: -0.012em;
 }
 
-/*
- * The tail on the last bubble of a run, as Messages draws it: a small curl at the bottom corner on the
- * sender's side, drawn with two pseudo-elements in the bubble's colour and the canvas behind it. The
- * carve is only as wide as the curl, so it never paints over the sender's face beside the bubble.
- */
-.bubble-tail {
-  position: relative;
-}
-.bubble-tail::before,
-.bubble-tail::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  height: 17px;
-  z-index: -1;
-}
-.bubble-tail.from-me::before {
-  right: -7px;
-  width: 20px;
-  background: var(--bubble-tone);
-  border-bottom-left-radius: 16px 14px;
-}
-.bubble-tail.from-me::after {
-  right: -10px;
-  width: 10px;
-  background: var(--canvas);
-  border-bottom-left-radius: 10px;
-}
-.bubble-tail.from-them::before {
-  left: -7px;
-  width: 20px;
-  background: var(--bubble-tone);
-  border-bottom-right-radius: 16px 14px;
-}
-.bubble-tail.from-them::after {
-  left: -10px;
-  width: 10px;
-  background: var(--canvas);
-  border-bottom-right-radius: 10px;
+/* Big type is set a little tighter, as display sizes should be. */
+.text-display,
+.text-title {
+  letter-spacing: -0.014em;
 }
 
 ::selection {
@@ -256,6 +236,27 @@ button {
 }
 .animate-flash {
   animation: flash 1.6s ease-out;
+}
+
+/* A message you send lands with a small give; one that arrives rises into place. */
+@keyframes sent {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.94);
+  }
+}
+.animate-sent {
+  animation: sent 0.24s cubic-bezier(0.3, 1.35, 0.5, 1);
+  transform-origin: bottom right;
+}
+@keyframes arrived {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.animate-arrived {
+  animation: arrived 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {

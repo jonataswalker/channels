@@ -1,5 +1,5 @@
 import { ArrowDown01Icon, Cancel01Icon } from "@hugeicons/core-free-icons"
-import { useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 
 import { freeAgentName, nameKey, type JoinRequest } from "@mc/membership.ts"
 import type { Message } from "@mc/protocol.ts"
@@ -50,23 +50,32 @@ export function NeedsYou({
   onJump: (seq: number) => void
 }) {
   const { p } = useControls()
-  const [all, setAll] = useState(false)
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLElement>(null)
   const requests = p.isOwner ? p.requests : []
-  const items: { key: string; node: ReactNode }[] = [
-    ...requests.map((r) => ({ key: `r${r.id}`, node: <RequestItem r={r} roomId={roomId} now={now} /> })),
-    ...escalations.map((m) => ({ key: `e${m.seq}`, node: <EscalationItem m={m} now={now} nameOf={nameOf} onReply={onReply} onJump={onJump} /> })),
-    ...reviews.map((t) => ({ key: `t${t.id}`, node: <ReviewItem t={t} nameOf={nameOf} onApprove={onApproveTask} onSendBack={onSendBack} onOpen={onOpenTask} /> })),
+  // Closes on a click elsewhere, or Escape, like any popover.
+  useEffect(() => {
+    if (!open) return
+    const away = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false)
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false)
+    document.addEventListener("pointerdown", away)
+    document.addEventListener("keydown", esc)
+    return () => {
+      document.removeEventListener("pointerdown", away)
+      document.removeEventListener("keydown", esc)
+    }
+  }, [open])
+  const items: { key: string; summary: string; node: ReactNode }[] = [
+    ...requests.map((r) => ({ key: `r${r.id}`, summary: `${r.name} wants to join`, node: <RequestItem r={r} roomId={roomId} now={now} /> })),
+    ...escalations.map((m) => ({ key: `e${m.seq}`, summary: `${nameOf(m.from)} needs a decision`, node: <EscalationItem m={m} now={now} nameOf={nameOf} onReply={onReply} onJump={(seq) => (setOpen(false), onJump(seq))} /> })),
+    ...reviews.map((t) => ({ key: `t${t.id}`, summary: `${taskId(t.id)} is ready for review`, node: <ReviewItem t={t} nameOf={nameOf} onApprove={onApproveTask} onSendBack={onSendBack} onOpen={(id) => (setOpen(false), onOpenTask(id))} /> })),
     ...(joinedVia.size
       ? [
           {
             key: "via",
+            summary: [...joinedVia].map(([computer, n]) => `${n === 1 ? "An agent" : `${n} agents`} joined via ${computer}`).join(" · "),
             node: (
-              <Row
-                lead={<Monogram name="+" agent size={24} />}
-                title={[...joinedVia].map(([computer, n]) => `${n === 1 ? "An agent" : `${n} agents`} joined via ${computer}`).join(" · ")}
-                detail="Your computer let them in. Remove one from People if it shouldn’t be here."
-              >
+              <Row lead={<Monogram name="+" agent size={24} />} title={[...joinedVia].map(([computer, n]) => `${n === 1 ? "An agent" : `${n} agents`} joined via ${computer}`).join(" · ")} detail="Your computer let them in. Remove one from the details if it shouldn’t be here.">
                 <IconButton label="Dismiss" className="size-7" onClick={onDismissJoined}>
                   <Icon icon={Cancel01Icon} size={14} />
                 </IconButton>
@@ -77,29 +86,31 @@ export function NeedsYou({
       : []),
   ]
   if (!items.length) return null
-  const shown = all ? items : items.slice(0, 3)
+  const n = items.length
   return (
-    <section aria-label="Needs you" className="mx-auto mt-4 max-w-[640px] overflow-hidden rounded-bubble bg-raised shadow-[0_0_0_1px_var(--line),0_2px_8px_-4px_rgba(0,0,0,0.08)]">
-      <h2>
-        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={cx("flex w-full items-baseline gap-2 px-4 pt-2.5 text-left text-ui font-semibold", open ? "pb-1" : "pb-2.5")}>
-          Needs you <span className="font-normal text-ink-3 tabular-nums">{items.length}</span>
-          <Icon icon={ArrowDown01Icon} size={14} className={cx("ml-auto shrink-0 self-center text-ink-3 transition-transform", open && "rotate-180")} />
-        </button>
-      </h2>
-      {open && requests.some((r) => r.check === "unchecked") && <p className="mx-4 mb-1 text-meta leading-normal text-ink-3">{TOO_MANY_REQUESTS}</p>}
+    <section ref={box} aria-label="Needs you" className="sticky top-0 z-20 bg-canvas pt-3 pb-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className={cx("flex h-9 w-full items-center gap-2.5 rounded-full bg-field pr-3 pl-3.5 text-left text-ui transition-colors hover:bg-wash-2", open && "bg-wash-2")}
+      >
+        <span aria-hidden className="size-2 shrink-0 rounded-full bg-decide" />
+        <span className="shrink-0 font-semibold">{n === 1 ? "1 thing needs you" : `${n} things need you`}</span>
+        <span className="min-w-0 flex-1 truncate text-ink-3">{items[0]!.summary}{n > 1 ? `, and ${n - 1} more` : ""}</span>
+        <Icon icon={ArrowDown01Icon} size={14} className={cx("shrink-0 text-ink-3 transition-transform", open && "rotate-180")} />
+      </button>
       {open && (
-      <ul className="max-h-[40vh] divide-y divide-line overflow-y-auto">
-        {shown.map((i) => (
-          <li key={i.key} className="px-4 py-2">
-            {i.node}
-          </li>
-        ))}
-      </ul>
-      )}
-      {open && items.length > 3 && (
-        <button type="button" onClick={() => setAll(!all)} className="w-full border-t border-line px-4 py-2 text-left text-meta font-medium text-ink-2 hover:text-ink">
-          {all ? "Show fewer" : `Show ${items.length - 3} more`}
-        </button>
+        <div className="animate-rise absolute inset-x-0 top-full z-20 -mt-1 overflow-hidden rounded-card bg-raised shadow-pop">
+          {requests.some((r) => r.check === "unchecked") && <p className="mx-4 mt-3 text-meta leading-normal text-ink-3">{TOO_MANY_REQUESTS}</p>}
+          <ul className="max-h-[60vh] divide-y divide-line overflow-y-auto">
+            {items.map((i) => (
+              <li key={i.key} className="px-4 py-3">
+                {i.node}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </section>
   )
@@ -130,7 +141,7 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
   if (auth.status === "signed-out") {
     return (
       <Row lead={lead} title={<><span className="font-medium">{r.name}</span> wants to join</>} detail={who}>
-        <Button size="sm" onClick={auth.signIn}>
+        <Button size="sm" variant="secondary" onClick={auth.signIn}>
           Sign in to review
         </Button>
       </Row>
@@ -168,13 +179,13 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
         >
           <span className="text-meta text-ink-2">{r.name} is taken here. It matches: let in as</span>
           <TextField value={rename} onChange={(e) => setRename(e.target.value)} maxLength={32} aria-label="Name to let it in as" className="w-36" />
-          <Button size="sm" type="submit" disabled={busy || !rename.trim() || p.roster.some((m) => m.active && nameKey(m.name) === nameKey(rename.trim()))}>
+          <Button size="sm" variant="secondary" type="submit" disabled={busy || !rename.trim() || p.roster.some((m) => m.active && nameKey(m.name) === nameKey(rename.trim()))}>
             Let in
           </Button>
         </form>
       ) : r.check === "ready" ? (
         <>
-          <Button size="sm" disabled={busy} onClick={() => run(() => p.onApprove(r, defaultScopes(roomId)), `${r.name} joined`)}>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(() => p.onApprove(r, defaultScopes(roomId)), `${r.name} joined`)}>
             It matches: let in
           </Button>
           <Button size="sm" variant="ghost" onClick={() => ask({ kind: "approve", req: r })}>
@@ -182,7 +193,7 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
           </Button>
         </>
       ) : r.check === "unchecked" ? (
-        <Button size="sm" disabled={busy} onClick={() => run(() => p.onCheck(r), `Asked ${r.name} for its code`)}>
+        <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(() => p.onCheck(r), `Asked ${r.name} for its code`)}>
           Show code
         </Button>
       ) : (
@@ -217,18 +228,19 @@ function EscalationItem({ m, now, nameOf, onReply, onJump }: { m: Message; now: 
       lead={<Monogram name={m.from} agent size={24} />}
       title={
         <>
-          <span className="font-medium">{nameOf(m.from)}</span> <span className="font-medium text-alert">escalated</span>: {excerpt(m.body, 220)}
+          <span className="mr-1.5 rounded-full bg-decide-wash px-1.5 text-meta font-semibold text-decide">Decision for you</span>
+          <span className="font-medium">{nameOf(m.from)}</span>: {excerpt(m.body, 220)}
         </>
       }
       detail={formatAgo(m.ts, now)}
     >
       {draft === null ? (
         <>
-          <Button size="sm" onClick={() => setDraft("")}>
+          <Button size="sm" variant="secondary" onClick={() => setDraft("")}>
             Answer
           </Button>
           <Button size="sm" variant="ghost" onClick={() => onJump(m.seq)}>
-            Show in the conversation
+            Show
           </Button>
         </>
       ) : (
@@ -240,7 +252,7 @@ function EscalationItem({ m, now, nameOf, onReply, onJump }: { m: Message; now: 
           }}
         >
           <TextField autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setDraft(null)} placeholder={`Answer ${nameOf(m.from)}`} aria-label="Answer" className="flex-1" />
-          <Button size="sm" type="submit" disabled={busy || !draft.trim()}>
+          <Button size="sm" variant="secondary" type="submit" disabled={busy || !draft.trim()}>
             Send
           </Button>
         </form>
@@ -277,7 +289,7 @@ function ReviewItem({ t, nameOf, onApprove, onSendBack, onOpen }: { t: Task; nam
     >
       {why === null ? (
         <>
-          <Button size="sm" disabled={busy} onClick={() => act(() => onApprove(t), `Approved ${taskId(t.id)}`)}>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(() => onApprove(t), `Approved ${taskId(t.id)}`)}>
             Approve
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setWhy("")}>
@@ -296,7 +308,7 @@ function ReviewItem({ t, nameOf, onApprove, onSendBack, onOpen }: { t: Task; nam
           }}
         >
           <TextField autoFocus value={why} onChange={(e) => setWhy(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setWhy(null)} placeholder="What to change" aria-label="What to change" className="flex-1" />
-          <Button size="sm" type="submit" disabled={busy || !why.trim()}>
+          <Button size="sm" variant="secondary" type="submit" disabled={busy || !why.trim()}>
             Send back
           </Button>
         </form>

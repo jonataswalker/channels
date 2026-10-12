@@ -58,7 +58,7 @@ export function IconButton({
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   label: string
   active?: boolean
-  /** A round button with a hairline: the header bar's actions. */
+  /** A round button: the header bar's actions. Ghost, like the rest: no outline, a fill only on hover. */
   round?: boolean
   ref?: Ref<HTMLButtonElement>
 }) {
@@ -69,7 +69,7 @@ export function IconButton({
         aria-label={label}
         className={cx(
           "relative inline-flex shrink-0 items-center justify-center transition-colors duration-120 disabled:opacity-40",
-          round ? "rounded-full shadow-[inset_0_0_0_1px_var(--line)]" : "rounded-ctl",
+          round ? "rounded-full" : "rounded-ctl",
           !/(^|\s)size-/.test(className ?? "") && "size-8",
           active ? "bg-wash-2 text-ink" : "text-ink-2 hover:bg-wash hover:text-ink data-popup-open:bg-wash-2 data-popup-open:text-ink",
           className
@@ -92,13 +92,22 @@ export function TextField({ className, ...props }: InputHTMLAttributes<HTMLInput
   )
 }
 
+/** An agent with no colour of its own still gets one, the same every time: a channel of agents isn't a wall of grey. */
+const HUES = Object.keys(PALETTE).filter((c) => c !== "yellow") as Color[]
+function hueOf(name: string): Color {
+  let h = 0
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)!) >>> 0
+  return HUES[h % HUES.length]!
+}
+
 /**
- * Who someone is, at a glance: a circle with their initials in white, as Messages draws a contact
- * without a picture. People and agents look alike; their colour is the person's pick (their agents
- * wear it), and no pick is Messages' soft grey. `working` puts a slow ring around an agent's.
+ * Who someone is, at a glance: a circle with their initials. A person wears their own pick (their
+ * agents wear it too), or a quiet grey; an agent with no pick gets a steady hue from its name.
+ * `working` puts a ring in the in-progress blue around an agent's.
  */
 export function Monogram({
   name,
+  agent,
   size = 28,
   online,
   color,
@@ -106,7 +115,7 @@ export function Monogram({
   className,
 }: {
   name: string
-  /** Kept for callers; agents and people share one look now. */
+  /** An agent: with no colour of its own, it wears a steady hue from its name. */
   agent?: boolean
   size?: number
   online?: boolean
@@ -114,7 +123,7 @@ export function Monogram({
   working?: boolean
   className?: string
 }) {
-  const tone = color ? PALETTE[color] : null
+  const tone = color ? PALETTE[color] : agent ? PALETTE[hueOf(name)] : null
   const letters = initials(name)
   return (
     <span className={cx("relative inline-flex shrink-0", className)} style={{ width: size, height: size }}>
@@ -122,7 +131,7 @@ export function Monogram({
         className={cx(
           "flex size-full items-center justify-center rounded-full font-semibold tracking-[-0.01em] text-white select-none",
           !tone && "bg-[linear-gradient(180deg,var(--avatar-top),var(--avatar-bottom))]",
-          working && "shadow-[0_0_0_1.5px_var(--canvas),0_0_0_3px_var(--accent)]"
+          working && "shadow-[0_0_0_1.5px_var(--canvas),0_0_0_3px_var(--doing)]"
         )}
         style={{ ...(tone && { background: `linear-gradient(180deg, ${tone.fill}, color-mix(in srgb, ${tone.fill} 72%, black))`, color: tone.ink }), fontSize: Math.round(size * (letters.length > 1 ? 0.38 : 0.44)) }}
       >

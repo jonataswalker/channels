@@ -5,9 +5,9 @@
 import type { ChannelIcon } from "@mc/protocol.ts"
 import { cx } from "@/lib/utils"
 
-const SIZE: Record<number, string> = { 20: "size-5 text-meta", 28: "size-7 text-ui", 40: "size-10 text-title", 64: "size-16 text-display" }
+const SIZE: Record<number, string> = { 20: "size-5 text-meta", 28: "size-7 text-ui", 32: "size-8 text-ui", 40: "size-10 text-title", 64: "size-16 text-display" }
 
-export function ChannelIconTile({ icon, title, size }: { icon: ChannelIcon | null; title: string; size: 20 | 28 | 40 | 64 }) {
+export function ChannelIconTile({ icon, title, size }: { icon: ChannelIcon | null; title: string; size: 20 | 28 | 32 | 40 | 64 }) {
   const box = cx("rounded-full", SIZE[size])
   if (icon?.kind === "image") {
     return (

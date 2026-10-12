@@ -27,18 +27,19 @@ export function ThreadPanel({ count, children, composer, onClose }: { count: num
     }
   }, [])
 
+  // On the rail's tone, bubbles and the field step up to the raised one so they still stand out.
   return (
     <ResizablePanel>
       <aside
         aria-label="Thread"
-        className="animate-slide-in flex h-full w-full flex-col bg-canvas shadow-[inset_1px_0_0_var(--line)]"
+        className="animate-slide-in flex h-full w-full flex-col bg-rail [--bubble-them:var(--raised)] [--field:var(--raised)]"
         onKeyDown={(e) => {
           if (e.key !== "Escape") return
           e.preventDefault()
           onClose()
         }}
       >
-        <header className="flex h-14 shrink-0 items-center justify-between pr-3 pl-4 shadow-[inset_0_-1px_0_var(--line)]">
+        <header className="flex h-14 shrink-0 items-center justify-between pr-3 pl-4">
           <span className="text-ui font-semibold">
             Thread <span className="font-normal text-ink-3">{count === 1 ? "1 reply" : `${count} replies`}</span>
           </span>

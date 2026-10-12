@@ -189,7 +189,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
   const hint = disabled ? "Connecting…" : thread ? "Reply" : replyTo ? `Reply to ${nameOf(replyTo.from)}` : (placeholder ?? (route?.view === "coordinator" ? `Message ${route.label}` : "Message"))
 
   return (
-    <div className={cx("relative mx-auto w-full shrink-0", thread ? "px-3 pt-2 pb-3" : "max-w-[900px] px-3 pt-2 pb-3 md:px-6")}>
+    <div className={cx("relative mx-auto w-full shrink-0", thread ? "px-3 pt-2 pb-3" : "max-w-[792px] px-4 pt-2 pb-4")}>
       <input ref={picker} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden" onChange={(e) => (pick(e.target.files), (e.target.value = ""))} />
 
       {matches.length > 0 && (
@@ -199,11 +199,11 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
               key={p.name}
               type="button"
               onMouseDown={(e) => (e.preventDefault(), complete(p))}
-              className={cx("flex w-full items-center gap-2.5 rounded-row px-2 py-1.5 text-left text-ui", i === mention!.index ? "bg-accent text-accent-ink" : "hover:bg-wash")}
+              className={cx("flex w-full items-center gap-2.5 rounded-row px-2 py-1.5 text-left text-ui", i === mention!.index ? "bg-wash-2" : "hover:bg-wash")}
             >
               <Monogram name={p.label} agent={p.agent} color={p.color} size={20} />
               <span className="truncate font-medium">{p.label}</span>
-              {p.label !== p.name && <span className={cx("truncate", i === mention!.index ? "text-accent-ink/75" : "text-ink-3")}>@{p.name}</span>}
+              {p.label !== p.name && <span className="truncate text-ink-3">@{p.name}</span>}
             </button>
           ))}
         </div>
@@ -228,15 +228,15 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
           title="Attach images"
           onClick={() => picker.current?.click()}
           disabled={disabled || files.length >= 8}
-          className="mb-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-wash-2 text-ink-2 transition-colors hover:text-ink disabled:opacity-40"
+          className="mb-[3px] flex size-[30px] shrink-0 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-wash-2 hover:text-ink disabled:opacity-40"
         >
           <Icon icon={Add01Icon} size={17} strokeWidth={2} />
         </button>
 
         <div
           className={cx(
-            "relative min-w-0 flex-1 rounded-bubble bg-canvas shadow-[inset_0_0_0_1px_var(--edge-strong)] transition-shadow focus-within:shadow-[inset_0_0_0_1px_var(--ring)]",
-            dropping && "shadow-[inset_0_0_0_1.5px_var(--accent)]"
+            "relative min-w-0 flex-1 rounded-bubble bg-field transition-shadow focus-within:shadow-[0_0_0_3px_var(--accent-wash)]",
+            dropping && "shadow-[inset_0_0_0_1.5px_var(--ring)]"
           )}
           onDragEnter={(e) => {
             if (disabled || !e.dataTransfer.types.includes("Files")) return
@@ -331,7 +331,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
                   onClearReply()
                 }
               }}
-              className="bubble-text block max-h-[220px] min-h-[36px] min-w-0 flex-1 resize-none bg-transparent py-[7px] pr-1 pl-3.5 text-body outline-none placeholder:truncate placeholder:text-ink-3 focus-visible:outline-none"
+              className="bubble-text block max-h-[220px] min-h-[36px] min-w-0 flex-1 resize-none bg-transparent py-2 pr-1 pl-3.5 text-body outline-none placeholder:truncate placeholder:text-ink-3 focus-visible:outline-none"
             />
             <button
               type="button"
@@ -340,8 +340,8 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
               disabled={!canSend}
               onClick={() => void submit()}
               className={cx(
-                "m-1 flex size-7 shrink-0 items-center justify-center rounded-full transition-[background-color,color,opacity,transform] duration-150",
-                canSend ? "scale-100 bg-accent text-accent-ink hover:opacity-90" : "scale-90 bg-wash-2 text-ink-3 opacity-0"
+                "m-[4px] flex size-7 shrink-0 items-center justify-center rounded-full transition-[background-color,color,opacity,transform] duration-150",
+                canSend ? "scale-100 bg-accent text-accent-ink hover:opacity-90 active:scale-95" : "scale-75 bg-wash-2 text-ink-3 opacity-0"
               )}
             >
               <Icon icon={ArrowUp02Icon} size={15} strokeWidth={2.4} />

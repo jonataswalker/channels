@@ -303,13 +303,21 @@ try {
   const joining = kiwi(["join", code, "smoke", "--relay", BASE, "--as", "bot", "--role", "tester"])
   // Needs you: the request, its code, and one click; what it can do is the default unless chosen.
   const needs = page.getByRole("region", { name: "Needs you" })
+  // Needs you is a slim banner; what's in it opens under it.
+  const needsOpen = async () => {
+    const banner = needs.getByRole("button", { name: /needs? you/ }).first()
+    await banner.waitFor({ timeout: 30000 })
+    if ((await banner.getAttribute("aria-expanded")) !== "true") await banner.click()
+  }
   const letIn = needs.getByRole("button", { name: "It matches: let in" })
   const showCode = needs.getByRole("button", { name: "Show code" })
+  await needsOpen()
   await letIn.or(showCode).first().waitFor({ timeout: 30000 })
   if (await showCode.count()) await showCode.click()
   await letIn.waitFor({ timeout: 30000 })
   await opens("Needs you → Choose what it can do…", () => needs.getByRole("button", { name: "Choose what it can do…" }).click())
   at = "approve"
+  await needsOpen()
   await letIn.click()
   await joining
   await addAgent.waitFor({ state: "hidden", timeout: 15000 })
@@ -381,7 +389,8 @@ try {
 
   // A new channel starts in coordinator mode; one click makes bot the coordinator, another takes it back.
   at = "Make coordinator"
-  await page.getByText(/turned on coordinator-only/).first().waitFor({ timeout: 15000 })
+  // An event line says it in a few words; its tooltip has the whole of it.
+  await page.locator('[title*="turned on coordinator-only"]').first().waitFor({ state: "attached", timeout: 15000 })
   await inDetails(async () => {
     await panel.getByRole("button", { name: "More for bot" }).click()
     await page.getByRole("menuitem", { name: "Make coordinator" }).click()
@@ -390,7 +399,7 @@ try {
   await panel.getByRole("button", { name: "More for bot" }).click()
   await page.getByRole("menuitem", { name: "No longer coordinator" }).click()
   // The mode goes off first (so nobody re-appoints in between), then the role: the role is the newest line.
-  await page.getByText(/cleared bot's role/).first().waitFor({ timeout: 15000 })
+  await page.getByText("bot has no role now").first().waitFor({ timeout: 15000 })
   await panel.getByText(/No coordinator yet/).waitFor({ timeout: 15000 })
   // A direct conversation with a member, from their face.
   await panel.getByRole("button", { name: "More for bot" }).click()

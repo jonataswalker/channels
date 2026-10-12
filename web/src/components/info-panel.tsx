@@ -8,7 +8,7 @@ import { memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import type { Mood } from "@/lib/coordinator-mood"
 import { ChannelIconTile } from "./channel-icon"
-import { CoordinatorHead } from "./coordinator-head"
+import { CoordinatorAvatar, CoordinatorHead } from "./coordinator-head"
 import { MemberActions, loadDetail, memberDetail, useControls } from "./controls"
 import { Icon, type IconSvgElement } from "./icon"
 import { IconButton, Monogram, errorText, toast } from "./kit"
@@ -54,10 +54,10 @@ export function InfoPanel({
   return (
     <aside
       aria-label="Details"
-      className="animate-slide-in flex h-full w-full flex-col bg-rail shadow-[inset_1px_0_0_var(--line)] md:w-[340px]"
+      className="animate-slide-in flex h-full w-full flex-col bg-rail md:w-[340px]"
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
-      <header className="flex h-13 shrink-0 items-center px-3">
+      <header className="flex h-14 shrink-0 items-center px-3">
         <IconButton label="Close details" round className="size-8" onClick={onClose}>
           <Icon icon={Cancel01Icon} size={16} />
         </IconButton>
@@ -67,7 +67,7 @@ export function InfoPanel({
         <div className="flex flex-col items-center text-center">
           {/* The channel's face is its coordinator, when it has one: the one people talk with. */}
           {coordinator ? <CoordinatorHead size={112} mood={mood} live interactive seed={0.5} /> : <ChannelIconTile icon={icon} title={title} size={64} />}
-          <h2 className="mt-2.5 max-w-full truncate text-display font-bold tracking-[-0.02em]">{title}</h2>
+          <h2 className="mt-2 max-w-full truncate text-display font-semibold">{title}</h2>
           <p className="mt-0.5 text-meta text-ink-3">{subtitle}</p>
         </div>
 
@@ -94,7 +94,7 @@ export function InfoPanel({
 
         {p.isOwner && p.requests.length > 0 && (
           <Section>
-            <Row icon={UserMultipleIcon} onClick={openRequests} trailing={<span className="rounded-full bg-accent px-1.5 text-meta font-semibold text-accent-ink tabular-nums">{p.requests.length}</span>}>
+            <Row icon={UserMultipleIcon} onClick={openRequests} trailing={<span className="rounded-full bg-decide-wash px-1.5 text-meta font-semibold text-decide tabular-nums">{p.requests.length}</span>}>
               {p.requests.length === 1 ? `${p.requests[0]!.name} wants to join` : `${p.requests.length} want to join`}
             </Row>
           </Section>
@@ -106,7 +106,7 @@ export function InfoPanel({
             {active.map((m) => {
               const face = (
                 <Face
-                  head={coordinator === m.name ? <CoordinatorHead size={52} mood={mood} seed={0.2} /> : undefined}
+                  head={coordinator === m.name ? <CoordinatorAvatar size={52} mood={mood} seed={0.2} /> : undefined}
                   name={memberName(m)}
                   agent={m.kind !== "human"}
                   online={p.online.has(m.name)}
@@ -141,7 +141,7 @@ export function InfoPanel({
             })}
             {p.isOwner && (
               <button type="button" onClick={openInvite} className="flex flex-col items-center rounded-card py-1 transition-colors hover:bg-wash">
-                <span className="flex size-[52px] items-center justify-center rounded-full bg-wash-2 text-ink-2">
+                <span className="flex size-[52px] items-center justify-center rounded-full bg-field text-ink-2">
                   <Icon icon={Add01Icon} size={22} />
                 </span>
                 <span className="mt-1.5 text-meta font-medium">Add</span>
@@ -150,7 +150,7 @@ export function InfoPanel({
           </div>
           {/* A name in use again (a lost key: removed, then joined anew) reads as the earlier key, never as a second one of them. */}
           {former.length > 0 && (
-            <p className="border-t border-line px-3 py-2 text-meta text-ink-3">
+            <p className="px-3 py-2 text-meta text-ink-3 shadow-[inset_0_1px_0_var(--line)]">
               Left: {[...new Set(former.map((m) => (active.some((a) => a.name === m.name) ? `${m.name} (an earlier key)` : m.name)))].join(", ")}
             </p>
           )}
@@ -168,7 +168,7 @@ export function InfoPanel({
                 <>
                   <span className="font-semibold text-ink">{memberName(p.state.members.get(coordinator))}</span> is the coordinator, but people still talk with everyone.
                   {p.isOwner && p.onMode && (
-                    <button type="button" onClick={() => void p.onMode!(true, true).then(() => toast("People talk with the coordinator now"), (err) => toast(errorText(err), "error"))} className="ml-1 font-medium text-accent hover:underline">
+                    <button type="button" onClick={() => void p.onMode!(true, true).then(() => toast("People talk with the coordinator now"), (err) => toast(errorText(err), "error"))} className="ml-1 font-medium text-accent-text hover:underline">
                       Route through them
                     </button>
                   )}
@@ -220,7 +220,7 @@ export function InfoPanel({
 function RoundAction({ icon, label, onClick, tone }: { icon: IconSvgElement; label: string; onClick: () => void; tone?: "alert" }) {
   return (
     <button type="button" onClick={onClick} aria-label={label === "Pause" ? "Pause agents" : label === "Resume" ? "Resume agents" : label} className="group flex w-14 flex-col items-center gap-1">
-      <span className={cx("flex size-10 items-center justify-center rounded-full bg-raised shadow-[0_0_0_1px_var(--line)] transition-colors group-hover:bg-wash-2", tone === "alert" ? "text-alert" : "text-ink")}>
+      <span className={cx("flex size-10 items-center justify-center rounded-full bg-raised transition-colors group-hover:bg-wash-2", tone === "alert" ? "text-alert" : "text-ink")}>
         <Icon icon={icon} size={18} />
       </span>
       <span className="text-stamp font-medium text-ink-2">{label}</span>
@@ -231,8 +231,8 @@ function RoundAction({ icon, label, onClick, tone }: { icon: IconSvgElement; lab
 function Section({ label, children }: { label?: string; children: ReactNode }) {
   return (
     <section className="mt-4">
-      {label && <h3 className="mb-1 px-3 text-meta font-semibold text-ink-3">{label}</h3>}
-      <div className="overflow-hidden rounded-card bg-raised shadow-[0_0_0_1px_var(--line)] [&>*+*]:border-t [&>*+*]:border-line">{children}</div>
+      {label && <h3 className="mb-1.5 px-3 text-stamp font-semibold tracking-[0.04em] text-ink-3 uppercase">{label}</h3>}
+      <div className="overflow-hidden rounded-card bg-raised [&>*+*]:shadow-[inset_0_1px_0_var(--line)]">{children}</div>
     </section>
   )
 }
@@ -240,7 +240,7 @@ function Section({ label, children }: { label?: string; children: ReactNode }) {
 function Row({ icon, children, detail, trailing, onClick }: { icon: IconSvgElement; children: ReactNode; detail?: string; trailing?: ReactNode; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-wash">
-      <Icon icon={icon} size={16} className="shrink-0 text-accent" />
+      <Icon icon={icon} size={16} className="shrink-0 text-ink-3" />
       <span className="min-w-0 flex-1">
         <span className="block text-ui">{children}</span>
         {detail && <span className="mt-0.5 line-clamp-2 block text-meta text-ink-3">{detail}</span>}
@@ -255,7 +255,7 @@ function Face({ head, name, agent, online, color, working, line, strong, title }
     <span className="flex min-w-0 flex-col items-center px-1" title={title}>
       {head ?? <Monogram name={name} agent={agent} size={52} online={online} color={color} working={working} />}
       <span className="mt-1.5 max-w-full truncate text-meta font-medium">{name}</span>
-      <span className={cx("max-w-full truncate text-stamp", strong ? "font-semibold text-accent" : "text-ink-3")}>{line}</span>
+      <span className={cx("max-w-full truncate text-stamp", strong ? "font-semibold text-ink-2" : "text-ink-3")}>{line}</span>
     </span>
   )
 }
