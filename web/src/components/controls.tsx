@@ -6,6 +6,8 @@ import { loadLine, memberLoad, showsLoad, type Load } from "@mc/load.ts"
 import { cardLine } from "@mc/format.ts"
 import { NAME_RE, type JoinRequest, type Member as RosterMember } from "@mc/membership.ts"
 import { MAX_CHARTER, type ChannelIcon, type Color, type Event } from "@mc/protocol.ts"
+import { decodeJoinCode } from "@mc/crypto.ts"
+import { codeFor, pairNonce, type PairRow } from "@mc/pair.ts"
 import { TOO_MANY_REQUESTS } from "@mc/sas.ts"
 import { SCOPES, type Scope } from "@mc/scopes.ts"
 import { colorOf, COORDINATOR, isPerson, taskId, type ChannelState, type Member } from "@mc/state.ts"
@@ -63,8 +65,8 @@ export interface ControlsProps {
   onRole: (ev: Extract<Event, { op: "role.set" | "role.refuse" }>) => Promise<void>
   onCloseChannel: () => Promise<void>
   onLeaveChannel: () => Promise<void>
-  /** `kiwi tui --link '…'`: this seat in a terminal. It carries this browser's key. */
-  terminalCommand?: () => string
+  /** This seat in a terminal: `kiwi tui <code>` there, then the person approves the code it shows (pair.ts). No key is copied. */
+  pairing?: { code: string; list: () => Promise<PairRow[]>; open: (id: string, nonce: string) => Promise<string>; answer: (p: PairRow) => Promise<void> }
   /** Unused: channel icons left the UI (T1389). Still accepted until conversation.tsx stops passing it. */
   onSetIcon?: (icon: ChannelIcon | null) => Promise<void>
   /** Owner: rename the channel (a title signed by the owner). Absent for everyone else. */
@@ -765,6 +767,7 @@ export function ChannelMenu() {
   const auth = useAuth()
   const [renaming, setRenaming] = useState(false)
   const [charterOpen, setCharterOpen] = useState(false)
+  const [pairing, setPairing] = useState(false)
   return (
     <>
       <Menu
@@ -786,12 +789,9 @@ export function ChannelMenu() {
         )}
         {p.isOwner && p.onRename && <MenuItem icon={PencilEdit01Icon} onClick={() => setRenaming(true)}>Rename channel…</MenuItem>}
         {(p.isOwner || p.state.charter) && <MenuItem icon={BookOpen01Icon} onClick={() => setCharterOpen(true)}>{p.isOwner ? "Charter…" : "Charter"}</MenuItem>}
-        {p.terminalCommand && (
-          <MenuItem
-            icon={ComputerTerminal01Icon}
-            onClick={() => navigator.clipboard.writeText(p.terminalCommand!()).then(() => toast("Copied. It carries your key: paste it only into a terminal on your own computer."))}
-          >
-            Use in a terminal
+        {p.pairing && (
+          <MenuItem icon={ComputerTerminal01Icon} onClick={() => setPairing(true)}>
+            Use in a terminal…
           </MenuItem>
         )}
         <MenuSeparator />
@@ -807,6 +807,7 @@ export function ChannelMenu() {
       </Menu>
       {p.onRename && renaming && <RenameDialog title={p.title ?? ""} onClose={() => setRenaming(false)} onSave={p.onRename} />}
       {charterOpen && <CharterDialog text={p.state.charter?.text ?? ""} onClose={() => setCharterOpen(false)} onSave={p.isOwner ? p.onCharter : undefined} />}
+      {pairing && p.pairing && <TerminalDialog pairing={p.pairing} onClose={() => setPairing(false)} />}
     </>
   )
 }
@@ -932,6 +933,88 @@ function CharterDialog({ text, onClose, onSave }: { text: string; onClose: () =>
           )}
         </div>
       </form>
+    </Modal>
+  )
+}
+
+/**
+ * Your seat in a terminal: run `kiwi tui <code>` there; while this is open, a terminal that asks shows
+ * up here with its code, and you let it in once the codes match. Nothing secret is copied.
+ */
+function TerminalDialog({ pairing, onClose }: { pairing: NonNullable<ControlsProps["pairing"]>; onClose: () => void }) {
+  const [waiting, setWaiting] = useState<{ row: PairRow; code: string | null }[]>([])
+  const [busy, setBusy] = useState(false)
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
+  const command = `kiwi tui ${pairing.code}${location.origin !== PUBLIC_RELAY ? ` --relay ${location.origin}` : ""}`
+  useEffect(() => {
+    let stop = false
+    const tick = async () => {
+      try {
+        const rows = await pairing.list()
+        // Opening one only adds this browser's half of its code; letting it in is the person's click.
+        for (const r of rows) if (!r.wnonce) await pairing.open(r.id, pairNonce()).catch(() => {})
+        const fresh = rows.some((r) => !r.wnonce) ? await pairing.list() : rows
+        const room = decodeJoinCode(pairing.code).roomId
+        const next = await Promise.all(fresh.map(async (row) => ({ row, code: await codeFor(room, row) })))
+        if (!stop) setWaiting(next)
+      } catch {
+        // The relay out of reach for a moment: the next tick tries again.
+      }
+    }
+    void tick()
+    const t = window.setInterval(() => void tick(), 1500)
+    return () => {
+      stop = true
+      window.clearInterval(t)
+    }
+  }, [pairing])
+  const shown = waiting.filter((w) => !dismissed.has(w.row.id))
+  const approve = async (row: PairRow) => {
+    setBusy(true)
+    try {
+      await pairing.answer(row)
+      toast("That terminal has your seat now")
+      onClose()
+    } catch (err) {
+      toast(errorText(err), "error")
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal open onClose={onClose}>
+      <div className="p-5">
+        <Dialog.Title className="text-title font-semibold tracking-[-0.01em]">Use in a terminal</Dialog.Title>
+        <Dialog.Description className="mt-1 text-ui leading-normal text-ink-2">
+          Run this in a terminal on your computer. It shows a code; when the same code appears here, let it in. Keep this open until then.
+        </Dialog.Description>
+        <div className="mt-4">
+          <CopyBox text={command} label="Copy command" done="Command copied" />
+        </div>
+        <div className="mt-4 grid gap-2" aria-live="polite">
+          {shown.length === 0 && <p className="text-meta text-ink-2">Waiting for a terminal…</p>}
+          {shown.map(({ row, code }) => (
+            <div key={row.id} className="flex items-center gap-3 rounded-ctl bg-wash px-3 py-2.5">
+              {code ? (
+                <>
+                  <span className="min-w-0 flex-1 text-ui">
+                    Does your terminal show <span className="font-mono font-semibold tracking-wide">{code}</span>?
+                  </span>
+                  <Button size="sm" disabled={busy} onClick={() => void approve(row)}>
+                    It matches
+                  </Button>
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => setDismissed((d) => new Set(d).add(row.id))}>
+                    No
+                  </Button>
+                </>
+              ) : (
+                <span className="text-meta text-ink-2">A terminal is asking; its code is on the way…</span>
+              )}
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-meta text-ink-3">Only let in a terminal you just opened yourself. The seat it gets can act as you.</p>
+      </div>
     </Modal>
   )
 }

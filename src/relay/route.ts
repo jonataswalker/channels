@@ -24,6 +24,12 @@ import { betaMessage, inBeta, Policy } from "./policy.ts";
 import {
   admit,
   admitsNow,
+  answerPair,
+  askPair,
+  pairNonceFromBrowser,
+  pairStatus,
+  pendingPairs,
+  revealPair,
   allow,
   append,
   approve,
@@ -293,11 +299,61 @@ const routes: RoomRoute[] = [
         return { data: { revealed: true }, fx: fresh ? { broadcast: [frame({ t: "request" })] } : undefined };
       }),
   },
+  // Pairing a terminal with a person's seat (pair.ts): the terminal signs with its one-time key, members answer.
+  // Changes ride the "request" frame, which every client already re-reads on, so older ones are unaffected.
+  {
+    method: "POST",
+    path: "/pairs",
+    guard: "requester", // the terminal's one-time key, which isn't a member
+    run: ({ me: pk }) =>
+      Effect.gen(function* () {
+        const { id, fresh } = yield* askPair(pk, yield* json<{ xpk?: unknown; commit?: unknown }>());
+        return { data: { id }, fx: fresh ? { broadcast: [frame({ t: "request" })] } : undefined };
+      }),
+  },
+  {
+    method: "GET",
+    path: new RegExp(`^/pairs/${ID}$`),
+    guard: "requester", // the terminal that asked
+    run: ({ me: pk }, m) => Effect.map(pairStatus(m[1]!, pk), (data) => ({ data })),
+  },
+  {
+    method: "POST",
+    path: new RegExp(`^/pairs/${ID}/reveal$`),
+    guard: "requester",
+    run: ({ me: pk }, m) =>
+      Effect.gen(function* () {
+        const { nonce } = yield* json<{ nonce?: unknown }>();
+        const data = yield* revealPair(m[1]!, pk, nonce);
+        return { data, fx: { broadcast: [frame({ t: "request" })] } };
+      }),
+  },
   {
     method: "GET",
     path: new RegExp(`^/requests/${ID}$`),
     guard: "requester", // signed by the requester's key, which isn't a member yet
     run: ({ me: pk }, m) => Effect.map(requestStatus(m[1]!, pk), (data) => ({ data })),
+  },
+  { method: "GET", path: "/pairs", guard: "member", run: () => Effect.map(pendingPairs(), (pairs) => ({ data: { pairs } })) },
+  {
+    method: "POST",
+    path: new RegExp(`^/pairs/${ID}/nonce$`),
+    guard: "member", // a person's browser, opening the pairing
+    run: (_, m) =>
+      Effect.gen(function* () {
+        const { nonce } = yield* json<{ nonce?: unknown }>();
+        return { data: yield* pairNonceFromBrowser(m[1]!, nonce) };
+      }),
+  },
+  {
+    method: "PUT",
+    path: new RegExp(`^/pairs/${ID}$`),
+    guard: "member", // the person approved: their seat, sealed to the terminal
+    run: (_, m) =>
+      Effect.gen(function* () {
+        const { box } = yield* json<{ box?: unknown }>();
+        return { data: yield* answerPair(m[1]!, box), fx: { broadcast: [frame({ t: "request" })] } };
+      }),
   },
   { method: "GET", path: "/", guard: "member", run: () => withRoom((db) => ({ data: { head: db.head() } })) },
   {

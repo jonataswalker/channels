@@ -37,6 +37,7 @@ import {
 } from "./crypto.ts";
 import { sign, signText, verify, verifyText, type Identity } from "./identity.ts";
 import { commitTo, joinCheckCode, joinNonce, ownerNonceStatement, spendAuto, type SigningBudget } from "./sas.ts";
+import { codeFor, pairCode, pairCommit, pairInfo, type PairRow } from "./pair.ts";
 import { canPost, scopesOf, wireScopes, type Scope } from "./scopes.ts";
 import { COORDINATOR, type ChannelState, type GuardFloor } from "./state.ts";
 import { admitRoster, freeAgentName, handleFor, inlineText, makeAdmittedRecord, makeRecord, NAME_RE, nameKey, readRecord, RESERVED_NAMES, sealRecord, type JoinRequest, type Member, type MemberInfo, type ReadEntry } from "./membership.ts";
@@ -568,6 +569,12 @@ export interface ChannelFx {
    * under `name`, or name-2… if that's taken. Refused when it has no live seat, or the channel is on hold.
    */
   admit(agent: { pk: string; xpk: string; name: string; about?: string }): Effect.Effect<{ name: string; access: ChannelAccess }, Refused, Relay>;
+  /** Terminals waiting to pair with a seat here (pair.ts). */
+  pairs(): Effect.Effect<PairRow[], Refused, Relay>;
+  /** Open a pairing with this browser's nonce (the first one in wins); returns the one that counts. */
+  pairOpen(pairId: string, nonce: string): Effect.Effect<string, Refused, Relay>;
+  /** The person confirmed the codes match: seal `seat` to the terminal's one-time key and hand it over. */
+  pairAnswer(p: PairRow, seat: Identity): Effect.Effect<void, Refused, Relay>;
   rotate(): Effect.Effect<number, Refused, Relay>;
   rotateIfDue(): Effect.Effect<boolean, Refused, Relay>;
   close(): Effect.Effect<void, Refused, Relay>;
@@ -729,6 +736,37 @@ export class Channel {
       const keys = yield* Effect.promise(() => unwrapKeys(id, roomId, r.keys, info.ownerPk, signedKeys));
       const access: ChannelAccess = { roomId, ownerPk: info.ownerPk, ownerXpk: info.ownerXpk, epoch: r.epoch, keys, signedKeys };
       return access;
+    }),
+
+    /**
+     * A terminal asks to pair with a person's seat (pair.ts), under a one-time identity `id`: its key and
+     * its commit to `nonce`. Asking again with the same key resumes the same pairing.
+     */
+    pairAsk: Effect.fn("Channel.pairAsk")(function* (relay: string, code: string, id: Identity, nonce: string) {
+      const { roomId } = yield* pinnedInfo(relay, code);
+      if (!id.xpk) return yield* new MissingKey("identity has no exchange key");
+      const commit = yield* Effect.promise(() => pairCommit(roomId, id.pk, id.xpk!, nonce));
+      const { id: pairId } = yield* callRelay<{ id: string }>(relay, roomId, "/pairs", { method: "POST", identity: id, body: JSON.stringify({ xpk: id.xpk, commit }) });
+      return { roomId, pairId };
+    }),
+
+    /**
+     * Where a terminal's pairing stands. Once a browser opened it, this reveals the terminal's nonce and
+     * gives the code to show; once the person approved, the seat's identity, opened from its sealed box.
+     */
+    pairCheck: Effect.fn("Channel.pairCheck")(function* (relay: string, code: string, id: Identity, pairId: string, nonce: string) {
+      const { roomId } = yield* pinnedInfo(relay, code);
+      const r = yield* callRelay<{ wnonce: string | null; revealed: boolean; box: string | null }>(relay, roomId, `/pairs/${pairId}`, { identity: id });
+      if (!r.wnonce) return { code: null, seat: null };
+      if (!r.revealed) yield* callRelay(relay, roomId, `/pairs/${pairId}/reveal`, { method: "POST", identity: id, body: JSON.stringify({ nonce }) });
+      const shown = yield* Effect.promise(() => pairCode(roomId, id.pk, id.xpk!, nonce, r.wnonce!));
+      if (!r.box) return { code: shown, seat: null };
+      const opened = yield* Effect.promise(() => openFrom(id.xsk!, r.box!, pairInfo(roomId)));
+      let seat: Identity | null = null;
+      try {
+        seat = opened ? (JSON.parse(opened) as Identity) : null;
+      } catch {}
+      return { code: shown, seat };
     }),
   };
 
@@ -1177,6 +1215,21 @@ export class Channel {
         }
       }
       return yield* new Rejected(`couldn't find a free name near "${agent.name}"; pick another`);
+    }),
+
+    pairs: Effect.fn("Channel.pairs")({ self: this }, function* (this: Channel) {
+      return (yield* this.request<{ pairs: PairRow[] }>("/pairs")).pairs;
+    }),
+
+    pairOpen: Effect.fn("Channel.pairOpen")({ self: this }, function* (this: Channel, pairId: string, nonce: string) {
+      return (yield* this.request<{ wnonce: string }>(`/pairs/${pairId}/nonce`, { method: "POST", body: JSON.stringify({ nonce }) })).wnonce;
+    }),
+
+    pairAnswer: Effect.fn("Channel.pairAnswer")({ self: this }, function* (this: Channel, p: PairRow, seat: Identity) {
+      // Only to a pairing whose code checks out: the terminal's reveal must match the commit it made first.
+      if (!(yield* Effect.promise(() => codeFor(this.roomId, p)))) return yield* new Rejected("that terminal hasn't shown a code yet");
+      const box = yield* Effect.promise(() => sealTo(p.xpk, JSON.stringify(seat), pairInfo(this.roomId)));
+      yield* this.request(`/pairs/${p.id}`, { method: "PUT", body: JSON.stringify({ box }) });
     }),
 
     rotate: Effect.fn("Channel.rotate")({ self: this }, function* (this: Channel) {
@@ -1785,6 +1838,18 @@ export class Channel {
   /** Remove a member and rotate the key so they can't read anything newer. */
   remove(pk: string): Promise<void> {
     return run(this.fx.remove(pk));
+  }
+
+  pairs(): Promise<PairRow[]> {
+    return run(this.fx.pairs());
+  }
+
+  pairOpen(pairId: string, nonce: string): Promise<string> {
+    return run(this.fx.pairOpen(pairId, nonce));
+  }
+
+  pairAnswer(p: PairRow, seat: Identity): Promise<void> {
+    return run(this.fx.pairAnswer(p, seat));
   }
 
   seatComputer(c: { pk: string; xpk: string; label: string }, until?: number): Promise<Member> {

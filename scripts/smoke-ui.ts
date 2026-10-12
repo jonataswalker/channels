@@ -80,8 +80,13 @@ async function opens(name: string, open: () => Promise<void>) {
   at = name
   await open()
   await popup(page).waitFor({ state: "visible", timeout: 5000 })
-  await page.keyboard.press("Escape")
-  await page.locator("[role=menu], [role=dialog], [role=alertdialog]").first().waitFor({ state: "hidden", timeout: 5000 }).catch(() => {})
+  // Escape until nothing's open: a dialog opened from a menu item can still be mounting when the first one lands.
+  const open_ = page.locator("[role=menu], [role=dialog], [role=alertdialog]")
+  for (let i = 0; i < 3 && (await open_.count()) > 0; i++) {
+    await page.keyboard.press("Escape")
+    await open_.first().waitFor({ state: "hidden", timeout: 2000 }).catch(() => {})
+  }
+  if ((await open_.count()) > 0) throw new Error(`${name} didn't close with Escape`)
   await page.waitForTimeout(150)
   console.log(`ok  ${name}`)
 }
@@ -304,6 +309,31 @@ try {
   await page.getByText("smoke test", { exact: true }).first().waitFor()
   await kiwi(["join", code, "smoke", "--relay", BASE, "--as", "helper"])
   await page.getByText(/joined via/).first().waitFor({ timeout: 15000 })
+  console.log(`ok  ${at}`)
+
+  // Your seat in a terminal (T1389): kiwi tui <code> on another computer shows a code, the dialog shows
+  // the same, and "It matches" hands the seat over sealed. Nothing with a key is copied.
+  at = "pair a terminal"
+  await page.getByRole("button", { name: "Channel menu" }).click()
+  await page.getByRole("menuitem", { name: "Use in a terminal…" }).click()
+  const pairDialog = page.getByRole("dialog").filter({ hasText: "Use in a terminal" })
+  const pairCmd = (await pairDialog.getByText(/^kiwi tui mc2-/).innerText()).trim()
+  const termHome = join(data, "terminal")
+  let termOut = ""
+  // KIWI_RELAY too: whatever the command says, this never reaches a relay but the local one.
+  const term = spawn("bun", ["src/cli/main.ts", ...pairCmd.split(/\s+/).slice(1)], { cwd: ROOT, env: { ...cliEnv, KIWI_HOME: termHome, KIWI_RELAY: BASE.replace(/\/$/, "") } })
+  term.stdout.on("data", (d: Buffer) => (termOut += d))
+  term.stderr.on("data", (d: Buffer) => (termOut += d))
+  const termDone = new Promise<number | null>((ok) => term.on("exit", ok))
+  const asked = pairDialog.getByText(/Does your terminal show/)
+  await asked.waitFor({ timeout: 20000 }).catch((e) => {
+    throw new Error(`${e instanceof Error ? e.message.split("\n")[0] : e} (terminal: ${termOut.trim() || "nothing yet"})`)
+  })
+  const shownCode = /\d{3}-\d{3}/.exec(await asked.innerText())![0]
+  for (let i = 0; i < 100 && !termOut.includes(`code ${shownCode}`); i++) await page.waitForTimeout(100)
+  if (!termOut.includes(`code ${shownCode}`)) throw new Error(`the terminal didn't show ${shownCode}: ${termOut}`)
+  await pairDialog.getByRole("button", { name: "It matches" }).click()
+  if ((await termDone) !== 0 || !termOut.includes("Your seat is on this computer now")) throw new Error(`pairing failed: ${termOut}`)
   console.log(`ok  ${at}`)
 
   await kiwi(["-c", "smoke", "--as", "bot", "task", "add", "Smoke task", "--owner", "bot"])

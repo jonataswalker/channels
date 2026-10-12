@@ -28,7 +28,8 @@ import { describeMember, freeAgentName, handleFor, type JoinRequest } from "../m
 import { baseName, here, seatsNear } from "../seats.ts";
 import { ago, cardLine, charterLines, describeEvent, fitsLine, holdLine, formatAdded, formatAfter, formatClaims, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, statusJson } from "../format.ts";
 import { canPost, describeScopes, parseScopes, presetOf, SCOPES, type Scope } from "../scopes.ts";
-import { fingerprint, type Identity } from "../identity.ts";
+import { fingerprint, generateIdentity, type Identity } from "../identity.ts";
+import { PAIR_TTL_MS, pairNonce } from "../pair.ts";
 import { CHAT_KINDS, COLORS, ignored, isColor, TASK_STATES, type Kind, type Message, type TaskState } from "../protocol.ts";
 import { COORDINATOR, humanOf, parseTaskId, similarOpenTasks, taskId, type ChannelState } from "../state.ts";
 import { VERSION } from "../version.ts";
@@ -70,7 +71,8 @@ Agents
 People
   kiwi setup                                     set up this computer, once (link it to your account; Claude Code)
   kiwi create [alias]                            make a channel you own; prints its join code
-  kiwi tui [--link 'URL']                        your seat in this terminal, like the web page
+  kiwi tui [mc2-…]                               your seat in this terminal, like the web page; with the join code,
+                                                 pair it by a code you approve in your browser (Use in a terminal)
   kiwi web [--sign-in]                           your dashboard link (it carries the owner key: keep it to yourself)
   kiwi hold ["why"] | kiwi hold off              stop every agent at once / let them carry on (owner)
   kiwi requests · approve CODE · deny CODE · kick NAME · close   who gets in and who goes (owner)
@@ -409,7 +411,6 @@ const personAlias = Effect.fn("kiwi.personAlias")(function* () {
  * member, keep it here, and name the channel. Returns its alias.
  */
 const importPerson = Effect.fn("kiwi.importPerson")(function* (link: string) {
-  const keys = yield* Keystore;
   let url: URL;
   try {
     url = new URL(link.trim());
@@ -430,8 +431,14 @@ const importPerson = Effect.fn("kiwi.importPerson")(function* (link: string) {
   } catch {
     return yield* die("that link carries no key (an invite link only asks to join): copy the one from Use in a terminal");
   }
-  if (typeof id?.name !== "string" || !NAME_RE.test(id.name) || typeof id.pk !== "string" || typeof id.sk !== "string" || typeof id.xsk !== "string") return yield* die("the key in that link isn't one kiwi can use");
-  const relay = (opt.relay ?? process.env.KIWI_RELAY ?? url.origin).replace(/\/+$/, "");
+  return yield* importSeat(code, (opt.relay ?? process.env.KIWI_RELAY ?? url.origin).replace(/\/+$/, ""), id);
+});
+
+/** Keep a person's seat here (from a link, or paired): check the key is a member, save it, and name the channel. Returns its alias. */
+const importSeat = Effect.fn("kiwi.importSeat")(function* (code: string, relay: string, id: Identity) {
+  const keys = yield* Keystore;
+  const { roomId } = decodeJoinCode(code);
+  if (typeof id?.name !== "string" || !NAME_RE.test(id.name) || typeof id.pk !== "string" || typeof id.sk !== "string" || typeof id.xsk !== "string") return yield* die("that seat's key isn't one kiwi can use");
   const gone = (err: unknown) => err instanceof RelayError && [401, 403, 404].includes(err.status);
   const access = yield* Channel.fx.resume(relay, code, id).pipe(Effect.catchIf(gone, () => die("that key isn't in this channel any more (it left, was removed, or the channel closed)")));
   const mine = (yield* keys.identitiesIn(roomId)).includes(id.name);
@@ -452,6 +459,33 @@ const importPerson = Effect.fn("kiwi.importPerson")(function* (link: string) {
       `  Anything running as you on this computer can read it, agents too. From now on: kiwi tui${several ? ` -c ${alias}` : ""}\n`,
   );
   return alias;
+});
+
+/**
+ * Pair this terminal with a person's seat (pair.ts): ask under a one-time key, show the code once the
+ * person's browser opens the pairing, and take the seat when they approve it there. No key is ever copied.
+ */
+const pairSeat = Effect.fn("kiwi.pairSeat")(function* (code: string) {
+  const relay = relayUrl();
+  const eph = yield* Effect.promise(() => generateIdentity("pair"));
+  const nonce = pairNonce();
+  const { pairId } = yield* Channel.fx.pairAsk(relay, code, eph, nonce);
+  out("Pairing this terminal with your seat. In your browser, open the channel: it asks whether this terminal may have it.");
+  const deadline = Date.now() + PAIR_TTL_MS;
+  let shown: string | null = null;
+  for (;;) {
+    const st = yield* Channel.fx.pairCheck(relay, code, eph, pairId, nonce);
+    if (st.code && st.code !== shown) {
+      shown = st.code;
+      out(`code ${st.code}: approve in your browser once it shows the same 6 digits.`);
+    }
+    if (st.seat) {
+      out("approved.");
+      return yield* importSeat(code, relay, st.seat);
+    }
+    if (Date.now() > deadline) return yield* die("nobody approved this terminal within 10 minutes; run the same command to try again", 3);
+    yield* Effect.sleep(1500);
+  }
 });
 
 /** A command: its exit code, when it isn't 0. */
@@ -1602,19 +1636,31 @@ const commands: Record<string, Command> = {
   tui: () =>
     Effect.gen(function* () {
       const keys = yield* Keystore;
-      if (!process.stdin.isTTY || !process.stdout.isTTY) return yield* die("kiwi tui needs a terminal (stdin and stdout a TTY)");
+      const tty = process.stdin.isTTY && process.stdout.isTTY;
       const link = opt.link ?? (args[1]?.includes("#") ? args[1] : undefined);
-      const alias = link ? yield* importPerson(link) : yield* personAlias();
+      // kiwi tui <join code>: pair this terminal by a code you approve on the web.
+      const pairing = !link && args[1]?.startsWith("mc2-") ? args[1].trim() : undefined;
+      if (pairing) {
+        try {
+          decodeJoinCode(pairing);
+        } catch {
+          return yield* die("that isn't a join code (they look like mc2-…-…)");
+        }
+      }
+      if (!tty && !pairing) return yield* die("kiwi tui needs a terminal (stdin and stdout a TTY)");
+      const alias = link ? yield* importPerson(link) : pairing ? yield* pairSeat(pairing) : yield* personAlias();
+      // Paired from something that isn't a terminal: the seat is here now, for the next kiwi tui.
+      if (!tty) return out(`Your seat is on this computer now. Open it in a terminal with: kiwi tui${Object.keys((yield* keys.config).channels).length > 1 ? ` -c ${alias}` : ""}`);
       const c = (yield* keys.config).channels[alias]!;
       const name = opt.as ?? c.person ?? c.owner;
       const here = yield* keys.identitiesIn(c.roomId);
       if (!name || (name !== c.person && name !== c.owner)) {
         return yield* die(
           `there's no person's seat for "${alias}" on this computer (agents here: ${here.join(", ") || "none"}).\n` +
-            "  On the web, open the channel's menu → Use in a terminal, and run the command it copies (kiwi tui --link '…').",
+            "  On the web, open the channel's menu → Use in a terminal, and run the command it shows (kiwi tui mc2-…).",
         );
       }
-      if (!here.includes(name)) return yield* die(`the key for ${name} in "${alias}" is gone from this computer; bring it again with kiwi tui --link '…'`);
+      if (!here.includes(name)) return yield* die(`the key for ${name} in "${alias}" is gone from this computer; bring it again with kiwi tui mc2-… (the channel's menu → Use in a terminal)`);
       acting.alias = alias;
       acting.name = name;
       const s = yield* openPersonSession(alias, c, name);
