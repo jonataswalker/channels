@@ -128,14 +128,14 @@ try {
   await setup
   await owner.goto(channel)
   const joining = kiwi(["join", code, "kiwi", "--relay", BASE, "--as", "atlas", "--role", "backend"])
-  const review = owner.getByRole("button", { name: "Review", exact: true })
-  await review.waitFor({ timeout: 30000 })
-  await review.click()
-  await owner.getByRole("button", { name: "Review and approve" }).click()
-  await owner.getByRole("button", { name: "Approve", exact: true }).click()
+  // Needs you: compare the code, let it in.
+  const needs = owner.getByRole("region", { name: "Needs you" })
+  const letIn = needs.getByRole("button", { name: "It matches: let in" })
+  const showCode = needs.getByRole("button", { name: "Show code" })
+  await letIn.or(showCode).first().waitFor({ timeout: 30000 })
+  if (await showCode.count()) await showCode.click()
+  await letIn.click({ timeout: 30000 })
   await joining
-  await owner.waitForTimeout(500)
-  if (await owner.getByRole("dialog").count()) await owner.keyboard.press("Escape")
 
   // The conversation: chat, a question, a thread, a long message with code, tasks, a claim, facts.
   const composer = () => owner.getByPlaceholder(/^Write (to the channel|in #)/)
@@ -160,19 +160,22 @@ try {
   await owner.waitForTimeout(400)
   await owner.getByRole("button", { name: "Close thread" }).click()
   await bot("task", "start", firstTask, "steady numbers look fine")
-
-  // A room, with a message in it.
-  await owner.getByRole("button", { name: "New room" }).click()
-  await owner.getByRole("textbox", { name: "Room name" }).fill("design")
-  await owner.getByRole("button", { name: "Create room" }).click()
-  await owner.getByPlaceholder(/^Write in #design/).waitFor()
-  await owner.getByPlaceholder(/^Write in #design/).fill("Moodboard: Linear's activity feed, one reading column.")
-  await owner.keyboard.press("Enter")
-  await owner.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /general/ }).click()
+  // Work waiting on a person's review, and a decision an agent hands to its person: both under Needs you.
+  const reviewed = /T\d+/.exec(await bot("task", "add", "Cache sealed history in the browser", "--owner", "atlas", "--review", "any"))?.[0] ?? "T0"
+  await bot("task", "review", reviewed, "reload fetches only what is new")
+  await bot("escalate", "Should I delete the 800 test rooms on the old relay? It frees space, and it can't be undone.")
 
   // An agent asking to join, left pending (its CLI waits in the background).
   void kiwi(["join", code, "kiwi-2", "--relay", BASE, "--as", "scout", "--role", "frontend"], (o) => void (pendingOut = o)).catch(() => {})
-  await review.waitFor({ timeout: 30000 }).catch(() => console.log(`no pending request to show: ${pendingOut.trim().split("\n").pop()}`))
+  await needs.getByText(/scout/).first().waitFor({ timeout: 30000 }).catch(() => console.log(`no pending request to show: ${pendingOut.trim().split("\n").pop()}`))
+
+  // A second channel, still empty: it opens on how to add an agent.
+  await plus.click()
+  await owner.getByRole("menuitem", { name: "New channel" }).click()
+  await owner.getByRole("dialog").getByRole("textbox").fill("fresh")
+  await owner.getByRole("button", { name: "Create channel" }).click()
+  await owner.waitForURL((u) => u.toString() !== channel && /#mc2-/.test(u.toString()))
+  const fresh = owner.url()
 
   // ---------- shoot ----------
   for (const theme of ["dark", "light"] as const) {
@@ -190,14 +193,12 @@ try {
         await owner.locator("button[aria-label='Reply']").last().dispatchEvent("click")
         await owner.getByRole("button", { name: "Close thread" }).waitFor()
       }, () => owner.getByRole("button", { name: "Close thread" }).click())
-      await shoot(owner, tag, "04-tasks", () => owner.getByRole("tab", { name: /^Work/ }).click(), () => owner.getByRole("tab", { name: "Chat" }).click())
+      await shoot(owner, tag, "04-tasks", () => owner.getByRole("button", { name: /^Tasks/ }).click(), () => owner.getByRole("button", { name: "Everything" }).click())
       await shoot(owner, tag, "05-task-page", async () => {
-        await owner.getByRole("tab", { name: /^Work/ }).click()
         await owner.getByRole("button", { name: /Write fewer rows/ }).first().click()
         await owner.getByRole("heading", { name: "Activity" }).waitFor()
       }, async () => {
         await owner.getByRole("button", { name: "Close task" }).click()
-        await owner.getByRole("tab", { name: "Chat" }).click()
       })
       await shoot(owner, tag, "06-people", () => owner.getByRole("button", { name: /\d+ members?$/ }).click())
       await shoot(owner, tag, "07-invite", () => owner.getByRole("button", { name: "Invite" }).click())
@@ -208,12 +209,12 @@ try {
         await owner.getByRole("menuitem", { name: "Settings…" }).click()
       })
       await shoot(owner, tag, "11-palette", () => owner.getByRole("button", { name: /^Go to…/ }).click())
-      await shoot(owner, tag, "12-composer-kind", () => owner.getByRole("button", { name: /^Message/ }).click())
-      await shoot(owner, tag, "13-join-request", () => review.click())
-      await shoot(owner, tag, "14-room", () => owner.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /design/ }).click(), () =>
-        owner.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /general/ }).click(),
-      )
+      await shoot(owner, tag, "12-notes", () => owner.getByRole("button", { name: /^Notes/ }).click(), () => owner.getByRole("button", { name: /^Notes/ }).click())
+      await shoot(owner, tag, "13-pause", () => owner.getByRole("button", { name: "Pause agents" }).click())
       await shoot(owner, tag, "15-new-channel-menu", () => owner.getByRole("button", { name: "New channel or join" }).click())
+      await owner.goto(fresh)
+      await owner.getByRole("region", { name: "Add an agent" }).waitFor({ timeout: 10000 }).catch(() => {})
+      await shoot(owner, tag, "16-add-agent")
 
       // Signed out, and someone opening the invite link who isn't in yet.
       const out = await browser.newPage({ viewport: size })

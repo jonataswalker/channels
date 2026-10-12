@@ -56,7 +56,7 @@ export function TaskPage({
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-edge px-4 md:px-5">
         <nav className="flex min-w-0 flex-1 items-center gap-1.5 text-title font-semibold" aria-label="Breadcrumb">
           <button type="button" onClick={onClose} className="font-medium text-ink-3 hover:text-ink">
-            Work
+            Tasks
           </button>
           <span className="text-ink-3">/</span>
           <span className="tabular-nums">{taskId(id)}</span>
