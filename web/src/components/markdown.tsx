@@ -1,9 +1,10 @@
 import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons"
-import { Children, isValidElement, memo, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react"
+import { Children, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkBreaks from "remark-breaks"
 import remarkGfm from "remark-gfm"
 import { compareCells, nextSort, sanitizeMarkdownUrl, type SortDir } from "../lib/markdown"
+import { cx } from "../lib/utils"
 import { Icon } from "./icon"
 
 // react-markdown never renders raw HTML. urlTransform also drops any scheme outside the allowlist.
@@ -52,10 +53,25 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   const timer = useRef<number | undefined>(undefined)
   const [copied, setCopied] = useState(false)
   useEffect(() => () => window.clearTimeout(timer.current), [])
+  // Lines wider than the bubble scroll sideways; while there's more to the right, the edge fades, so a
+  // cut-off line reads as "scroll for more" rather than as the end of it.
+  const [more, setMore] = useState(false)
+  const measure = useCallback(() => {
+    const el = preRef.current
+    if (el) setMore(el.scrollWidth - el.clientWidth - el.scrollLeft > 2)
+  }, [])
+  useEffect(() => {
+    const el = preRef.current
+    if (!el) return
+    measure()
+    const watch = new ResizeObserver(measure)
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [measure])
   return (
     <div className="group relative my-2">
       {/* On a phone, long lines wrap rather than run off the edge with no sign there's more. */}
-      <pre ref={preRef} className="overflow-x-auto rounded-ctl bg-wash-2 px-3 py-2.5 font-mono text-ui leading-relaxed text-ink max-sm:break-all max-sm:whitespace-pre-wrap [&>code]:bg-transparent [&>code]:p-0">
+      <pre ref={preRef} onScroll={measure} className={cx("overflow-x-auto rounded-ctl bg-wash-2 px-3 py-2.5 font-mono text-ui leading-relaxed text-ink max-sm:break-all max-sm:whitespace-pre-wrap [&>code]:bg-transparent [&>code]:p-0", more && "code-more")}>
         {children}
       </pre>
       <button

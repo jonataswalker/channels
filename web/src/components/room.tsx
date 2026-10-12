@@ -16,7 +16,7 @@ import { PALETTE } from "@/lib/characters"
 import { excerpt, formatAgo, formatTime } from "@/lib/format"
 import { joinCommand } from "@/lib/join-line"
 import { escapeLayer } from "@/lib/escape"
-import { AGENT_SPEAKING_MS, agentInputs, agentMood, currentTask, delegations, dialogueOf, flagsByAgent, hiddenFlags, newDelegations, presentAt, seatsPerSide, stageAgents, teamEvents } from "@/lib/room"
+import { AGENT_SPEAKING_MS, agentInputs, agentMood, currentTask, delegations, dialogueOf, emptyLines, flagsByAgent, hiddenFlags, newDelegations, presentAt, seatsPerSide, stageAgents, teamEvents } from "@/lib/room"
 import { cx } from "@/lib/utils"
 import { Command } from "./add-agent"
 import { CoordinatorAvatar, CoordinatorHead, type FaceShape } from "./coordinator-head"
@@ -375,6 +375,7 @@ export function Room(p: RoomProps) {
       coordMood={coordMood}
       waiting={replay === null && p.waiting}
       replaying={replay !== null}
+      replayedAt={replayAt === null ? null : formatTime(replayAt)}
       starters={p.starters}
       onStarter={p.onStarter}
       onShowConversation={p.onShowConversation}
@@ -410,7 +411,7 @@ export function Room(p: RoomProps) {
 
                 {/* The team: a face for every agent behind it (beside it when there's room, then under it). */}
                 {empty ? (
-                  <Alone name={p.nameOf(p.coordinator)} code={p.code} isOwner={p.isOwner} />
+                  <Alone name={p.nameOf(p.coordinator)} code={p.code} isOwner={p.isOwner} replayedAt={replayAt === null ? null : formatTime(replayAt)} />
                 ) : (
                   (!flank || seats.length > flankSeats) && (
                     <div className={cx("w-full", phone ? "-mx-4 mt-3 overflow-x-auto px-4" : "mt-6")}>
@@ -488,11 +489,12 @@ function TeamLine({ team }: { team: TeamPart[] }) {
 }
 
 /** The coordinator with nobody behind it yet: how to bring an agent in. */
-function Alone({ name, code, isOwner }: { name: string; code: string; isOwner: boolean }) {
+function Alone({ name, code, isOwner, replayedAt }: { name: string; code: string; isOwner: boolean; replayedAt: string | null }) {
+  const lines = emptyLines(name, replayedAt)
   return (
     <div className="mt-6 w-full max-w-[520px] text-center">
-      <p className="text-body text-ink-2">{name} works alone for now. Add an agent and it joins the room.</p>
-      {isOwner && (
+      <p className="text-body text-ink-2">{lines.stage}</p>
+      {isOwner && lines.actions && (
         <div className="text-left">
           <Command text={joinCommand(location.origin, code)} label="Copy the command to add an agent" />
         </div>
@@ -797,6 +799,7 @@ function Dock({
   coordMood,
   waiting,
   replaying,
+  replayedAt,
   starters,
   onStarter,
   onShowConversation,
@@ -815,6 +818,8 @@ function Dock({
   coordMood: Mood | undefined
   waiting: boolean
   replaying: boolean
+  /** In a replay, the time it stands at, as shown. */
+  replayedAt: string | null
   starters: string[]
   onStarter: (text: string) => void
   onShowConversation: () => void
@@ -879,15 +884,19 @@ function Dock({
         <div className="mx-auto flex w-full max-w-[792px] flex-col gap-1 px-4 pb-3">
           {dialogue.length === 0 ? (
             <div className="flex flex-col items-center py-4 text-center">
-              <p className="text-title font-semibold">Tell {nameOf(coordinator)} what you want done.</p>
-              <p className="mt-1 max-w-sm text-ui leading-normal text-ink-2">It plans the work, hands it to the agents here, and comes back to you when something needs a decision.</p>
-              <div className="mt-3 flex flex-wrap justify-center gap-2">
-                {starters.map((s) => (
-                  <button key={s} type="button" onClick={() => onStarter(s)} className="rounded-full bg-field px-3 py-1 text-ui text-ink-2 transition-colors hover:bg-wash-2 hover:text-ink">
-                    {s}
-                  </button>
-                ))}
-              </div>
+              <p className={replayedAt === null ? "text-title font-semibold" : "text-ui text-ink-2"}>{emptyLines(nameOf(coordinator), replayedAt).dialogue}</p>
+              {replayedAt === null && (
+                <>
+                  <p className="mt-1 max-w-sm text-ui leading-normal text-ink-2">It plans the work, hands it to the agents here, and comes back to you when something needs a decision.</p>
+                  <div className="mt-3 flex flex-wrap justify-center gap-2">
+                    {starters.map((s) => (
+                      <button key={s} type="button" onClick={() => onStarter(s)} className="rounded-full bg-field px-3 py-1 text-ui text-ink-2 transition-colors hover:bg-wash-2 hover:text-ink">
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             dialogue.map((m, i) => {
@@ -900,7 +909,7 @@ function Dock({
                   {!mine && <span className="w-7 shrink-0">{(!dialogue[i + 1] || dialogue[i + 1]!.from !== m.from) && (theirs ? <CoordinatorAvatar size={28} mood={m.seq === newestTheirs?.seq ? (revealing && coordMood?.state !== "sleeping" ? { state: "speaking" } : coordMood) : undefined} live={m.seq === newestTheirs?.seq} seed={0.3} /> : null)}</span>}
                   <div className={cx("min-w-0 max-w-[min(88%,640px)] rounded-bubble px-3.5 py-2 text-chat", mine ? "bg-bubble-me text-bubble-me-ink" : "bg-bubble-them text-ink")}>
                     {!mine && !theirs && <p className="text-stamp font-medium text-ink-3">{nameOf(m.from)}</p>}
-                    <div aria-hidden={typing || undefined} className="bubble-text [&_pre]:text-ui">
+                    <div aria-hidden={typing || undefined} className="bubble-text [&_pre]:max-w-full [&_pre]:text-ui [&_pre]:whitespace-pre [&_pre]:[overflow-wrap:normal]">
                       {typing ? <p className="whitespace-pre-wrap">{text}</p> : <Markdown>{m.body}</Markdown>}
                     </div>
                   </div>

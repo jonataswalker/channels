@@ -763,7 +763,10 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
           : undefined
       }
       placeholder={
-        place.kind === "main"
+        // Scrubbed back in the Room, what you send goes out now, not then: say so before you type.
+        focus && replay !== null
+          ? "Sending returns to live"
+          : place.kind === "main"
           ? state.coordinator && state.coordinator !== me
             ? `Message ${nameOf(state.coordinator)}`
             : "Message everyone"
@@ -775,6 +778,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       }
       send={async (body, opts) => {
         atBottom.current = true
+        // A message is sent now: the stage comes back to now with it, not to a past it would sit under.
+        if (replay !== null) setReplay(null)
         return send(body, opts)
       }}
     />

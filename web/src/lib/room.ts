@@ -191,3 +191,14 @@ export function presentAt(messages: Message[], name: string, at: number): boolea
   }
   return false
 }
+
+/**
+ * What the stage and the dialogue say while they're empty. Live, they offer the next step (the command
+ * that adds an agent, a first thing to ask); in a replay they only say how things stood then, with
+ * nothing to act on: a past moment has no buttons.
+ */
+export function emptyLines(coordinator: string, replayedAt: string | null): { stage: string; dialogue: string; actions: boolean } {
+  return replayedAt === null
+    ? { stage: `${coordinator} works alone for now. Add an agent and it joins the room.`, dialogue: `Tell ${coordinator} what you want done.`, actions: true }
+    : { stage: `No agents had joined by ${replayedAt}.`, dialogue: "Nothing said yet by then.", actions: false }
+}

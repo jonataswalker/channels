@@ -484,6 +484,14 @@ try {
   await page.mouse.click(bar.x + bar.width * 0.02, bar.y + bar.height / 2)
   await page.getByRole("button", { name: /^Replaying/ }).click({ timeout: 10000 })
   await page.getByText("Live", { exact: true }).waitFor({ timeout: 10000 })
+  // Scrubbed back, the field says a message goes out now, and sending one brings the stage back to live.
+  await page.mouse.click(bar.x + bar.width * 0.02, bar.y + bar.height / 2)
+  await page.getByRole("button", { name: /^Replaying/ }).waitFor({ timeout: 10000 })
+  const field = page.getByPlaceholder("Sending returns to live")
+  await field.fill("smoke, sent from a replay")
+  await field.press("Enter")
+  await page.getByText("Live", { exact: true }).waitFor({ timeout: 10000 })
+  await page.getByText("smoke, sent from a replay").first().waitFor({ timeout: 10000 })
   console.log(`ok  ${at}`)
 
   // Back to the whole conversation, and the Room again, from where each says so; Esc in the field too.
