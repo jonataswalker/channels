@@ -330,7 +330,8 @@ try {
       await shoot(owner, tag, "17-room", toRoom, async () => {})
       await shoot(owner, tag, "18-room-drawer", async () => {
         await room().getByRole("button", { name: /^win, / }).click()
-        await owner.getByRole("dialog", { name: /Write fewer rows/ }).waitFor()
+        // Wide, it takes the dialogue's column (a region); narrow, it slides over the room (a dialog).
+        await owner.getByLabel(/Write fewer rows/).first().waitFor()
       })
       await shoot(owner, tag, "24-room-flag", async () => {
         await room().getByRole("button", { name: /^win needs you/ }).click()

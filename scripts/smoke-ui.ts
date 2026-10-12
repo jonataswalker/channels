@@ -449,11 +449,32 @@ try {
   const flag = team.getByRole("button", { name: /^helper needs you/ })
   await flag.click({ timeout: 15000 })
   await page.getByText("Smoke asks: may I delete the test rooms?").first().waitFor({ timeout: 10000 })
+  // Esc closes the top layer only: from the field, the flag's popover goes and the Room stays.
+  await page.getByRole("textbox", { name: "Message" }).last().focus()
+  await page.keyboard.press("Escape")
+  await team.getByRole("button", { name: /^helper needs you/, expanded: false }).waitFor({ timeout: 10000 })
+  await room.waitFor()
+  await flag.click()
+  await team.getByRole("button", { name: /^helper needs you/, expanded: true }).waitFor({ timeout: 10000 })
   // Answered from the face: the flag comes down.
   await page.getByRole("button", { name: "Answer", exact: true }).click()
   await page.getByRole("textbox", { name: "Answer" }).fill("Not yet: keep them until Friday.")
   await page.keyboard.press("Enter")
   await flag.waitFor({ state: "hidden", timeout: 15000 })
+  console.log(`ok  ${at}`)
+
+  // Wide, the Room is two columns: the dialogue runs the full height beside the stage, and an agent's
+  // conversation takes the dialogue's place, with a way back.
+  at = "the wide room"
+  // (The smoke runs with more beside the conversation than a laptop does, so it needs a wider window for the same pane.)
+  await page.setViewportSize({ width: 1900, height: 900 })
+  await page.getByText(/^You and bot$/).waitFor({ timeout: 10000 })
+  await helperFace.click()
+  await page.getByRole("button", { name: "Back to bot" }).click({ timeout: 10000 })
+  await page.getByText(/^You and bot$/).waitFor({ timeout: 10000 })
+  await page.setViewportSize({ width: 1280, height: 800 })
+  // Narrower again, the dialogue docks under the stage (with its handle) before anything there is measured.
+  await page.getByRole("separator", { name: "Resize the dialogue" }).waitFor({ timeout: 10000 })
   console.log(`ok  ${at}`)
 
   // The timeline: click back in time, and the stage replays; Back to live returns.

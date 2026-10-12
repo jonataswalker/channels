@@ -18,7 +18,7 @@ import { excerpt, memberName } from "@/lib/format"
 import { usePlaceSlot } from "@/lib/place-slot"
 import { coordinatorMood, ERROR_MS, moodInputs, SPEAKING_MS, type Mood } from "@/lib/coordinator-mood"
 import { dmPlace, markSeenIn, MAIN, placeFromKey, placeKey, seenIn, sendFrom, useSeen, threadMembers, type Place, type PlaceSummary } from "@/lib/threads"
-import { currentTask } from "@/lib/room"
+import { drawerPlaceFor } from "@/lib/room"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { CoordinatorAvatar } from "./coordinator-head"
@@ -201,9 +201,14 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   /** The thread open on the right, by its first message. */
   const [threadRoot, setThreadRoot] = useState<number | null>(null)
   const [openTask, setOpenTask] = useState<number | null>(null)
-  /** The Room: the agent whose conversation is open in the drawer, and the point the timeline replays (null: live). */
-  const [drawer, setDrawer] = useState<string | null>(null)
+  /**
+   * The Room: the agent whose conversation is open in the drawer (and the place it opened on, kept so
+   * the drawer doesn't follow the agent to its next task mid-sentence), the point the timeline replays
+   * (null: live), and the face whose flag popover is open.
+   */
+  const [drawerAt, setDrawerAt] = useState<{ agent: string; place: Place } | null>(null)
   const [replay, setReplay] = useState<number | null>(null)
+  const [flagOpen, setFlagOpen] = useState<string | null>(null)
   const [wasFocus, setWasFocus] = useState(false)
   const [highlight, setHighlight] = useState<number | null>(null)
   /** New messages below while scrolled up. */
@@ -310,10 +315,12 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   // Up close: Main in coordinator mode opens on the coordinator's face and its last words (hero.tsx).
   const focus = !!coordinator && hereKey === "main" && mainView === "focus" && search === null && !board && openTask === null
   const isMain = useCallback((m: Message) => placeKey(placeOf.get(m.seq) ?? MAIN) === "main", [placeOf])
-  // The agent whose conversation the drawer shows: its task's, or else its direct one with the coordinator.
-  const drawerTask = drawer ? currentTask(state, drawer) : undefined
-  const drawerPlace: Place | null = !drawer ? null : drawerTask ? { kind: "task", task: drawerTask.id } : dmPlace(coordinator ?? me, drawer)
+  // The agent whose conversation the drawer shows: its task's, or else its direct one with the coordinator (drawerPlaceFor).
+  const drawer = drawerAt?.agent ?? null
+  const drawerPlace: Place | null = drawerAt?.place ?? null
+  const drawerTask = drawerPlace?.kind === "task" ? state.tasks.get(drawerPlace.task) : undefined
   const drawerKey = drawerPlace ? placeKey(drawerPlace) : null
+  const setDrawer = useCallback((agent: string | null) => setDrawerAt(agent ? { agent, place: drawerPlaceFor(state, agent, coordinator, me) } : null), [state, coordinator, me])
 
   // Its last words to you, and yours to it, in Main (replies included: up close there are no threads).
   // Yours only when they reach it: a reply to another agent's escalation or an @dev message isn't to it.
@@ -507,7 +514,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     setWasFocus(focus)
     if (!focus) {
       setReplay(null)
-      setDrawer(null)
+      setDrawerAt(null)
+      setFlagOpen(null)
     }
   }
   if (gone) {
@@ -567,7 +575,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         </p>
       )
     // A task's own conversation opens on its card: what it is, where it stands, who has it.
-    if (t) out.push(<TaskCard key="card" task={t} state={state} now={now} onOpen={() => (setDrawer(null), setOpenTask(t.id))} highlighted={!anchor && highlight === t.id} />)
+    if (t) out.push(<TaskCard key="card" task={t} state={state} now={now} onOpen={() => (setDrawerAt(null), setOpenTask(t.id))} highlighted={!anchor && highlight === t.id} />)
     for (let i = 0; i < list.length; i++) {
       const m = list[i]!
       const prev = list[i - 1]
@@ -582,7 +590,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         if (!lines.length) continue
         const alone = lines.filter((ev) => standsAlone(ev, state, me))
         const rest = lines.filter((ev) => !standsAlone(ev, state, me))
-        const open = inMain ? (id: number) => go({ kind: "task", task: id }) : (id: number) => (setDrawer(null), setOpenTask(id))
+        const open = inMain ? (id: number) => go({ kind: "task", task: id }) : (id: number) => (setDrawerAt(null), setOpenTask(id))
         for (const ev of alone) out.push(<EventRow key={ev.seq} m={ev} state={state} now={now} onOpenTask={open} openLabel={inMain ? "Open" : "Details"} />)
         if (rest.length) out.push(<EventGroup key={`e${rest[0]!.seq}`} messages={rest} state={state} now={now} onOpenTask={open} highlight={highlight} openLabel={inMain ? "Open" : "Details"} />)
         continue
@@ -732,6 +740,103 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       onBoard={() => (setBoard(true), setOpenTask(null), setThreadRoot(null), setInfo(false))}
     />
   )
+
+  // The field under the conversation; in the Room it sits under the dialogue, wherever the Room puts that.
+  const composerHere = mayWrite ? (
+    <Composer
+      key={hereKey}
+      me={me}
+      people={people}
+      replyTo={replyTo}
+      nameOf={nameOf}
+      onClearReply={() => setReplyTo(null)}
+      disabled={connection === "connecting"}
+      route={coordinator && place.kind === "main" ? { coordinator, label: nameOf(coordinator), view: "coordinator" } : undefined}
+      extra={extra}
+      seed={focus ? starter : undefined}
+      onEscape={
+        coordinator && hereKey === "main" && !board && openTask === null
+          ? // One stack, top first: a flag's popover, then an agent's drawer, then a replay, then the view.
+            () => (flagOpen !== null ? setFlagOpen(null) : drawerAt ? setDrawerAt(null) : replay !== null ? setReplay(null) : setMainView(focus ? "conversation" : "focus"))
+          : undefined
+      }
+      placeholder={
+        place.kind === "main"
+          ? state.coordinator && state.coordinator !== me
+            ? `Message ${nameOf(state.coordinator)}`
+            : "Message everyone"
+          : place.kind === "task"
+            ? task
+              ? `Message in ${taskId(task.id)} · ${task.title}`
+              : "Message in this task"
+            : `Message ${nameOf(place.with.find((n) => n !== me) ?? "")} privately`
+      }
+      send={async (body, opts) => {
+        atBottom.current = true
+        return send(body, opts)
+      }}
+    />
+  ) : (
+    <p className="shrink-0 px-6 pt-2 pb-4 text-center text-meta text-ink-3">
+      Between {place.kind === "dm" ? place.with.map(nameOf).join(" and ") : ""}. You can read along; talk with them in the main conversation.
+    </p>
+  )
+  // An agent's conversation, opened from its face: in the Room's dialogue column when wide, over the Room when not.
+  const drawerView =
+    drawer && drawerPlace
+      ? (mode: "column" | "overlay") => (
+        <AgentDrawer
+          mode={mode}
+          back={nameOf(coordinator ?? me)}
+          title={drawerTask ? drawerTask.title : `${nameOf(drawer)} and ${nameOf(drawerPlace.kind === "dm" ? (drawerPlace.with.find((n) => n !== drawer) ?? me) : me)}`}
+          subtitle={[nameOf(drawer), drawerTask ? `${taskId(drawerTask.id)} · ${STATE_WORD[drawerTask.state]}` : "Direct conversation", online.has(drawer) ? "online" : "away"].join(" · ")}
+          face={<CoordinatorAvatar size={32} {...faceOf(drawer, colorOf(state, drawer))} label={nameOf(drawer)} />}
+          onClose={() => setDrawerAt(null)}
+          composer={
+            drawerPlace.kind !== "dm" || drawerPlace.with.includes(me) ? (
+              <Composer
+                key={`d${drawerKey}`}
+                me={me}
+                people={people}
+                replyTo={null}
+                nameOf={nameOf}
+                onClearReply={() => undefined}
+                disabled={connection === "connecting"}
+                extra={sendFrom(state, drawerPlace, me)}
+                placeholder={drawerTask ? `Message in ${taskId(drawerTask.id)} · ${drawerTask.title}` : `Message ${nameOf(drawer)} privately`}
+                send={send}
+              />
+            ) : (
+              <div className="shrink-0 px-5 pt-2 pb-4 text-center text-meta text-ink-3">
+                Between {drawerPlace.with.map(nameOf).join(" and ")}: you read along.{" "}
+                {/* In strict coordinator mode an agent can't answer a person, so a direct line to it would go one way. */}
+                {state.mode.coordinatorOnly && state.mode.strict && coordinator && drawer !== coordinator ? (
+                  <>
+                    {nameOf(drawer)} talks with people through {nameOf(coordinator)}: ask {nameOf(coordinator)} instead.
+                  </>
+                ) : (
+                  <button type="button" className="font-medium text-ink-2 hover:text-ink" onClick={() => (setDrawerAt(null), setMainView("conversation"), go(dmPlace(me, drawer)))}>
+                    Message {nameOf(drawer)} yourself
+                  </button>
+                )}
+              </div>
+            )
+          }
+        >
+          <DrawerRows
+            messages={messages}
+            placeOf={placeOf}
+            at={drawerKey ?? ""}
+            state={state}
+            task={drawerTask}
+            now={now}
+            bubble={bubble}
+            empty={`Nothing said here yet. What ${nameOf(drawer)} says about its work shows up here.`}
+            onOpenTask={(id) => (setDrawerAt(null), setOpenTask(id))}
+          />
+        </AgentDrawer>
+        )
+      : null
 
   return (
     <ChannelControls
@@ -915,6 +1020,10 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   banner={needsMe || joinedVia.size ? needsYou("banner") : null}
                   replay={replay}
                   onReplay={setReplay}
+                  flagOpen={flagOpen}
+                  onFlagOpen={setFlagOpen}
+                  composer={composerHere}
+                  drawer={drawerView}
                 />
               ) : (
                 <>
@@ -979,87 +1088,10 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 </>
               )}
 
-              {mayWrite ? (
-                <Composer
-                  key={hereKey}
-                  me={me}
-                  people={people}
-                  replyTo={replyTo}
-                  nameOf={nameOf}
-                  onClearReply={() => setReplyTo(null)}
-                  disabled={connection === "connecting"}
-                  route={coordinator && place.kind === "main" ? { coordinator, label: nameOf(coordinator), view: "coordinator" } : undefined}
-                  extra={extra}
-                  seed={focus ? starter : undefined}
-                  onEscape={coordinator && hereKey === "main" && !board && openTask === null ? () => (replay !== null ? setReplay(null) : setMainView(focus ? "conversation" : "focus")) : undefined}
-                  placeholder={
-                    place.kind === "main"
-                      ? state.coordinator && state.coordinator !== me
-                        ? `Message ${nameOf(state.coordinator)}`
-                        : "Message everyone"
-                      : place.kind === "task"
-                        ? task
-                          ? `Message in ${taskId(task.id)} · ${task.title}`
-                          : "Message in this task"
-                        : `Message ${nameOf(place.with.find((n) => n !== me) ?? "")} privately`
-                  }
-                  send={async (body, opts) => {
-                    atBottom.current = true
-                    return send(body, opts)
-                  }}
-                />
-              ) : (
-                <p className="shrink-0 px-6 pt-2 pb-4 text-center text-meta text-ink-3">
-                  Between {place.kind === "dm" ? place.with.map(nameOf).join(" and ") : ""}. You can read along; talk with them in the main conversation.
-                </p>
-              )}
+              {!focus && composerHere}
             </>
           )}
 
-          {/* The Room: an agent's conversation, slid over from the right. */}
-          {focus && drawer && drawerPlace && (
-            <AgentDrawer
-              title={drawerTask ? drawerTask.title : `${nameOf(drawer)} and ${nameOf(drawerPlace.kind === "dm" ? (drawerPlace.with.find((n) => n !== drawer) ?? me) : me)}`}
-              subtitle={[nameOf(drawer), drawerTask ? `${taskId(drawerTask.id)} · ${STATE_WORD[drawerTask.state]}` : "Direct conversation", online.has(drawer) ? "online" : "away"].join(" · ")}
-              face={<CoordinatorAvatar size={32} {...faceOf(drawer, colorOf(state, drawer))} label={nameOf(drawer)} />}
-              onClose={() => setDrawer(null)}
-              composer={
-                drawerPlace.kind !== "dm" || drawerPlace.with.includes(me) ? (
-                  <Composer
-                    key={`d${drawerKey}`}
-                    me={me}
-                    people={people}
-                    replyTo={null}
-                    nameOf={nameOf}
-                    onClearReply={() => undefined}
-                    disabled={connection === "connecting"}
-                    extra={sendFrom(state, drawerPlace, me)}
-                    placeholder={drawerTask ? `Message in ${taskId(drawerTask.id)} · ${drawerTask.title}` : `Message ${nameOf(drawer)} privately`}
-                    send={send}
-                  />
-                ) : (
-                  <div className="shrink-0 px-5 pt-2 pb-4 text-center text-meta text-ink-3">
-                    Between {drawerPlace.with.map(nameOf).join(" and ")}: you read along.{" "}
-                    <button type="button" className="font-medium text-ink-2 hover:text-ink" onClick={() => (setDrawer(null), setMainView("conversation"), go(dmPlace(me, drawer)))}>
-                      Message {nameOf(drawer)} yourself
-                    </button>
-                  </div>
-                )
-              }
-            >
-              <DrawerRows
-                messages={messages}
-                placeOf={placeOf}
-                at={drawerKey ?? ""}
-                state={state}
-                task={drawerTask}
-                now={now}
-                bubble={bubble}
-                empty={`Nothing said here yet. What ${nameOf(drawer)} says about its work shows up here.`}
-                onOpenTask={(id) => (setDrawer(null), setOpenTask(id))}
-              />
-            </AgentDrawer>
-          )}
         </div>
 
         {root && !info && (

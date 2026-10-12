@@ -4,7 +4,7 @@
 // travels from one to the other. What needs you hangs off the face that raised it. Your dialogue with
 // the coordinator is docked at the bottom, and a timeline lets you scrub back and watch what happened.
 
-import { ArrowDown01Icon, Cancel01Icon, RotateClockwiseIcon } from "@hugeicons/core-free-icons"
+import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, RotateClockwiseIcon } from "@hugeicons/core-free-icons"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 
@@ -15,7 +15,8 @@ import { coordinatorMood, ERROR_MS, moodInputs, type Mood } from "@/lib/coordina
 import { PALETTE } from "@/lib/characters"
 import { excerpt, formatAgo, formatTime } from "@/lib/format"
 import { joinCommand } from "@/lib/join-line"
-import { AGENT_SPEAKING_MS, agentInputs, agentMood, currentTask, delegations, dialogueOf, flagsByAgent, presentAt, stageAgents, teamEvents } from "@/lib/room"
+import { escapeLayer } from "@/lib/escape"
+import { AGENT_SPEAKING_MS, agentInputs, agentMood, currentTask, delegations, dialogueOf, flagsByAgent, hiddenFlags, newDelegations, presentAt, seatsPerSide, stageAgents, teamEvents } from "@/lib/room"
 import { cx } from "@/lib/utils"
 import { Command } from "./add-agent"
 import { CoordinatorAvatar, CoordinatorHead, type FaceShape } from "./coordinator-head"
@@ -62,21 +63,37 @@ function saveDock(room: string, px: number): void {
   }
 }
 
-/** The seats beside the coordinator, two to a side; the rest sit in a row under it. */
-const FLANK = 4
+/** The column everything in the conversation shares (the banner, the timeline, the dock): the stage keeps to it too. */
+const COLUMN = 760
+/** From this pane width, the stage and the dialogue sit side by side (a 1440px laptop's pane is about 1140). */
+const WIDE_ROOM = 1080
+/** How many of the latest exchanges the dialogue holds (scrollable). */
+const DIALOGUE = 20
 
 /**
  * How big things are, from the room the stage has. The coordinator never goes below 200px on a laptop.
- * With room to the sides, the first agents sit beside it (flank), so the stage needs little height;
- * otherwise they sit in a row under it.
+ * The first agents sit beside it, as many as fit inside the column (at most two a side), so the stage
+ * needs little height; the rest sit in a row under it.
  */
-function sizes(w: number, h: number, seats: number) {
-  const phone = w < 640
-  const face = phone ? 72 : seats <= 3 ? 104 : 96
-  const side = Math.ceil(Math.min(seats, FLANK) / 2)
-  const flank = !phone && seats > 0 && w >= 2 * side * (face + 48) + 420
-  const coord = phone ? 120 : Math.round(Math.max(200, Math.min(300, flank ? h - 150 : h * 0.48)))
-  return { phone, coord, face, flank }
+function sizes(w: number, h: number, seats: number, pane: number, stacked: boolean) {
+  // A phone by the whole pane's width: beside the dialogue, the stage's own column can be narrow on a big screen.
+  const phone = pane < 640
+  const column = Math.min(COLUMN, w - 32)
+  // On a phone the dialogue takes half the height, so the stage is a compact strip: a smaller head, a row of small faces.
+  const face = phone ? 56 : seats <= 3 ? 104 : 96
+  const beside = phone ? 0 : Math.min(seatsPerSide(column, 220, face), Math.ceil(seats / 2))
+  const flank = beside > 0
+  // Beside it, the coordinator takes the height left under it for its name, and the width the seats leave.
+  const side = beside * (face + 40) + Math.max(0, beside - 1) * 16
+  const fits = flank ? column - 2 * side - 2 * 24 : 300
+  // The height it has: what's left of the stage after its name and team line, and the row of faces under it.
+  const under = seats > 2 * beside ? face + 110 : 0
+  const tall = h - 96 - under
+  // Beside the dialogue (wide) or alone, it never goes under 200px; stacked over the dialogue on a short
+  // screen, it gives way down to 140px rather than push the faces out of sight.
+  const floor = stacked && tall < 200 ? 140 : 200
+  const coord = phone ? 96 : Math.round(Math.max(floor, Math.min(300, tall, fits)))
+  return { phone, coord, face, flank, beside }
 }
 
 // ---------- the Room ----------
@@ -121,11 +138,31 @@ export interface RoomProps {
   /** The point the timeline replays, as the message it stands at (null: live). */
   replay: number | null
   onReplay: (seq: number | null) => void
+  /** The field you talk to the coordinator in: under the dialogue, wherever the dialogue sits. */
+  composer: ReactNode
+  /** An agent's conversation, when one is open: in the dialogue's column when the room is wide, over the room when not. */
+  drawer: ((mode: "column" | "overlay") => ReactNode) | null
+  /** The face whose flag (or the join request whose ghost, `r<id>`) has its popover open. */
+  flagOpen: string | null
+  onFlagOpen: (f: string | null | ((was: string | null) => string | null)) => void
 }
 
 export function Room(p: RoomProps) {
+  const root = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ w: 1000, h: 480 })
+  // Wide enough, the room is two columns: the stage, and the dialogue the full height beside it.
+  const [paneW, setPaneW] = useState(1000)
+  useLayoutEffect(() => {
+    const el = root.current
+    if (!el) return
+    const on = () => setPaneW(el.clientWidth)
+    on()
+    const watch = new ResizeObserver(on)
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [])
+  const wide = paneW >= WIDE_ROOM
   useLayoutEffect(() => {
     const el = stage.current
     if (!el) return
@@ -159,10 +196,11 @@ export function Room(p: RoomProps) {
   }, [replayAt, p.mood, st, msgs, isOnline, p.coordinator, now])
 
   // ---------- the faces ----------
-  const agents = useMemo(() => stageAgents(st, p.coordinator), [st, p.coordinator])
+  const agents = useMemo(() => stageAgents(st, p.coordinator, replayAt), [st, p.coordinator, replayAt])
   const shown = useMemo(() => agents.slice(0, 8), [agents])
   const more = agents.length - shown.length
-  const flags = useMemo(() => (replay === null ? flagsByAgent(p.escalations, p.reviews) : new Map()), [replay, p.escalations, p.reviews])
+  const flags = useMemo(() => (replay === null ? flagsByAgent(p.escalations, p.reviews) : new Map<string, { escalations: Message[]; reviews: Task[] }>()), [replay, p.escalations, p.reviews])
+  const moreFlags = hiddenFlags(agents, shown.length, flags)
   // Each face's inputs, read once per change of the channel (not per tick of the clock).
   const read = useMemo(() => shown.map((name) => ({ name, task: currentTask(st, name), ...agentInputs(st, msgs, name) })), [shown, st, msgs])
   const faces = read.map((f) => ({ ...f, mood: agentMood({ ...f, online: isOnline(f.name), hold: !!st.hold, now }) }))
@@ -175,7 +213,8 @@ export function Room(p: RoomProps) {
   }, [read, replay])
   const ghosts = replay === null ? p.requests : []
   const seatCount = shown.length + (agents.length > shown.length ? 1 : 0) + ghosts.length
-  const { phone, coord, face, flank } = sizes(box.w, box.h, seatCount)
+  const { phone, coord, face, flank, beside } = sizes(box.w, box.h, seatCount, paneW, !wide)
+  const flankSeats = 2 * beside
 
   // ---------- delegation: a line from the coordinator to the agent it handed work to ----------
   const coordEl = useRef<HTMLDivElement>(null)
@@ -185,16 +224,27 @@ export function Room(p: RoomProps) {
   const seenTo = useRef(all.at(-1)?.seq ?? 0)
   const [flights, setFlights] = useState<{ id: number; d: string }[]>([])
   const [hops, setHops] = useState<ReadonlySet<string>>(new Set())
+  // A flight's frame and the timer that ends it outlive the render that started them: a message
+  // landing mid-flight (the coordinator's task.add, then its word in the task) re-runs this effect,
+  // and must not cut the line short or leave it hanging. They're dropped only when the Room goes.
+  const pending = useRef({ frames: new Set<number>(), timers: new Set<ReturnType<typeof setTimeout>>() })
   useEffect(() => {
-    const unseen = all.filter((d) => d.seq > seenTo.current)
-    if (!unseen.length) return
-    seenTo.current = unseen.at(-1)!.seq
+    const live = pending.current
+    return () => {
+      live.frames.forEach(cancelAnimationFrame)
+      live.timers.forEach(clearTimeout)
+    }
+  }, [])
+  const lastDelegation = all.at(-1)?.seq ?? 0
+  useEffect(() => {
     // Only what's handed out now draws a line: history arriving (the cache, a reconnect) doesn't.
-    const fresh = unseen.filter((d) => Date.now() - d.at < 10_000)
+    const { fresh, seenTo: to } = newDelegations(all, seenTo.current, Date.now())
+    seenTo.current = to
     if (replay !== null || !fresh.length) return
+    const live = pending.current
     // Measured on the next frame, once the faces (a brand-new agent's included) are laid out.
-    let done: ReturnType<typeof setTimeout> | undefined
     const frame = requestAnimationFrame(() => {
+      live.frames.delete(frame)
       const host = stage.current?.getBoundingClientRect()
       const from = coordEl.current?.getBoundingClientRect()
       const scroll = stage.current?.scrollTop ?? 0
@@ -229,26 +279,28 @@ export function Room(p: RoomProps) {
       }
       setFlights((f) => [...f, ...lines])
       setHops((h) => new Set([...h, ...to]))
-      done = setTimeout(
+      const done = setTimeout(
         () => {
+          live.timers.delete(done)
           setFlights((f) => f.filter((l) => !lines.includes(l)))
           setHops((h) => new Set([...h].filter((n) => !to.has(n))))
         },
         calm ? 1000 : 1500
       )
+      live.timers.add(done)
     })
-    return () => {
-      cancelAnimationFrame(frame)
-      clearTimeout(done)
-    }
-  }, [all, replay, face])
+    live.frames.add(frame)
+    // Nothing to undo here: the flight finishes on its own (see `pending`).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a new delegation is a new last seq; `all` is read fresh
+  }, [lastDelegation, replay, face])
 
   // ---------- the flag popover: what an agent (or someone asking in) needs from you ----------
-  const [flagOpen, setFlagOpen] = useState<string | null>(null)
+  // Kept by the conversation, so Esc in its field closes this first (flag, then drawer, then replay, then the view).
+  const { flagOpen, onFlagOpen: setFlagOpen } = p
 
   // ---------- the dialogue dock ----------
-  const dialogue = useMemo(() => dialogueOf(msgs, st, p.coordinator, p.isMain, 8), [msgs, st, p.coordinator, p.isMain])
-  const [dock, setDock] = useState<number | null>(() => loadDock(p.roomId))
+  const dialogue = useMemo(() => dialogueOf(msgs, st, p.coordinator, p.isMain, DIALOGUE), [msgs, st, p.coordinator, p.isMain])
+  const [dockH, setDockH] = useState<number | null>(() => loadDock(p.roomId))
 
   const empty = agents.length === 0 && ghosts.length === 0
 
@@ -282,76 +334,121 @@ export function Room(p: RoomProps) {
     }),
     ...(more > 0
       ? [
-          <li key="more" className="flex flex-col items-center justify-start" style={{ width: face + 40 }}>
+          <li key="more" className="relative flex flex-col items-center justify-start" style={{ width: face + 40 }}>
             <span className="flex items-center justify-center rounded-full bg-field text-title font-semibold text-ink-2" style={{ width: face * 0.8, height: face * 0.8, marginTop: face * 0.1 }}>
               +{more}
             </span>
+            <span className="mt-2 text-stamp text-ink-3">{more === 1 ? "1 more agent" : `${more} more agents`}</span>
+            {/* What they need from you stays on the stage, counted here; Needs you above has each one. */}
+            {moreFlags > 0 && (
+              <span
+                role="img"
+                aria-label={`${moreFlags} ${moreFlags === 1 ? "thing" : "things"} from agents not shown need you`}
+                title="From agents not shown here: see Needs you above"
+                className="absolute top-0 right-3 flex h-6 min-w-6 items-center justify-center rounded-full bg-decide px-1.5 text-stamp font-semibold text-white shadow-[0_0_0_2px_var(--canvas)]"
+              >
+                {moreFlags}
+              </span>
+            )}
           </li>,
         ]
       : []),
     ...ghosts.map((r) => <GhostFace key={r.id} r={r} size={face} open={flagOpen === `r${r.id}`} onToggle={() => setFlagOpen((o) => (o === `r${r.id}` ? null : `r${r.id}`))} onClose={() => setFlagOpen(null)} body={p.requestFor(r)} />),
   ]
 
-  return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={stage} role="region" className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto" aria-label={`The room: ${p.nameOf(p.coordinator)} and the team`}>
-        {p.banner && replay === null && <div className="relative z-30 mx-auto w-full max-w-[792px] px-4">{p.banner}</div>}
-        <div className={cx("mx-auto flex w-full max-w-[1100px] flex-col items-center px-4 pb-6", phone ? "pt-3" : p.banner ? "pt-3" : "pt-[max(20px,4vh)]")}>
-          <div className={cx("flex w-full justify-center", flank ? "items-start gap-x-8" : "flex-col items-center")}>
-            {/* Beside it, the faces sit on its eye line. */}
-            {flank && <Seats seats={seats.slice(0, Math.ceil(Math.min(seats.length, FLANK) / 2))} top={(coord - face) / 2} />}
-            {/* The coordinator: the one voice, big at the centre. */}
-            <div ref={blockEl} className="flex shrink-0 flex-col items-center">
-              <div ref={coordEl} className="flex justify-center" style={{ height: coord }}>
-                <CoordinatorHead size={coord} mood={coordMood} live interactive={replay === null} seed={0.7} label={`${p.nameOf(p.coordinator)}, ${coordMood?.state ?? "idle"}`} />
-              </div>
-              <p className="mt-4 text-title font-semibold tracking-[-0.01em]">{p.nameOf(p.coordinator)}</p>
-              {coordMood?.state === "sleeping" && replay === null && <p className="mt-0.5 text-meta text-ink-3">{coordMood.paused ? "Paused with every agent, until you resume them" : "Away right now: it reads what you say when it's back"}</p>}
-              {p.team.length > 0 && replay === null && <TeamLine team={p.team} />}
-            </div>
-            {flank && <Seats seats={seats.slice(Math.ceil(Math.min(seats.length, FLANK) / 2), FLANK)} top={(coord - face) / 2} />}
-          </div>
+  const timeline = <Timeline messages={p.messages} state={p.state} now={p.now} nameOf={p.nameOf} replay={replay} onReplay={setReplay} />
+  const dock = (
+    <Dock
+      fill={wide}
+      share={phone ? "50%" : "55%"}
+      height={dockH}
+      onHeight={(h) => (setDockH(h), saveDock(p.roomId, h))}
+      dialogue={dialogue}
+      me={p.me}
+      coordinator={p.coordinator}
+      nameOf={p.nameOf}
+      coordMood={coordMood}
+      waiting={replay === null && p.waiting}
+      replaying={replay !== null}
+      starters={p.starters}
+      onStarter={p.onStarter}
+      onShowConversation={p.onShowConversation}
+      newCount={p.newCount}
+    />
+  )
 
-          {/* The team: a face for every agent behind it (beside it when there's room, then under it). */}
-          {empty ? (
-            <Alone name={p.nameOf(p.coordinator)} code={p.code} isOwner={p.isOwner} />
-          ) : (
-            (!flank || seats.length > FLANK) && (
-              <div className={cx("mt-6 w-full", phone ? "-mx-4 overflow-x-auto px-4" : "")}>
-                <Seats seats={flank ? seats.slice(FLANK) : seats} row phone={phone} />
+  return (
+    <div ref={root} className="relative flex min-h-0 flex-1 flex-col">
+      {/* What needs you spans the whole room, above the stage and the dialogue alike. */}
+      {p.banner && replay === null && <div className={cx("relative z-30 w-full shrink-0 px-4", !wide && "mx-auto max-w-[792px]")}>{p.banner}</div>}
+      <div className={cx("flex min-h-0 flex-1", wide ? "flex-row" : "flex-col")}>
+        {/* The stage: the coordinator, the team behind it, and the timeline under them. */}
+        <div className={cx("flex min-h-0 flex-col", wide ? "w-[55%] shrink-0" : "flex-1")}>
+          <div ref={stage} role="region" className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto" aria-label={`The room: ${p.nameOf(p.coordinator)} and the team`}>
+            <div className="flex min-h-full flex-col">
+              {/* The stage keeps to its column, and stands in the middle of the room it has (no gap piling up under it). */}
+              <div className={cx("mx-auto my-auto flex w-full max-w-[792px] flex-col items-center px-4 pb-4", phone ? "pt-3" : "pt-4")}>
+                <div className={cx("flex w-full justify-center", flank ? "items-start gap-x-6" : "flex-col items-center")}>
+                  {/* Beside it, the faces sit on its eye line. */}
+                  {flank && <Seats seats={seats.slice(0, Math.ceil(Math.min(seats.length, flankSeats) / 2))} top={(coord - face) / 2} />}
+                  {/* The coordinator: the one voice, big at the centre. */}
+                  <div ref={blockEl} className="flex shrink-0 flex-col items-center">
+                    <div ref={coordEl} className="flex justify-center" style={{ height: coord }}>
+                      <CoordinatorHead size={coord} mood={coordMood} live interactive={replay === null} seed={0.7} label={`${p.nameOf(p.coordinator)}, ${coordMood?.state ?? "idle"}`} />
+                    </div>
+                    <p className="mt-4 text-title font-semibold tracking-[-0.01em]">{p.nameOf(p.coordinator)}</p>
+                    {coordMood?.state === "sleeping" && replay === null && <p className="mt-0.5 text-meta text-ink-3">{coordMood.paused ? "Paused with every agent, until you resume them" : "Away right now: it reads what you say when it's back"}</p>}
+                    {p.team.length > 0 && replay === null && <TeamLine team={p.team} />}
+                  </div>
+                  {flank && <Seats seats={seats.slice(Math.ceil(Math.min(seats.length, flankSeats) / 2), flankSeats)} top={(coord - face) / 2} />}
+                </div>
+
+                {/* The team: a face for every agent behind it (beside it when there's room, then under it). */}
+                {empty ? (
+                  <Alone name={p.nameOf(p.coordinator)} code={p.code} isOwner={p.isOwner} />
+                ) : (
+                  (!flank || seats.length > flankSeats) && (
+                    <div className={cx("w-full", phone ? "-mx-4 mt-3 overflow-x-auto px-4" : "mt-6")}>
+                      <Seats seats={flank ? seats.slice(flankSeats) : seats} row phone={phone} />
+                    </div>
+                  )
+                )}
               </div>
-            )
-          )}
+            </div>
+
+            {/* The lines of delegation, drawn over the stage. */}
+            {flights.length > 0 && (
+              <svg aria-hidden className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+                {flights.map((f) => (
+                  <path key={f.id} d={f.d} pathLength={1} className="room-flight" fill="none" stroke="var(--accent)" strokeWidth={2.5} strokeLinecap="round" />
+                ))}
+              </svg>
+            )}
+          </div>
+          {timeline}
         </div>
 
-        {/* The lines of delegation, drawn over the stage. */}
-        {flights.length > 0 && (
-          <svg aria-hidden className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
-            {flights.map((f) => (
-              <path key={f.id} d={f.d} pathLength={1} className="room-flight" fill="none" stroke="var(--accent)" strokeWidth={2.5} strokeLinecap="round" />
-            ))}
-          </svg>
+        {wide ? (
+          // The dialogue, a real chat panel the full height of the room; an agent's conversation takes its place.
+          <div className="flex min-h-0 w-[45%] flex-col bg-rail">
+            {p.drawer ? (
+              p.drawer("column")
+            ) : (
+              <>
+                {dock}
+                {p.composer}
+              </>
+            )}
+          </div>
+        ) : (
+          <>
+            {dock}
+            {p.composer}
+          </>
         )}
       </div>
-
-      <Timeline messages={p.messages} state={p.state} now={p.now} nameOf={p.nameOf} replay={replay} onReplay={setReplay} />
-
-      <Dock
-        roomId={p.roomId}
-        height={dock}
-        onHeight={(h) => (setDock(h), saveDock(p.roomId, h))}
-        dialogue={dialogue}
-        me={p.me}
-        coordinator={p.coordinator}
-        nameOf={p.nameOf}
-        coordMood={coordMood}
-        waiting={replay === null && p.waiting}
-        replaying={replay !== null}
-        starters={p.starters}
-        onStarter={p.onStarter}
-        onShowConversation={p.onShowConversation}
-        newCount={p.newCount}
-      />
+      {/* Narrower, an agent's conversation slides over the whole room. */}
+      {!wide && p.drawer?.("overlay")}
     </div>
   )
 }
@@ -546,12 +643,12 @@ function Popover({ children, onClose, anchor }: { children: ReactNode; onClose: 
   }, [anchor])
   useEffect(() => {
     const away = (e: PointerEvent) => !box.current?.contains(e.target as Node) && !anchor?.contains(e.target as Node) && onClose()
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose()
     document.addEventListener("pointerdown", away)
-    document.addEventListener("keydown", esc)
+    // Esc closes this and only this: not the drawer, the replay or the view under it.
+    const stop = escapeLayer(() => box.current, onClose)
     return () => {
       document.removeEventListener("pointerdown", away)
-      document.removeEventListener("keydown", esc)
+      stop()
     }
   }, [onClose, anchor])
   return createPortal(
@@ -684,6 +781,8 @@ function Timeline({ messages, state, now, nameOf, replay, onReplay }: { messages
 // ---------- the docked dialogue ----------
 
 function Dock({
+  fill,
+  share,
   height,
   onHeight,
   dialogue,
@@ -698,7 +797,10 @@ function Dock({
   onShowConversation,
   newCount,
 }: {
-  roomId: string
+  /** Beside the stage, it takes the column's whole height and doesn't resize. */
+  fill: boolean
+  /** Under the stage, the part of the room it takes until it's resized. */
+  share: string
   height: number | null
   onHeight: (px: number) => void
   dialogue: Message[]
@@ -724,14 +826,15 @@ function Dock({
     if (el) el.scrollTop = el.scrollHeight
   }, [dialogue.length, text])
 
-  // Dragging the handle resizes the dock; it keeps between a fifth and two thirds of the pane.
+  // Dragging the handle resizes the dock; it keeps between a third and three quarters of the room.
   const drag = useRef<{ y: number; h: number } | null>(null)
   const clamp = (h: number) => {
     const total = panel.current?.parentElement?.clientHeight ?? 800
-    return Math.round(Math.min(total * 0.66, Math.max(Math.min(160, total * 0.2), h)))
+    return Math.round(Math.min(total * 0.75, Math.max(Math.min(200, total * 0.33), h)))
   }
   return (
-    <div ref={panel} className="relative flex shrink-0 flex-col bg-canvas" style={{ height: height ?? "clamp(200px, 32%, 340px)" }}>
+    <div ref={panel} className={cx("relative flex flex-col", fill ? "min-h-0 flex-1 pt-3" : "shrink-0 bg-canvas")} style={fill ? undefined : { height: height ?? share }}>
+      {fill ? null : (
       <div
         role="separator"
         aria-orientation="horizontal"
@@ -754,8 +857,9 @@ function Dock({
       >
         <span className="h-1 w-9 rounded-full bg-wash-2 transition-colors group-hover/h:bg-ink-3/50" />
       </div>
+      )}
       <div className="mx-auto flex w-full max-w-[792px] shrink-0 items-center justify-between px-4 pb-1">
-        <span className="text-stamp font-medium text-ink-3">{replaying ? "What you and " + nameOf(coordinator) + " had said by then" : `You and ${nameOf(coordinator)}`}</span>
+        <span className={fill ? "text-ui font-semibold text-ink" : "text-stamp font-medium text-ink-3"}>{replaying ? "What you and " + nameOf(coordinator) + " had said by then" : `You and ${nameOf(coordinator)}`}</span>
         <button type="button" onClick={onShowConversation} title="Show conversation (Esc in the message field)" className="flex items-center gap-1 rounded-full px-2 py-0.5 text-stamp text-ink-3 transition-colors hover:bg-wash hover:text-ink">
           <Icon icon={ArrowDown01Icon} size={11} className="rotate-180" />
           Show conversation
@@ -767,7 +871,7 @@ function Dock({
         {newestTheirs && !replaying ? `${nameOf(coordinator)}: ${newestTheirs.body}` : ""}
       </p>
       <div ref={list} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[792px] flex-col gap-1.5 px-4 pb-3">
+        <div className="mx-auto flex w-full max-w-[792px] flex-col gap-1 px-4 pb-3">
           {dialogue.length === 0 ? (
             <div className="flex flex-col items-center py-4 text-center">
               <p className="text-title font-semibold">Tell {nameOf(coordinator)} what you want done.</p>
@@ -787,9 +891,9 @@ function Dock({
               const prev = dialogue[i - 1]
               const typing = theirs && m.seq === newestTheirs?.seq && revealing
               return (
-                <div key={m.seq} className={cx("flex items-end gap-2", mine ? "justify-end pl-12" : "pr-12", prev && prev.from !== m.from && "mt-2")}>
-                  {!mine && <span className="w-6 shrink-0">{(!dialogue[i + 1] || dialogue[i + 1]!.from !== m.from) && (theirs ? <CoordinatorAvatar size={24} mood={m.seq === newestTheirs?.seq ? (revealing && coordMood?.state !== "sleeping" ? { state: "speaking" } : coordMood) : undefined} live={m.seq === newestTheirs?.seq} seed={0.3} /> : null)}</span>}
-                  <div className={cx("min-w-0 max-w-[min(85%,620px)] rounded-bubble px-3 py-1.5 text-body", mine ? "bg-bubble-me text-bubble-me-ink" : "bg-bubble-them text-ink")}>
+                <div key={m.seq} className={cx("flex items-end gap-2", mine ? "justify-end pl-14" : "pr-14", prev && prev.from !== m.from && "mt-3")}>
+                  {!mine && <span className="w-7 shrink-0">{(!dialogue[i + 1] || dialogue[i + 1]!.from !== m.from) && (theirs ? <CoordinatorAvatar size={28} mood={m.seq === newestTheirs?.seq ? (revealing && coordMood?.state !== "sleeping" ? { state: "speaking" } : coordMood) : undefined} live={m.seq === newestTheirs?.seq} seed={0.3} /> : null)}</span>}
+                  <div className={cx("min-w-0 max-w-[min(88%,640px)] rounded-bubble px-3.5 py-2 text-chat", mine ? "bg-bubble-me text-bubble-me-ink" : "bg-bubble-them text-ink")}>
                     {!mine && !theirs && <p className="text-stamp font-medium text-ink-3">{nameOf(m.from)}</p>}
                     <div aria-hidden={typing || undefined} className="bubble-text [&_pre]:text-ui">
                       {typing ? <p className="whitespace-pre-wrap">{text}</p> : <Markdown>{m.body}</Markdown>}
@@ -815,10 +919,19 @@ function Dock({
   )
 }
 
-/** The drawer an agent's face opens: its conversation (its task's, or its direct one with the coordinator), live. */
-export function AgentDrawer({ title, subtitle, face, onClose, children, composer }: { title: string; subtitle: string; face: ReactNode; onClose: () => void; children: ReactNode; composer: ReactNode }) {
+/**
+ * The drawer an agent's face opens: its conversation (its task's, or its direct one with the
+ * coordinator), live. In a wide room it takes the dialogue's column, with a way back; narrower, it
+ * slides over the room.
+ */
+export function AgentDrawer({ mode, back, title, subtitle, face, onClose, children, composer }: { mode: "column" | "overlay"; back: string; title: string; subtitle: string; face: ReactNode; onClose: () => void; children: ReactNode; composer: ReactNode }) {
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && onClose()
+    // After the field's own Esc (which walks the same stack and marks the key handled), and after any popover.
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return
+      e.preventDefault()
+      onClose()
+    }
     addEventListener("keydown", esc)
     return () => removeEventListener("keydown", esc)
   }, [onClose])
@@ -827,24 +940,43 @@ export function AgentDrawer({ title, subtitle, face, onClose, children, composer
     const el = list.current
     if (el) el.scrollTop = el.scrollHeight
   })
+  const body = (
+    <>
+      <header className="flex h-14 shrink-0 items-center gap-2.5 px-4">
+        {mode === "column" && (
+          <button type="button" onClick={onClose} aria-label={`Back to ${back}`} title={`Back to ${back} (Esc)`} className="-ml-2 flex h-8 items-center gap-0.5 rounded-full pr-2 pl-1 text-ui text-ink-3 transition-colors hover:bg-wash hover:text-ink">
+            <Icon icon={ArrowLeft01Icon} size={16} />
+            {back}
+          </button>
+        )}
+        {face}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-title font-semibold">{title}</span>
+          <span className="block truncate text-meta text-ink-3">{subtitle}</span>
+        </span>
+        {mode === "overlay" && (
+          <button type="button" onClick={onClose} aria-label="Close" className="flex size-8 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-wash hover:text-ink">
+            <Icon icon={Cancel01Icon} size={16} />
+          </button>
+        )}
+      </header>
+      <div ref={list} className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+        {children}
+      </div>
+      {composer}
+    </>
+  )
+  if (mode === "column")
+    return (
+      <section aria-label={title} className="animate-rise flex min-h-0 flex-1 flex-col">
+        {body}
+      </section>
+    )
   return (
     <div className="absolute inset-0 z-40 flex justify-end">
       <button type="button" aria-label="Close" onClick={onClose} className="room-scrim absolute inset-0 bg-overlay" />
       <aside role="dialog" aria-label={title} className="room-drawer relative flex h-full w-full max-w-[520px] flex-col bg-canvas shadow-pop">
-        <header className="flex h-14 shrink-0 items-center gap-2.5 px-4">
-          {face}
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-title font-semibold">{title}</span>
-            <span className="block truncate text-meta text-ink-3">{subtitle}</span>
-          </span>
-          <button type="button" onClick={onClose} aria-label="Close" className="flex size-8 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-wash hover:text-ink">
-            <Icon icon={Cancel01Icon} size={16} />
-          </button>
-        </header>
-        <div ref={list} className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-          {children}
-        </div>
-        {composer}
+        {body}
       </aside>
     </div>
   )

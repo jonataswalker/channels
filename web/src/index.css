@@ -88,11 +88,13 @@
   --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   /*
-   * Seven type steps and nothing between them (scripts/ui-tokens.ts keeps it that way):
+   * Eight type steps and nothing between them (scripts/ui-tokens.ts keeps it that way):
    * stamp for the times between messages; meta for counts, previews' dates and section heads; ui for
    * names, rows, menus and buttons; body for what people read, in bubbles too; title for headers and
    * dialogs; display for the info panel's name, empty states and welcomes; hero for what the
-   * coordinator says to you in its focus view, where its words are the page.
+   * coordinator says to you in its focus view, where its words are the page; chat for the Room's
+   * dialogue with the coordinator, a touch bigger than a conversation's bubbles, since it's the one
+   * exchange on the screen.
    */
   --text-stamp: 11px;
   --text-stamp--line-height: 14px;
@@ -108,6 +110,8 @@
   --text-display--line-height: 28px;
   --text-hero: 20px;
   --text-hero--line-height: 30px;
+  --text-chat: 15px;
+  --text-chat--line-height: 22px;
   --radius-row: 6px;
   --radius-ctl: 8px;
   --radius-card: 12px;

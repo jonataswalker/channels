@@ -4,10 +4,10 @@ import type { Message } from "../../../src/protocol.ts"
 import type { ChannelState, Task } from "../../../src/state.ts"
 
 import { ERROR_MS } from "./coordinator-mood"
-import { AGENT_SPEAKING_MS, agentInputs, agentMood, currentTask, delegations, dialogueOf, flagsByAgent, presentAt, stageAgents, teamEvents, type AgentInput } from "./room"
+import { AGENT_SPEAKING_MS, agentInputs, agentMood, currentTask, delegations, dialogueOf, drawerPlaceFor, flagsByAgent, hiddenFlags, newDelegations, presentAt, seatsPerSide, stageAgents, teamEvents, type AgentInput } from "./room"
 
 const msg = (seq: number, from: string, extra: Partial<Message> = {}): Message => ({ v: 1, id: `m${seq}`, from, kind: "msg", body: `said ${seq}`, ts: seq * 1000, seq, sigOk: true, ...extra }) as Message
-const member = (name: string, kind: "human" | "agent", at = 0) => [name, { name, kind, active: true, at }] as const
+const member = (name: string, kind: "human" | "agent", joined = 0) => [name, { name, kind, active: true, joined }] as const
 const task = (id: number, over: Partial<Task> = {}): Task => ({ id, title: `T${id}`, state: "todo", createdBy: "lead", createdAt: 0, updatedAt: id, notes: [], workedBy: [], ...over })
 const state = (over: Partial<ChannelState> = {}) =>
   ({
@@ -116,5 +116,39 @@ describe("the timeline", () => {
     expect(presentAt(all, "win", 1000 + 60_000)).toBe(true)
     expect(presentAt(all, "win", 1000 + 16 * 60_000)).toBe(false)
     expect(presentAt(all, "ana", 2000)).toBe(false)
+  })
+})
+
+describe("fixes after The Room shipped", () => {
+  test("a replay's stage has only the agents who had joined by then", () => {
+    const s = state()
+    expect(stageAgents(s, "lead", 2)).toEqual(["win"])
+    expect(stageAgents(s, "lead", 3)).toEqual(["win", "dev"])
+    expect(stageAgents(s, "lead", null)).toEqual(["win", "dev"])
+  })
+  test("what agents past the shown faces need from you is counted on the '+N' seat", () => {
+    const flags = flagsByAgent([msg(1, "a9", { esc: true }), msg(2, "a10", { esc: true }), msg(3, "a1", { esc: true })], [task(4, { owner: "a10", state: "review" })])
+    const agents = Array.from({ length: 10 }, (_, i) => `a${i + 1}`)
+    expect(hiddenFlags(agents, 8, flags)).toBe(3)
+    expect(hiddenFlags(agents, 10, flags)).toBe(0)
+  })
+  test("as many seats beside the coordinator as fit in the column, two a side at most", () => {
+    expect(seatsPerSide(760, 220, 104)).toBe(1)
+    expect(seatsPerSide(1100, 220, 96)).toBe(2)
+    expect(seatsPerSide(420, 220, 96)).toBe(0)
+  })
+  test("each delegation draws once, and only when it's new; history arriving draws nothing", () => {
+    const all = [
+      { seq: 1, to: "win", at: 1_000 },
+      { seq: 5, to: "dev", at: 50_000 },
+    ]
+    expect(newDelegations(all, 0, 55_000)).toEqual({ fresh: [all[1]!], seenTo: 5 })
+    // A later render with nothing new (a message that isn't a delegation) changes nothing and draws nothing.
+    expect(newDelegations(all, 5, 56_000)).toEqual({ fresh: [], seenTo: 5 })
+  })
+  test("the drawer opens on the agent's task, else its direct conversation with the coordinator", () => {
+    const s = state({ tasks: new Map([[3, task(3, { owner: "win", state: "doing" })]]) } as Partial<ChannelState>)
+    expect(drawerPlaceFor(s, "win", "lead", "ana")).toEqual({ kind: "task", task: 3 })
+    expect(drawerPlaceFor(s, "dev", "lead", "ana")).toEqual({ kind: "dm", with: ["dev", "lead"] })
   })
 })
