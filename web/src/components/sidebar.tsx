@@ -14,7 +14,6 @@ import { Icon } from "./icon"
 import { Button, IconButton, Monogram, Wordmark } from "./kit"
 import { Menu, MenuItem, MenuNote, MenuSeparator } from "./ui/menu"
 import { usageLine } from "./usage"
-import { setRoomsSlot } from "./rooms"
 import { offerVault, VaultCard } from "./vault"
 
 /** What a row says on hover: what was said last, or why this browser can't open it yet. */
@@ -143,10 +142,10 @@ export function Sidebar({
             const selected = c.code === active
             const reachable = c.state === "member"
             const n = newsOf.get(c.room)
-            // The open channel's own rooms say where its news is; its row says only what needs you.
+            // The open channel shows its own news; its row says only what needs you.
             const fresh = !selected && !!n?.fresh
             return (
-              <div key={c.room} className="[&:has(li[data-room])>button]:bg-transparent">
+              <div key={c.room}>
                 <button
                   type="button"
                   onClick={() => onSelect(c.code)}
@@ -171,8 +170,6 @@ export function Sidebar({
                     <Icon icon={LockIcon} size={12} className="shrink-0 text-ink-3" />
                   ) : null}
                 </button>
-                {/* The open channel's rooms nest here (rendered by the conversation). */}
-                {selected && <div ref={setRoomsSlot} />}
               </div>
             )
           })}
