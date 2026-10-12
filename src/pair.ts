@@ -71,6 +71,8 @@ export interface PairRow {
   /** The terminal's nonce, once it revealed it. */
   tnonce: string | null;
   ts: number;
+  /** What the terminal says it is ("jow@macbook"): for telling terminals apart, never proof of anything. */
+  label?: string | null;
 }
 
 /** The code for a pairing the terminal has revealed, or null while it hasn't (or its reveal doesn't match its commit). */
@@ -82,4 +84,29 @@ export async function codeFor(room: string, p: PairRow): Promise<string | null> 
   } catch {
     return null;
   }
+}
+
+/** What a browser fixed when the person chose a terminal: its own nonce, and the terminal's key and commit as listed then. */
+export interface Chosen {
+  nonce: string;
+  pk: string;
+  xpk: string;
+  commit: string;
+  /** The nonce the relay kept for the row: another browser's, if one opened it first. */
+  kept: string | null;
+}
+
+/**
+ * The code a browser shows for a terminal it chose: only from what it fixed then plus the terminal's
+ * reveal, never from what the relay lists since. Null while there's no reveal, or if the relay kept
+ * another nonce, or the row's key or commit changed, or the reveal doesn't match the commit.
+ */
+export async function browserCode(room: string, c: Chosen, r: PairRow): Promise<string | null> {
+  if (c.kept !== c.nonce || r.pk !== c.pk || r.xpk !== c.xpk || r.commit !== c.commit || !r.tnonce) return null;
+  return codeFor(room, { ...r, wnonce: c.nonce });
+}
+
+/** The row to seal to, as the browser fixed it: its key, its commit, its own nonce. */
+export function sealedTo(c: Chosen, r: PairRow): PairRow {
+  return { ...r, pk: c.pk, xpk: c.xpk, commit: c.commit, wnonce: c.nonce };
 }

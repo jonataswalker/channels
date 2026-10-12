@@ -742,31 +742,35 @@ export class Channel {
      * A terminal asks to pair with a person's seat (pair.ts), under a one-time identity `id`: its key and
      * its commit to `nonce`. Asking again with the same key resumes the same pairing.
      */
-    pairAsk: Effect.fn("Channel.pairAsk")(function* (relay: string, code: string, id: Identity, nonce: string) {
+    pairAsk: Effect.fn("Channel.pairAsk")(function* (relay: string, code: string, id: Identity, nonce: string, label?: string) {
       const { roomId } = yield* pinnedInfo(relay, code);
       if (!id.xpk) return yield* new MissingKey("identity has no exchange key");
       const commit = yield* Effect.promise(() => pairCommit(roomId, id.pk, id.xpk!, nonce));
-      const { id: pairId } = yield* callRelay<{ id: string }>(relay, roomId, "/pairs", { method: "POST", identity: id, body: JSON.stringify({ xpk: id.xpk, commit }) });
+      const { id: pairId } = yield* callRelay<{ id: string }>(relay, roomId, "/pairs", { method: "POST", identity: id, body: JSON.stringify({ xpk: id.xpk, commit, ...(label ? { label } : {}) }) });
       return { roomId, pairId };
     }),
 
     /**
-     * Where a terminal's pairing stands. Once a browser opened it, this reveals the terminal's nonce and
-     * gives the code to show; once the person approved, the seat's identity, opened from its sealed box.
+     * Where a terminal's pairing stands. The browser's nonce is pinned the first time it's seen
+     * (`pinned`): the terminal reveals its own once, bound to it, and a relay that later shows another
+     * one is caught (it could grind a code from it once it knew the terminal's nonce). Once the person
+     * approved, the seat's identity, opened from its sealed box.
      */
-    pairCheck: Effect.fn("Channel.pairCheck")(function* (relay: string, code: string, id: Identity, pairId: string, nonce: string) {
+    pairCheck: Effect.fn("Channel.pairCheck")(function* (relay: string, code: string, id: Identity, pairId: string, nonce: string, pinned: string | null) {
       const { roomId } = yield* pinnedInfo(relay, code);
       const r = yield* callRelay<{ wnonce: string | null; revealed: boolean; box: string | null }>(relay, roomId, `/pairs/${pairId}`, { identity: id });
-      if (!r.wnonce) return { code: null, seat: null };
-      if (!r.revealed) yield* callRelay(relay, roomId, `/pairs/${pairId}/reveal`, { method: "POST", identity: id, body: JSON.stringify({ nonce }) });
+      if (!r.wnonce) return { wnonce: null, code: null, seat: null };
+      if (pinned && r.wnonce !== pinned) return yield* new Rejected("the browser's half of the code changed after this terminal showed its code: someone in between may be tampering. Start over, and say so if it happens again");
+      // Reveal exactly once, right after first seeing the browser's nonce.
+      if (!pinned) yield* callRelay(relay, roomId, `/pairs/${pairId}/reveal`, { method: "POST", identity: id, body: JSON.stringify({ nonce }) });
       const shown = yield* Effect.promise(() => pairCode(roomId, id.pk, id.xpk!, nonce, r.wnonce!));
-      if (!r.box) return { code: shown, seat: null };
+      if (!r.box) return { wnonce: r.wnonce, code: shown, seat: null };
       const opened = yield* Effect.promise(() => openFrom(id.xsk!, r.box!, pairInfo(roomId)));
       let seat: Identity | null = null;
       try {
         seat = opened ? (JSON.parse(opened) as Identity) : null;
       } catch {}
-      return { code: shown, seat };
+      return { wnonce: r.wnonce, code: shown, seat };
     }),
   };
 

@@ -36,6 +36,8 @@ for (const opener of ["open", "xdg-open"]) {
   writeFileSync(join(cli, "bin", opener), "#!/bin/sh\nexit 0\n")
   chmodSync(join(cli, "bin", opener), 0o755)
 }
+/** A person's own terminal: none of the variables an agent's harness sets (the smoke may itself run inside one). */
+const PERSON = { CLAUDECODE: "", CODEX_THREAD_ID: "", GEMINI_CLI: "", CURSOR_AGENT: "", GROK_SESSION_ID: "" }
 const cliEnv = { ...process.env, KIWI_HOME: join(cli, "home"), CLAUDE_CONFIG_DIR: join(cli, "no-claude"), PATH: `${join(cli, "bin")}:${process.env.PATH}` }
 /** Run kiwi as that computer; resolves with its output once it exits, and lets you watch it meanwhile. */
 function kiwi(args: string[], watch?: (out: string) => void): Promise<string> {
@@ -321,18 +323,20 @@ try {
   const termHome = join(data, "terminal")
   let termOut = ""
   // KIWI_RELAY too: whatever the command says, this never reaches a relay but the local one.
-  const term = spawn("bun", ["src/cli/main.ts", ...pairCmd.split(/\s+/).slice(1)], { cwd: ROOT, env: { ...cliEnv, KIWI_HOME: termHome, KIWI_RELAY: BASE.replace(/\/$/, "") } })
+  const term = spawn("bun", ["src/cli/main.ts", ...pairCmd.split(/\s+/).slice(1)], { cwd: ROOT, env: { ...cliEnv, KIWI_HOME: termHome, KIWI_RELAY: BASE.replace(/\/$/, ""), ...PERSON } })
   term.stdout.on("data", (d: Buffer) => (termOut += d))
   term.stderr.on("data", (d: Buffer) => (termOut += d))
   const termDone = new Promise<number | null>((ok) => term.on("exit", ok))
-  const asked = pairDialog.getByText(/Does your terminal show/)
-  await asked.waitFor({ timeout: 20000 }).catch((e) => {
+  // The person chooses the terminal (its label says which), then compares codes.
+  await pairDialog.getByRole("button", { name: "That’s mine" }).click({ timeout: 20000 }).catch((e) => {
     throw new Error(`${e instanceof Error ? e.message.split("\n")[0] : e} (terminal: ${termOut.trim() || "nothing yet"})`)
   })
+  const asked = pairDialog.getByText(/Does it show/)
+  await asked.waitFor({ timeout: 20000 })
   const shownCode = /\d{3}-\d{3}/.exec(await asked.innerText())![0]
   for (let i = 0; i < 100 && !termOut.includes(`code ${shownCode}`); i++) await page.waitForTimeout(100)
   if (!termOut.includes(`code ${shownCode}`)) throw new Error(`the terminal didn't show ${shownCode}: ${termOut}`)
-  await pairDialog.getByRole("button", { name: "It matches" }).click()
+  await pairDialog.getByRole("button", { name: "It matches: let it in" }).click()
   if ((await termDone) !== 0 || !termOut.includes("Your seat is on this computer now")) throw new Error(`pairing failed: ${termOut}`)
   console.log(`ok  ${at}`)
 

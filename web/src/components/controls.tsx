@@ -7,12 +7,12 @@ import { cardLine } from "@mc/format.ts"
 import { NAME_RE, type JoinRequest, type Member as RosterMember } from "@mc/membership.ts"
 import { MAX_CHARTER, type ChannelIcon, type Color, type Event } from "@mc/protocol.ts"
 import { decodeJoinCode } from "@mc/crypto.ts"
-import { codeFor, pairNonce, type PairRow } from "@mc/pair.ts"
+import { browserCode, pairNonce, sealedTo, type Chosen, type PairRow } from "@mc/pair.ts"
 import { TOO_MANY_REQUESTS } from "@mc/sas.ts"
 import { SCOPES, type Scope } from "@mc/scopes.ts"
 import { colorOf, COORDINATOR, isPerson, taskId, type ChannelState, type Member } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
-import { noteAgentWorked } from "@/lib/channel"
+import { noteAgentWorked, useClock } from "@/lib/channel"
 import { formatAgo, memberLine, memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { isSignInGone } from "@/lib/session"
@@ -938,25 +938,36 @@ function CharterDialog({ text, onClose, onSave }: { text: string; onClose: () =>
 }
 
 /**
- * Your seat in a terminal: run `kiwi tui <code>` there; while this is open, a terminal that asks shows
- * up here with its code, and you let it in once the codes match. Nothing secret is copied.
+ * Your seat in a terminal: run `kiwi tui <code>` there, choose it here, and let it in once both show
+ * the same code. The code comes only from what this browser fixed when you chose the terminal (its own
+ * nonce, the terminal's key and commit) plus the terminal's reveal, and the seat is sealed to that key:
+ * nothing the relay lists afterwards can change either. Nothing secret is copied.
  */
 function TerminalDialog({ pairing, onClose }: { pairing: NonNullable<ControlsProps["pairing"]>; onClose: () => void }) {
-  const [waiting, setWaiting] = useState<{ row: PairRow; code: string | null }[]>([])
+  const [rows, setRows] = useState<PairRow[]>([])
+  const [codes, setCodes] = useState<Map<string, string | null>>(() => new Map())
+  // Read by the polling (a ref), shown by the render (state): both written together.
+  const chosen = useRef(new Map<string, Chosen>())
+  const [picked, setPicked] = useState<Map<string, Chosen>>(() => new Map())
+  const now = useClock(5_000)
   const [busy, setBusy] = useState(false)
-  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
+  const room = decodeJoinCode(pairing.code).roomId
   const command = `kiwi tui ${pairing.code}${location.origin !== PUBLIC_RELAY ? ` --relay ${location.origin}` : ""}`
+
   useEffect(() => {
     let stop = false
     const tick = async () => {
       try {
-        const rows = await pairing.list()
-        // Opening one only adds this browser's half of its code; letting it in is the person's click.
-        for (const r of rows) if (!r.wnonce) await pairing.open(r.id, pairNonce()).catch(() => {})
-        const fresh = rows.some((r) => !r.wnonce) ? await pairing.list() : rows
-        const room = decodeJoinCode(pairing.code).roomId
-        const next = await Promise.all(fresh.map(async (row) => ({ row, code: await codeFor(room, row) })))
-        if (!stop) setWaiting(next)
+        const list = await pairing.list()
+        const next = new Map<string, string | null>()
+        for (const r of list) {
+          const c = chosen.current.get(r.id)
+          next.set(r.id, c ? await browserCode(room, c, r) : null)
+        }
+        if (!stop) {
+          setRows(list)
+          setCodes(next)
+        }
       } catch {
         // The relay out of reach for a moment: the next tick tries again.
       }
@@ -967,12 +978,28 @@ function TerminalDialog({ pairing, onClose }: { pairing: NonNullable<ControlsPro
       stop = true
       window.clearInterval(t)
     }
-  }, [pairing])
-  const shown = waiting.filter((w) => !dismissed.has(w.row.id))
-  const approve = async (row: PairRow) => {
+  }, [pairing, room])
+
+  const choose = async (r: PairRow) => {
+    const c: Chosen = { nonce: pairNonce(), pk: r.pk, xpk: r.xpk, commit: r.commit, kept: null }
+    chosen.current.set(r.id, c)
+    try {
+      c.kept = await pairing.open(r.id, c.nonce)
+    } catch (err) {
+      toast(errorText(err), "error")
+    }
+    setPicked(new Map(chosen.current))
+  }
+
+  // Two terminals showing one code can't be told apart: neither is let in.
+  const shownCodes = [...codes.values()].filter((c): c is string => !!c)
+  const approve = async (r: PairRow, code: string) => {
+    const c = chosen.current.get(r.id)
+    if (!c || shownCodes.filter((x) => x === code).length > 1) return
     setBusy(true)
     try {
-      await pairing.answer(row)
+      // Sealed to the key this browser saw when it was chosen, with the code computed from its own nonce.
+      await pairing.answer(sealedTo(c, r))
       toast("That terminal has your seat now")
       onClose()
     } catch (err) {
@@ -981,39 +1008,51 @@ function TerminalDialog({ pairing, onClose }: { pairing: NonNullable<ControlsPro
       setBusy(false)
     }
   }
+
   return (
-    <Modal open onClose={onClose}>
+    <Modal open onClose={onClose} wide>
       <div className="p-5">
         <Dialog.Title className="text-title font-semibold tracking-[-0.01em]">Use in a terminal</Dialog.Title>
         <Dialog.Description className="mt-1 text-ui leading-normal text-ink-2">
-          Run this in a terminal on your computer. It shows a code; when the same code appears here, let it in. Keep this open until then.
+          Run this in a terminal on your computer, then choose it below. Let it in only when it shows the same code as here.
         </Dialog.Description>
         <div className="mt-4">
           <CopyBox text={command} label="Copy command" done="Command copied" />
         </div>
         <div className="mt-4 grid gap-2" aria-live="polite">
-          {shown.length === 0 && <p className="text-meta text-ink-2">Waiting for a terminal…</p>}
-          {shown.map(({ row, code }) => (
-            <div key={row.id} className="flex items-center gap-3 rounded-ctl bg-wash px-3 py-2.5">
-              {code ? (
-                <>
-                  <span className="min-w-0 flex-1 text-ui">
-                    Does your terminal show <span className="font-mono font-semibold tracking-wide">{code}</span>?
-                  </span>
-                  <Button size="sm" disabled={busy} onClick={() => void approve(row)}>
-                    It matches
+          {rows.length === 0 && <p className="text-meta text-ink-2">Waiting for a terminal…</p>}
+          {rows.map((r) => {
+            const c = picked.get(r.id)
+            const code = codes.get(r.id) ?? null
+            const twin = !!code && shownCodes.filter((x) => x === code).length > 1
+            const said = r.label ? `${r.label}` : "A terminal"
+            return (
+              <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-ctl bg-wash px-3 py-2.5">
+                <span className="min-w-0 flex-1 text-ui">
+                  <span className="font-medium">{said}</span> <span className="text-meta text-ink-3">· asked {formatAgo(r.ts, now)}</span>
+                  {c && c.kept && c.kept !== c.nonce && <span className="block text-meta text-alert">Opened in another browser or tab: close this and use that one, or run the command again.</span>}
+                  {twin && <span className="block text-meta text-alert">Two terminals show this code: let neither in, and run the command again.</span>}
+                  {code && !twin && (
+                    <span className="block">
+                      Does it show <span className="font-mono font-semibold tracking-wide">{code}</span>?
+                    </span>
+                  )}
+                  {c && c.kept === c.nonce && !code && <span className="block text-meta text-ink-2">Waiting for its code…</span>}
+                </span>
+                {!c ? (
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => void choose(r)}>
+                    That’s mine
                   </Button>
-                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => setDismissed((d) => new Set(d).add(row.id))}>
-                    No
+                ) : code && !twin ? (
+                  <Button size="sm" disabled={busy} onClick={() => void approve(r, code)}>
+                    It matches: let it in
                   </Button>
-                </>
-              ) : (
-                <span className="text-meta text-ink-2">A terminal is asking; its code is on the way…</span>
-              )}
-            </div>
-          ))}
+                ) : null}
+              </div>
+            )
+          })}
         </div>
-        <p className="mt-3 text-meta text-ink-3">Only let in a terminal you just opened yourself. The seat it gets can act as you.</p>
+        <p className="mt-3 text-meta text-ink-3">Only choose a terminal you just opened yourself. The seat it gets can act as you.</p>
       </div>
     </Modal>
   )

@@ -17,7 +17,7 @@ import { parseArgs } from "node:util";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join as joinPath, join } from "node:path";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname, userInfo } from "node:os";
 import { AgentLive, openPersonSession, openSession, type Agent, type AgentSession, type Delivery } from "../agent.ts";
 import { loadImages, saveImages } from "../attach.ts";
 import { Channel, ChannelGone, fx as relayFx, reason, RelayError } from "../client.ts";
@@ -466,18 +466,22 @@ const importSeat = Effect.fn("kiwi.importSeat")(function* (code: string, relay: 
  * person's browser opens the pairing, and take the seat when they approve it there. No key is ever copied.
  */
 const pairSeat = Effect.fn("kiwi.pairSeat")(function* (code: string) {
+  // The seat can act as the person (the owner, maybe): never into a file an agent running this could read.
+  if (inAgentHarness()) return yield* die("your seat carries your key: run kiwi tui in a terminal of your own, outside Claude Code (not with !) or any agent's harness");
   const relay = relayUrl();
   const eph = yield* Effect.promise(() => generateIdentity("pair"));
   const nonce = pairNonce();
-  const { pairId } = yield* Channel.fx.pairAsk(relay, code, eph, nonce);
-  out("Pairing this terminal with your seat. In your browser, open the channel: it asks whether this terminal may have it.");
+  // What the person sees next to the code, to tell this terminal from another (the relay could change it; the code is what counts).
+  const label = `${userInfo().username}@${hostname()}`.slice(0, 64);
+  const { pairId } = yield* Channel.fx.pairAsk(relay, code, eph, nonce, label);
+  out(`Pairing this terminal (${label}) with your seat. In your browser, open the channel's menu → Use in a terminal…, and choose this terminal.`);
   const deadline = Date.now() + PAIR_TTL_MS;
-  let shown: string | null = null;
+  let pinned: string | null = null;
   for (;;) {
-    const st = yield* Channel.fx.pairCheck(relay, code, eph, pairId, nonce);
-    if (st.code && st.code !== shown) {
-      shown = st.code;
-      out(`code ${st.code}: approve in your browser once it shows the same 6 digits.`);
+    const st: { wnonce: string | null; code: string | null; seat: Identity | null } = yield* Channel.fx.pairCheck(relay, code, eph, pairId, nonce, pinned);
+    if (st.wnonce && !pinned) {
+      pinned = st.wnonce;
+      out(`code ${st.code}: approve in your browser only if it shows the same 6 digits.`);
     }
     if (st.seat) {
       out("approved.");

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Channel } from "../src/client.ts";
 import { generateIdentity, type Identity } from "../src/identity.ts";
-import { codeFor, pairCode, pairCommit, pairNonce, type PairRow } from "../src/pair.ts";
+import { browserCode, codeFor, pairCode, pairCommit, pairNonce, sealedTo, type Chosen, type PairRow } from "../src/pair.ts";
 import { startRelay } from "../src/relay/bun.ts";
 import * as Effect from "effect/Effect";
 import { AgentLive } from "../src/agent.ts";
@@ -58,45 +58,133 @@ describe("pairing codes", () => {
   });
 });
 
+describe("the browser trusts only what it fixed when the person chose the terminal", () => {
+  test("a relay that swaps the key or commit, or keeps another nonce, gets no code", async () => {
+    const room = "0123456789abcdef0123456789abcdef";
+    const t = await generateIdentity("pair");
+    const nt = pairNonce();
+    const listed: PairRow = { id: "x", pk: t.pk, xpk: t.xpk!, commit: await pairCommit(room, t.pk, t.xpk!, nt), wnonce: null, tnonce: null, ts: 0 };
+    const c: Chosen = { nonce: pairNonce(), pk: listed.pk, xpk: listed.xpk, commit: listed.commit, kept: null };
+    c.kept = c.nonce;
+    const revealed = { ...listed, wnonce: c.nonce, tnonce: nt };
+    const good = await browserCode(room, c, revealed);
+    expect(good).toBe(await pairCode(room, t.pk, t.xpk!, nt, c.nonce));
+    // The relay lists a nonce it ground instead of the browser's: the browser still uses its own.
+    expect(await browserCode(room, c, { ...revealed, wnonce: pairNonce() })).toBe(good);
+    // It swaps in its own key and a commit for it after the person chose: nothing.
+    const evil = await generateIdentity("evil");
+    const ne = pairNonce();
+    expect(await browserCode(room, c, { ...revealed, pk: evil.pk, xpk: evil.xpk!, commit: await pairCommit(room, evil.pk, evil.xpk!, ne), tnonce: ne })).toBeNull();
+    // Another browser (or an agent) opened the row first: this one shows nothing.
+    expect(await browserCode(room, { ...c, kept: pairNonce() }, revealed)).toBeNull();
+    // And the seat goes to the key the browser fixed, whatever the row says now.
+    expect(sealedTo(c, { ...revealed, xpk: evil.xpk! }).xpk).toBe(t.xpk!);
+  });
+});
+
+/** A relay in front of the real one that, once the terminal has revealed, shows it a different browser nonce. */
+function grindingProxy(target: string) {
+  let revealed = false;
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+      const url = new URL(req.url);
+      const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+      const res = await fetch(target + url.pathname + url.search, { method: req.method, headers: req.headers, body });
+      if (/\/pairs\/[0-9a-f-]{36}\/reveal$/.test(url.pathname) && res.ok) revealed = true;
+      if (req.method === "GET" && /\/pairs\/[0-9a-f-]{36}$/.test(url.pathname) && revealed) {
+        const j = (await res.json()) as { wnonce: string | null };
+        return Response.json({ ...j, wnonce: pairNonce() });
+      }
+      return new Response(await res.arrayBuffer(), { status: res.status, headers: res.headers });
+    },
+  });
+  return { url: server.url.origin, stop: () => server.stop(true) };
+}
+
+async function terminal(code: string, relayUrl: string, env: Record<string, string> = {}) {
+  const term = mkdtempSync(join(tmpdir(), "kiwi-pair-term-"));
+  made.push(term);
+  const p = Bun.spawn([...MC, "tui", code], { cwd: term, env: { ...process.env, KIWI_HOME: term, KIWI_RELAY: relayUrl, KIWI_NO_HOOKS: "1", ...env }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  let out = "";
+  const read = async (s: ReadableStream<Uint8Array>) => {
+    const r = s.getReader();
+    for (;;) {
+      const { value, done } = await r.read();
+      if (done) return;
+      out += new TextDecoder().decode(value);
+    }
+  };
+  const reading = Promise.all([read(p.stdout), read(p.stderr)]);
+  return { term, p, output: () => out, done: async () => ((await p.exited), await reading, out) };
+}
+
+/** The person's browser: choose the only waiting terminal, wait for its reveal, and return the code it shows. */
+async function chooseAndCode(browser: Channel, room: string) {
+  const row = await until(async () => (await runIt(browser.fx.pairs()))[0], "a pairing to show up");
+  const c: Chosen = { nonce: pairNonce(), pk: row.pk, xpk: row.xpk, commit: row.commit, kept: null };
+  c.kept = await runIt(browser.fx.pairOpen(row.id, c.nonce));
+  const revealed = await until(async () => (await runIt(browser.fx.pairs())).find((x) => x.id === row.id && x.tnonce), "the terminal's reveal");
+  return { row: revealed, c, code: await browserCode(room, c, revealed) };
+}
+
 describe("kiwi tui <join code>", () => {
   test("the terminal shows a code, the browser approves the same one, and the seat arrives sealed", async () => {
-    // The owner's seat, as their browser holds it.
     const owner = await generateIdentity("human");
     const made_ = await Channel.create(relay, owner, { name: "human" });
     const browser = new Channel(made_.access, relay, owner);
-    const term = mkdtempSync(join(tmpdir(), "kiwi-pair-term-"));
-    made.push(term);
-    const p = Bun.spawn([...MC, "tui", made_.code], { cwd: term, env: { ...process.env, KIWI_HOME: term, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-    let out = "";
-    const reader = p.stdout.getReader();
-    const reading = (async () => {
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) return;
-        out += new TextDecoder().decode(value);
-      }
-    })();
-
-    // The browser sees the terminal waiting, opens it with its nonce, and waits for the terminal's reveal.
-    const pending = await until(async () => (await browser.fx.pairs().pipe(runIt))[0], "a pairing to show up");
+    const t = await terminal(made_.code, relay);
+    const pending = await until(async () => (await runIt(browser.fx.pairs()))[0], "a pairing to show up");
+    // It says what it is, for the person to tell terminals apart.
+    expect(pending.label).toContain("@");
     // Answering before the terminal shows a code is refused.
-    await expect(browser.fx.pairAnswer(pending, owner).pipe(runIt)).rejects.toThrow("hasn't shown a code");
-    await browser.fx.pairOpen(pending.id, pairNonce()).pipe(runIt);
-    const ready = await until(async () => (await browser.fx.pairs().pipe(runIt)).find((x) => x.id === pending.id && x.tnonce), "the terminal's reveal");
-    const browserCode = await codeFor(made_.access.roomId, ready);
-    expect(browserCode).toMatch(/^\d{3}-\d{3}$/);
-    await until(async () => out.includes(`code ${browserCode}`), "the same code in the terminal");
-
-    // The person says they match: the seat goes over sealed, once.
-    await browser.fx.pairAnswer(ready, owner).pipe(runIt);
-    expect(await p.exited).toBe(0);
-    await reading;
+    await expect(runIt(browser.fx.pairAnswer(pending, owner))).rejects.toThrow("hasn't shown a code");
+    const { row, c, code } = await chooseAndCode(browser, made_.access.roomId);
+    expect(code).toMatch(/^\d{3}-\d{3}$/);
+    await until(async () => t.output().includes(`code ${code}`), "the same code in the terminal");
+    await runIt(browser.fx.pairAnswer(sealedTo(c, row), owner));
+    const out = await t.done();
+    expect(t.p.exitCode).toBe(0);
     expect(out).toContain("approved.");
-    expect(out).toContain("Your seat is on this computer now");
-    const room = readdirSync(join(term, "identities"))[0]!;
-    const kept = JSON.parse(readFileSync(join(term, "identities", room, "human.json"), "utf8")) as Identity;
+    const room = readdirSync(join(t.term, "identities"))[0]!;
+    const kept = JSON.parse(readFileSync(join(t.term, "identities", room, "human.json"), "utf8")) as Identity;
     expect(kept.pk).toBe(owner.pk);
-    // Nothing is left waiting, and the box was handed over only once.
-    expect(await browser.fx.pairs().pipe(runIt)).toEqual([]);
+    expect(await runIt(browser.fx.pairs())).toEqual([]);
+  });
+
+  test("a relay that shows the terminal another browser nonce after it revealed is caught", async () => {
+    const owner = await generateIdentity("human");
+    const made_ = await Channel.create(relay, owner, { name: "human" });
+    const browser = new Channel(made_.access, relay, owner);
+    const proxy = grindingProxy(relay);
+    try {
+      const t = await terminal(made_.code, proxy.url);
+      await chooseAndCode(browser, made_.access.roomId);
+      const out = await t.done();
+      expect(t.p.exitCode).not.toBe(0);
+      expect(out).toContain("changed after this terminal showed its code");
+      expect(readdirSyncSafe(join(t.term, "identities"))).toEqual([]);
+    } finally {
+      proxy.stop();
+    }
+  });
+
+  test("never inside an agent's harness: the seat would land where the agent can read it", async () => {
+    const owner = await generateIdentity("human");
+    const made_ = await Channel.create(relay, owner, { name: "human" });
+    const t = await terminal(made_.code, relay, { CLAUDECODE: "1" });
+    const out = await t.done();
+    expect(t.p.exitCode).toBe(1);
+    expect(out).toContain("run kiwi tui in a terminal of your own");
+    expect(await runIt(new Channel(made_.access, relay, owner).fx.pairs())).toEqual([]);
   });
 });
+
+function readdirSyncSafe(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}

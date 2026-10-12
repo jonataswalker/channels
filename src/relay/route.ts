@@ -307,7 +307,7 @@ const routes: RoomRoute[] = [
     guard: "requester", // the terminal's one-time key, which isn't a member
     run: ({ me: pk }) =>
       Effect.gen(function* () {
-        const { id, fresh } = yield* askPair(pk, yield* json<{ xpk?: unknown; commit?: unknown }>());
+        const { id, fresh } = yield* askPair(pk, yield* json<{ xpk?: unknown; commit?: unknown; label?: unknown }>());
         return { data: { id }, fx: fresh ? { broadcast: [frame({ t: "request" })] } : undefined };
       }),
   },
