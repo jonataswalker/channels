@@ -732,7 +732,8 @@ function pairsTable(db: RoomDb): void {
 }
 
 const KEY_RE = /^[A-Za-z0-9_-]{43}$/;
-const SLOT_RE = /^[A-Za-z0-9_-]{22}$/;
+/** Hex, so it never starts with "-" (a pasted `--pair -x…` would read as a missing value). */
+const SLOT_RE = /^[0-9a-f]{32}$/;
 
 /** A member's browser opens a slot for one terminal to pair through (it goes in the command it shows). */
 export const openPairSlot = Effect.fn("Room.openPairSlot")(function* (pk: string) {
@@ -740,14 +741,10 @@ export const openPairSlot = Effect.fn("Room.openPairSlot")(function* (pk: string
   pairsTable(db);
   const today = db.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM pair_slots WHERE pk = ?", pk)[0]?.n ?? 0;
   if (today >= PAIR_SLOTS_PER_DAY) return yield* new TooMany({ message: `you opened ${PAIR_SLOTS_PER_DAY} pairings today, the most a day; try again tomorrow` });
-  const slot = b64urlBytes(crypto.getRandomValues(new Uint8Array(16)));
+  const slot = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
   db.sql.run("INSERT INTO pair_slots (slot, pk, ts) VALUES (?, ?, ?)", slot, pk, Date.now());
   return { slot };
 });
-
-function b64urlBytes(b: Uint8Array): string {
-  return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
 
 /** A terminal asks to pair through a slot: its one-time key (it signed the request with `pk`) and its commit. Asking again resumes. */
 export const askPair = Effect.fn("Room.askPair")(function* (pk: string, body: { xpk?: unknown; commit?: unknown; label?: unknown; slot?: unknown }) {
