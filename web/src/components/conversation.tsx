@@ -1,4 +1,4 @@
-import { ArrowDown01Icon, ArrowLeft01Icon, PauseIcon, PlayIcon, Search01Icon, SidebarRightIcon } from "@hugeicons/core-free-icons"
+import { ArrowDown01Icon, ArrowLeft01Icon, PauseCircleIcon, PlayCircleIcon, Search01Icon, SidebarRightIcon } from "@hugeicons/core-free-icons"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 
@@ -34,7 +34,8 @@ import { Notes, StateMark, TaskCard, Tasks } from "./tasks"
 import { ThreadPanel } from "./thread"
 
 /** A task's state in a word, beside its row in the list. */
-const SHORT = { todo: "Open", doing: "Doing", review: "Review", done: "Done" } as const
+/** Where a task stands, in words: the sidebar's dot says it at a glance; these say it on hover and to screen readers. */
+const STATE_WORD = { todo: "Open", doing: "In progress", review: "In review", done: "Done" } as const
 
 /** Messages this close together from one sender read as one run. */
 const RUN_GAP = 5 * 60_000
@@ -698,12 +699,14 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
               {hold &&
                 (!quiet || state.hold) &&
                 (state.hold ? (
-                  <IconButton label="Resume agents" active onClick={() => void hold(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error"))}>
-                    <Icon icon={PlayIcon} size={17} className="text-alert" />
+                  // Paused: play, in amber, where the stop was.
+                  <IconButton label="Resume agents" className="bg-decide-wash text-decide hover:bg-decide-wash hover:text-decide" onClick={() => void hold(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error"))}>
+                    <Icon icon={PlayCircleIcon} size={18} />
                   </IconButton>
                 ) : (
-                  <IconButton label="Pause agents" onClick={() => setPausing(true)}>
-                    <Icon icon={PauseIcon} size={17} />
+                  // A circled pause reads as a media control; two bare bars read as "columns".
+                  <IconButton label="Pause all agents" onClick={() => setPausing(true)}>
+                    <Icon icon={PauseCircleIcon} size={18} />
                   </IconButton>
                 ))}
               <IconButton label="Search" active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={board}>
@@ -931,7 +934,15 @@ function PlaceList({
     const { n: unread, forMe } = key === current ? { n: 0, forMe: false } : unreadIn(key)
     const other = p.kind === "dm" ? (p.with.includes(me) ? (p.with.find((n) => n !== me) ?? me) : null) : null
     return (
-      <button key={key} type="button" aria-current={key === current ? "page" : undefined} onClick={() => onPick(p)} className={rowClass(key === current, unread > 0 && forMe)}>
+      <button
+        key={key}
+        type="button"
+        aria-current={key === current ? "page" : undefined}
+        // The dot says where a task stands; the word is here, so the title gets the room.
+        title={t ? `${taskId(t.id)} ${t.title} · ${STATE_WORD[t.state]}` : undefined}
+        onClick={() => onPick(p)}
+        className={rowClass(key === current, unread > 0 && forMe)}
+      >
         {/* The row is named by its words; the dot or face beside them is decoration. */}
         <span aria-hidden className="flex w-4 shrink-0 justify-center">
           {t ? (
@@ -950,6 +961,7 @@ function PlaceList({
           ) : t ? (
             <>
               <span className="text-ink-3 tabular-nums">{taskId(t.id)}</span> {t.title}
+              <span className="sr-only">, {STATE_WORD[t.state]}</span>
             </>
           ) : p.kind === "dm" ? (
             other ? nameOf(other) : p.with.map(nameOf).join(" ↔ ")
@@ -964,8 +976,6 @@ function PlaceList({
             // News that isn't for you: a quiet dot, not a count that reads like mail.
             <span aria-label="New messages" className="size-1.5 shrink-0 rounded-full bg-ink-3" />
           )
-        ) : t && t.state !== "todo" ? (
-          <span className="shrink-0 text-stamp font-normal text-ink-3">{SHORT[t.state]}</span>
         ) : null}
       </button>
     )
