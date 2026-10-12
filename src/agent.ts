@@ -27,7 +27,8 @@ import { isLocalRefusal, OwnerOnly, Rejected } from "./refusals.ts";
 import { canPost, describeScopes, refusal, wireScopes, type Scope } from "./scopes.ts";
 import { GENERAL_ROOM, ignored, MAX_CHARTER, TASK_STATES, type Card, type Color, type Event, type Handoff, type ImageAttachment, type Kind, type Message, type Presence, type TaskState } from "./protocol.ts";
 import { allowedOnHold, claimConflict, findRoom, fold, humanOf, isPerson, keptFromPeople, newRoomId, normTags, ON_HOLD, overlaps, ownerOf, taskId, waitingOn, wouldCycle, type ChannelState, type GuardFloor, type Roster, type RoomsFloor } from "./state.ts";
-import { detectHarness, mergeCard, sameCard } from "./card.ts";
+import { inAgentHarness, mergeCard, sameCard } from "./card.ts";
+import { COMMANDS } from "./brief.ts";
 import { cardLine } from "./format.ts";
 
 export { Rejected };
@@ -100,8 +101,9 @@ const orNone = <A, E, R>(e: Effect.Effect<A | null, E, R>) => Effect.catchCause(
  * agent's harness, or a seat on a machine without the owner key.
  */
 export function peopleOnly(what: string, where: "agent" | "harness" | "elsewhere"): string {
-  if (where === "agent") return `only a person can ${what}: the channel's owner does it in the web dashboard or with kiwi tui. Agents can't let anyone in, remove anyone, or change roles, what members may do, the mode, the charter or the hold. Ask your human (kiwi escalate).`;
-  if (where === "harness") return `only a person can ${what}, and this runs inside an agent's harness: use kiwi tui, the web dashboard, or kiwi in a terminal of your own`;
+  if (where === "agent")
+    return `only a person can ${what}: the channel's owner does it in the web dashboard or with kiwi tui. Agents can't let anyone in, remove anyone, or change roles, what members may do, the mode, the charter or the hold. Ask your human: ${COMMANDS.escalate("kiwi")}.`;
+  if (where === "harness") return `only a person can ${what}, and an agent is running this: run it in a terminal of your own, outside Claude Code (not with !), or use kiwi tui or the web dashboard`;
   return `only the channel's owner can ${what}: in the web dashboard, or with kiwi tui on their computer`;
 }
 
@@ -147,7 +149,7 @@ export class AgentSession {
     const where = this.identity.pk !== this.cfg.ownerPk ? "agent" : this.duty ? "harness" : "elsewhere";
     // A person at their own terminal, on the machine that holds the owner key: say how to act as themself.
     // Never said inside an agent's harness, where it would be refused anyway.
-    const hint = where === "agent" && this.duty && this.cfg.owner && !detectHarness() ? ` If you're that person, at your own terminal: kiwi --as ${this.cfg.owner} …` : "";
+    const hint = where === "agent" && this.duty && this.cfg.owner && !inAgentHarness() ? ` If you're that person, at your own terminal: kiwi --as ${this.cfg.owner} …` : "";
     return Effect.fail(new OwnerOnly(peopleOnly(what, where) + hint));
   }
 
@@ -909,7 +911,7 @@ export const openSession = Effect.fn("AgentSession.open")(function* (alias: stri
   // Admin is the owner's own seat, run by a person: never an agent's seat, and not from inside an
   // agent's harness (an agent there could pass --as for the owner). A person's terminal, kiwi tui
   // and the dashboard are where it happens.
-  const admin = identity.pk === cfg.ownerPk && (opts.person ?? !detectHarness());
+  const admin = identity.pk === cfg.ownerPk && (opts.person ?? !inAgentHarness());
   return new AgentSession(alias, cfg, identity, owner, (a) => Effect.runSync(keys.saveAccess(alias, a)), admin);
 });
 
@@ -919,7 +921,9 @@ export const openPersonSession = Effect.fn("AgentSession.openPerson")(function* 
   keepRecordsIn(keys.records);
   const identity = yield* keys.identity(name, cfg.roomId);
   const owner = identity.pk === cfg.ownerPk;
-  return new AgentSession(alias, cfg, identity, owner ? identity : null, (a) => Effect.runSync(keys.saveAccess(alias, a)), owner);
+  // Not from inside an agent's harness, even in a terminal it drives (tmux, script): there it's a
+  // view of the channel, with no owner powers.
+  return new AgentSession(alias, cfg, identity, owner ? identity : null, (a) => Effect.runSync(keys.saveAccess(alias, a)), owner && !inAgentHarness());
 });
 
 export type { Presence };

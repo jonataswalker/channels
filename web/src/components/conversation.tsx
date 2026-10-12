@@ -209,10 +209,13 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     },
     [state.threadOf, bySeqAll]
   )
+  // The owner can look at what every view leaves out (forged, or not allowed), tagged; nobody else can.
+  const [showDropped, setShowDropped] = useState(false)
+  const revealed = isOwner && showDropped
   const threads = useMemo(() => {
     const out = new Map<number, Message[]>()
     for (const m of messages) {
-      if (m.kind === "event" || ignored(state.trust.get(m.seq))) continue
+      if (m.kind === "event" || (!revealed && ignored(state.trust.get(m.seq)))) continue
       const root = rootOf(m.seq)
       if (root === null) continue
       const list = out.get(root)
@@ -220,7 +223,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       else out.set(root, [m])
     }
     return out
-  }, [messages, rootOf, state.trust])
+  }, [messages, rootOf, state.trust, revealed])
 
   const visible = useMemo(() => {
     // Filters and search show every match flat, threads or not.
@@ -239,11 +242,11 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     if (!flat) list = list.filter((m) => m.kind === "event" || rootOf(m.seq) === null)
     // Joins are noise; the member list already shows who's here. Forged messages, and ones the
     // owner's settings don't allow, are left out (the owner sees how many, below).
-    list = list.filter((m) => m.ev?.op !== "hello" && !ignored(state.trust.get(m.seq)))
+    list = list.filter((m) => m.ev?.op !== "hello" && (revealed || !ignored(state.trust.get(m.seq))))
     const q = search?.trim().toLowerCase()
     if (q) list = list.filter((m) => m.body.toLowerCase().includes(q) || nameOf(m.from).toLowerCase().includes(q))
     return list
-  }, [filter, openAsks, forMe, withCoordinator, messages, search, nameOf, rootOf, state, rooms.active])
+  }, [filter, openAsks, forMe, withCoordinator, messages, search, nameOf, rootOf, state, rooms.active, revealed])
 
   const bySeq = useMemo(() => new Map(messages.map((m) => [m.seq, m])), [messages])
   const quoted = useCallback((seq: number) => bySeq.get(seq), [bySeq])
@@ -331,7 +334,10 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   if (dropped)
     rows.push(
       <p key="dropped" className="mt-3 text-meta text-ink-3">
-        {dropped === 1 ? "1 message" : `${dropped} messages`} left out: forged, or not allowed by your settings.
+        {dropped === 1 ? "1 message" : `${dropped} messages`} left out: forged, or not allowed by your settings.{" "}
+        <button type="button" onClick={() => setShowDropped((v) => !v)} className="font-medium text-ink-2 hover:text-ink hover:underline">
+          {showDropped ? "Hide them" : "Show them"}
+        </button>
       </p>
     )
   let run: ReactNode[] = []

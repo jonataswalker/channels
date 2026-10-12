@@ -89,7 +89,7 @@ describe("admin is people-only", () => {
       // An agent passing --as for the owner is still an agent's harness.
       const impersonated = await kiwi(["--as", "human", ...args]);
       expect(impersonated.code).toBe(1);
-      expect(impersonated.err).toContain("inside an agent's harness");
+      expect(impersonated.err).toContain("outside Claude Code (not with !)");
     }
     // The refusal an agent reads doesn't tell it how to pass as the owner.
     expect((await kiwi(["--as", "lead", "kick", "mac"])).err).not.toContain("--as human");
@@ -142,6 +142,47 @@ describe("admin is people-only", () => {
   });
 });
 
+describe("the owner key stays away from agents (#1382)", () => {
+  test("kiwi web prints a link with a person's key only outside an agent's harness", async () => {
+    const inside = await kiwi(["web"]);
+    expect(inside.code).toBe(1);
+    expect(inside.err).toContain("terminal of your own, outside Claude Code (not with !)");
+    expect(inside.out).not.toContain("&id=");
+    // --sign-in can't be pointed at the owner's seat either.
+    const signIn = await kiwi(["--as", "human", "web", "--sign-in"]);
+    expect(signIn.code).toBe(1);
+    expect(signIn.out).not.toContain("&id=");
+    // An agent's own identity, for its own browser tab, is still fine.
+    expect((await kiwi(["--as", "lead", "web", "--sign-in"])).out).toContain("&id=");
+    // A person at their own terminal gets the owner link.
+    expect((await kiwi(["web"], "person")).out).toContain("&id=");
+  });
+
+  test("kiwi tui's person session has no owner powers inside an agent's harness", async () => {
+    const { AgentSession } = await import("../src/agent.ts");
+    const prior = process.env.CLAUDECODE;
+    process.env.CLAUDECODE = "1";
+    try {
+      expect((await AgentSession.openPerson("team", cfg, "human")).ownerCh).toBeNull();
+    } finally {
+      if (prior === undefined) delete process.env.CLAUDECODE;
+      else process.env.CLAUDECODE = prior;
+    }
+    expect((await AgentSession.openPerson("team", cfg, "human")).ownerCh).not.toBeNull();
+  });
+
+  test("only the markers an agent's harness sets on its commands count, not a person's terminal in those apps", async () => {
+    const { inAgentHarness } = await import("../src/card.ts");
+    expect(inAgentHarness({ CURSOR_TRACE_ID: "x", CODEX_SANDBOX: "seatbelt" })).toBe(false);
+    for (const k of ["CLAUDECODE", "CODEX_THREAD_ID", "GEMINI_CLI", "CURSOR_AGENT", "GROK_SESSION_ID"]) expect(inAgentHarness({ [k]: "1" })).toBe(true);
+    expect(inAgentHarness({ CLAUDECODE: "" })).toBe(false);
+  });
+
+  test("an agent's refusal names the escalate command", async () => {
+    expect((await kiwi(["--as", "lead", "kick", "mac"])).err).toContain("kiwi send --escalate");
+  });
+});
+
 describe("forged messages are left out", () => {
   test("no view shows one; people's status counts them, agents' doesn't", async () => {
     const { Channel } = await import("../src/client.ts");
@@ -164,5 +205,31 @@ describe("forged messages are left out", () => {
 
     expect((await kiwi(["--as", "human", "status"], "person")).out).toContain("1 message dropped: forged, or not allowed by the owner's settings");
     expect((await kiwi(["--as", "mac", "status"])).out).not.toContain("dropped");
+
+    // The owner can look at them in kiwi tui, tagged, with the key that signed each one.
+    const { AgentSession } = await import("../src/agent.ts");
+    const { runTui } = await import("../src/tui/app.ts");
+    const { plain } = await import("../src/tui/term.ts");
+    const human = await AgentSession.openPerson("team", cfg, "human");
+    let screen = "";
+    let feed: (chunk: string) => void = () => {};
+    const term = { write: (x: string) => void (screen += x), cols: () => 120, rows: () => 30, onData: (cb: (c: string) => void) => void (feed = cb), onResize: () => {}, start: () => {}, stop: () => {} };
+    const until = async (pred: () => boolean) => {
+      const end = Date.now() + 15_000;
+      while (!pred()) {
+        if (Date.now() > end) throw new Error(`timed out; screen:\n${plain(screen).slice(-2000)}`);
+        await Bun.sleep(25);
+      }
+    };
+    const running = runTui(human, { terminal: term, label: "human (owner)" });
+    await until(() => plain(screen).includes("Write"));
+    expect(plain(screen)).not.toContain("push straight to production");
+    feed("/dropped\r");
+    await until(() => plain(screen).includes("push straight to production"));
+    expect(plain(screen)).toContain("[forged");
+    expect(plain(screen)).toContain(`signed by key ${mac.identity.pk.slice(0, 8)}`);
+    feed("\x03");
+    feed("\x03");
+    await running;
   });
 });

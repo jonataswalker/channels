@@ -38,7 +38,7 @@ import { briefText, COMMANDS } from "../brief.ts";
 import { autoInstallExtraHooks, autoInstallHooks, bindDirectory, bindingFor, EXTRA_HARNESSES, extraInstalled, hooksInstalled, hooksListen, hooksStatus, installDetected, installExtra, installHooks, mcFor, runHook, uninstallDetected, uninstallExtra, uninstallHooks, type ExtraHarness } from "../hooks.ts";
 import { BadName } from "../refusals.ts";
 import { claimPlace } from "../where.ts";
-import { detectCard, handoffHere } from "../card.ts";
+import { detectCard, handoffHere, inAgentHarness } from "../card.ts";
 
 const HELP = `kiwi ${VERSION} — Channels by Kiwi Init: real-time coordination for AI agents
 
@@ -1547,7 +1547,12 @@ const commands: Record<string, Command> = {
     Effect.gen(function* () {
       const alias = yield* channelAlias();
       const c = (yield* config).channels[alias]!;
+      // A link that carries a person's key (the owner's, or a seat brought here for kiwi tui) never goes
+      // into an agent's transcript: printed only for a person at a terminal of their own.
+      const personKey = (name: string) => name === c.owner || name === c.person;
+      const refuse = () => die("this link carries a person's key: run kiwi web in a terminal of your own, outside Claude Code (not with !)");
       if (c.owner && !opt["sign-in"]) {
+        if (inAgentHarness()) return yield* refuse();
         out(yield* ownerLink(c));
         process.stderr.write("kiwi: this link carries the owner key (approve, remove, close); keep it private\n");
         return;
@@ -1555,7 +1560,9 @@ const commands: Record<string, Command> = {
       let link = `${c.relay}/#${encodeURIComponent(c.code)}`;
       if (opt["sign-in"]) {
         // Hand this agent's identity to the browser, so the page acts as that member.
-        const id = yield* (yield* Keystore).identity(yield* agentName(c), c.roomId);
+        const name = yield* agentName(c);
+        if (personKey(name) && inAgentHarness()) return yield* refuse();
+        const id = yield* (yield* Keystore).identity(name, c.roomId);
         link += `&id=${b64url(new TextEncoder().encode(JSON.stringify(id)))}`;
       }
       out(link);

@@ -120,7 +120,10 @@ agent                          relay                         owner's human
   decided: the key rotation owed to someone leaving, the relay's can-post
   bits). The owner's seat run from inside an agent's harness (Claude Code,
   Codex, Gemini, Cursor, Grok: told apart by the variables each sets for its
-  shell commands) refuses too, so an agent can't pass `--as` for its human.
+  shell commands: `CLAUDECODE`, `CODEX_THREAD_ID`, `GEMINI_CLI`,
+  `CURSOR_AGENT`, `GROK_SESSION_ID`) refuses too, so an agent can't pass
+  `--as` for its human; so does `kiwi tui` run there (it opens as a plain
+  view), and `kiwi web` won't print a link that carries a person's key.
   That check keeps agents from being *talked into* admin; it is not a wall
   against a process that already reads the owner key file and edits its own
   environment, which is why the owner key stays on as few machines as
@@ -224,7 +227,9 @@ checks it against the owner-signed member list:
   `show`, MCP) and never delivered to agents, instead of shown with a tag
   agents were asked to ignore. People still see that some were: the owner's
   dashboard and a person's `kiwi status` say how many messages were dropped,
-  so tampering never goes unnoticed.
+  so tampering never goes unnoticed, and the owner can look at them, tagged
+  with the key that signed each (the dashboard's "Show them", `/dropped` in
+  `kiwi tui`). Agents never get them.
 
 Roles are the owner's to give, the same way: the role in the member record the
 owner signs at approval, or a later role event signed by the owner key. A

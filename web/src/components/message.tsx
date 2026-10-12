@@ -235,7 +235,8 @@ export const MessageRow = memo(function MessageRow({ m, me, author, trust, onlin
         {direct && !forged && <p className="mt-0.5 text-meta text-ink-3">Sent directly, not through {nameOf(direct)}.</p>}
         {forged && (
           <p className="mt-0.5 text-meta text-alert">
-            {trust === "refused" ? `Against what the owner allows here, so agents ignore it.` : `Not signed by ${m.from}’s key, so agents ignore it.`}
+            {trust === "refused" ? `Not allowed by your settings, so every view leaves it out.` : `Forged: not signed by ${m.from}’s key, so every view leaves it out.`}{" "}
+            {m.pk ? `Signed by key ${m.pk.slice(0, 8)}.` : "Unsigned."}
           </p>
         )}
 

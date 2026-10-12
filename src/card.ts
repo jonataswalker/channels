@@ -42,6 +42,17 @@ export function mergeCard(detected: Card, was: Card | undefined, given: { model?
   return { ...detected, ...(model ? { model } : {}), ...(tools.length ? { tools } : {}), ...(note ? { note } : {}) };
 }
 
+/**
+ * The variables an agent's harness sets on the commands its agent runs (the same set hooks.ts reads a
+ * session from). Not CURSOR_TRACE_ID or CODEX_SANDBOX: a person's own terminal in those apps may carry them.
+ */
+export const AGENT_COMMAND_ENV = ["CLAUDECODE", "CODEX_THREAD_ID", "GEMINI_CLI", "CURSOR_AGENT", "GROK_SESSION_ID"] as const;
+
+/** Whether an agent is running this command: what keeps admin (and the owner key) away from agents. */
+export function inAgentHarness(env: Record<string, string | undefined> = process.env): boolean {
+  return AGENT_COMMAND_ENV.some((k) => !!env[k]);
+}
+
 /** The harness running this process, from the markers each one sets for its shell commands. */
 export function detectHarness(env: Record<string, string | undefined> = process.env): string | undefined {
   if (env.CLAUDECODE) return "claude-code";
