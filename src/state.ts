@@ -125,6 +125,10 @@ export interface ChannelState {
   rooms: Map<string, Room>;
   /** Each counted chat message's room (an id). A reply is in its parent's room. */
   roomOf: Map<number, string>;
+  /** Where each message sits: the main conversation, a task's thread, or a direct thread (placeOf). */
+  placeOf: Map<number, Place>;
+  /** Every place with something in it, by placeKey: for listing them (main, tasks, then DMs). */
+  places: Map<string, PlaceSummary>;
   /** What the channel is for and where its limits are, as the owner last set it; null if never. */
   charter: Charter | null;
   /** Set while the owner has every agent stopped; null otherwise. */
@@ -222,6 +226,72 @@ export function taskId(id: number): string {
 /** A state as it folds now: an older client's "blocked" is still being done, its "cancelled" is done. */
 export function currentState(s: TaskState | OldTaskState): TaskState {
   return s === "blocked" ? "doing" : s === "cancelled" ? "done" : s;
+}
+
+/**
+ * Where a message sits. The main conversation is the people and the coordinator; each task has its
+ * own thread, where the agents working it talk; two members can have a direct thread. Nothing is
+ * hidden by it: it's structure. Rooms (older) all read as main.
+ */
+export type Place = { kind: "main" } | { kind: "task"; task: number } | { kind: "dm"; with: [string, string] };
+
+export const MAIN: Place = { kind: "main" };
+
+/** A place as a stable string: "main", "task:12", "dm:alice~bob" (names sorted). */
+export function placeKey(p: Place): string {
+  return p.kind === "main" ? "main" : p.kind === "task" ? `task:${p.task}` : `dm:${p.with[0]}~${p.with[1]}`;
+}
+
+/** The place a key names, or null for one that doesn't parse. */
+export function placeFromKey(key: string): Place | null {
+  if (key === "main") return MAIN;
+  const t = /^task:(\d+)$/.exec(key);
+  if (t) return { kind: "task", task: Number(t[1]) };
+  const d = /^dm:([^~]+)~([^~]+)$/.exec(key);
+  return d ? { kind: "dm", with: [d[1]!, d[2]!] } : null;
+}
+
+/** A direct thread between two members, named in a fixed order. */
+export function dmPlace(a: string, b: string): Place {
+  return { kind: "dm", with: a < b ? [a, b] : [b, a] };
+}
+
+export interface PlaceSummary {
+  place: Place;
+  /** The last message there (seq), and how many there are. */
+  last: number;
+  count: number;
+  /** A task's thread whose task is done: still there, listed as earlier. */
+  done?: boolean;
+}
+
+/**
+ * Who a place is for: in main, everyone; in a task's thread, whoever owns it or worked on it, its
+ * reviewer, and the coordinator; in a direct thread, its two members. Anyone may still read any place.
+ */
+export function threadMembers(state: Pick<ChannelState, "members" | "tasks" | "coordinator">, place: Place): string[] {
+  const active = (n: string | undefined): n is string => !!n && !!state.members.get(n)?.active;
+  if (place.kind === "main") return [...state.members.values()].filter((m) => m.active).map((m) => m.name);
+  if (place.kind === "dm") return place.with.filter(active);
+  const t = state.tasks.get(place.task);
+  if (!t) return [];
+  return [...new Set([t.owner, ...t.workedBy, t.review !== "*" ? t.review : undefined, state.coordinator ?? undefined].filter(active))];
+}
+
+/** Each place with what's in it: a task's thread is listed while its task exists (done ones flagged). */
+function summarize(placeOf: Map<number, Place>, tasks: Map<number, Task>, trust: Map<number, Trust>): Map<string, PlaceSummary> {
+  const out = new Map<string, PlaceSummary>();
+  for (const [seq, place] of placeOf) {
+    if (ignored(trust.get(seq))) continue;
+    const real = place.kind === "task" && !tasks.has(place.task) ? MAIN : place;
+    const key = placeKey(real);
+    const s = out.get(key);
+    if (s) {
+      s.count++;
+      s.last = Math.max(s.last, seq);
+    } else out.set(key, { place: real, last: seq, count: 1, ...(real.kind === "task" && tasks.get(real.task)?.state === "done" ? { done: true } : {}) });
+  }
+  return out;
 }
 
 /** Parse "T12", "t12", "#12" or "12". */
@@ -378,6 +448,7 @@ export function fold(
   }
   const nameTaken = (name: string, except?: string) => [...rooms.values()].some((r) => r.id !== except && r.name.toLowerCase() === name.toLowerCase());
   const roomOf = new Map<number, string>();
+  const placeOf = new Map<number, Place>();
 
   for (const m of messages) {
     passFloors(m.seq);
@@ -446,6 +517,19 @@ export function fold(
           continue;
         }
         roomOf.set(m.seq, room);
+        // Its place: a reply sits where its parent does (a thread never splits); else the task it names,
+        // a direct thread for a dm to one other member, or main.
+        const parentPlace = parent !== undefined ? placeOf.get(parent) : undefined;
+        const to = m.to?.length === 1 ? m.to[0]! : undefined;
+        placeOf.set(
+          m.seq,
+          parentPlace ??
+            (m.task !== undefined && tasks.has(m.task)
+              ? { kind: "task", task: m.task }
+              : m.dm && to && to !== m.from && members.get(to)?.active
+                ? dmPlace(m.from, to)
+                : MAIN),
+        );
       }
       member.lastSeen = Math.max(member.lastSeen, at);
       member.messages++;
@@ -469,6 +553,8 @@ export function fold(
 
       const ev = m.ev;
       if (m.kind !== "event" || !ev) continue;
+      // A task's events sit in its thread (its card and its changes); every other event is the channel's.
+      placeOf.set(m.seq, ev.op === "task.add" ? { kind: "task", task: m.seq } : (ev.op === "task.update" || ev.op === "task.claim") && tasks.has(ev.task) ? { kind: "task", task: ev.task } : MAIN);
       const reject = (why: string) => rejected.set(m.seq, why);
 
       switch (ev.op) {
@@ -737,6 +823,8 @@ export function fold(
     direct,
     rooms,
     roomOf,
+    placeOf,
+    places: summarize(placeOf, tasks, trust),
     charter,
     hold,
     head,

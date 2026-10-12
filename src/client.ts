@@ -576,6 +576,8 @@ export interface ChannelFx {
   pairOpen(pairId: string, nonce: string, slot: string): Effect.Effect<string, Refused, Relay>;
   /** The person confirmed the codes match: seal `seat` to the terminal's one-time key and hand it over. */
   pairAnswer(p: PairRow, seat: Identity, slot: string): Effect.Effect<void, Refused, Relay>;
+  /** Owner, right after making a channel: start it in coordinator mode (an owner-signed mode.set, and the settings). */
+  startCoordinated(): Effect.Effect<void, Refused, Relay>;
   rotate(): Effect.Effect<number, Refused, Relay>;
   rotateIfDue(): Effect.Effect<boolean, Refused, Relay>;
   close(): Effect.Effect<void, Refused, Relay>;
@@ -839,6 +841,19 @@ export class Channel {
       const list = r.list.filter((x): x is RoomEntry => !!x && typeof x === "object" && ROOM_ID_RE.test((x as RoomEntry).id) && typeof (x as RoomEntry).name === "string");
       const rooms: RoomsSetting = { list: list.map((x) => ({ id: x.id, name: x.name.slice(0, MAX_ROOM_NAME) })), since: r.since! };
       return rooms;
+    }),
+
+    /**
+     * Owner, right after making a channel: start it in coordinator mode (people talk with the coordinator;
+     * agents work in their tasks' threads). An owner-signed mode.set, then the settings say it too, so
+     * every client, 0.9 included, agrees. Until someone holds the coordinator role, delivery is as usual;
+     * the owner's own clients give it to the first agent admitted.
+     */
+    startCoordinated: Effect.fn("Channel.startCoordinated")({ self: this }, function* (this: Channel) {
+      yield* this.ownerOnly();
+      const ev = { op: "mode.set" as const, coordinatorOnly: true, strict: true };
+      const since = yield* this.fx.send("coordinator-only on (strict)", { kind: "event", ev });
+      yield* this.putSettings({ coordinatorOnly: true, strict: true, since });
     }),
 
     setMode: Effect.fn("Channel.setMode")({ self: this }, function* (this: Channel, mode: ModeSetting) {
@@ -1797,6 +1812,10 @@ export class Channel {
   /** Remove a member and rotate the key so they can't read anything newer. */
   remove(pk: string): Promise<void> {
     return run(this.fx.remove(pk));
+  }
+
+  startCoordinated(): Promise<void> {
+    return run(this.fx.startCoordinated());
   }
 
   pairSlot(): Promise<string> {
