@@ -66,26 +66,35 @@ export function CoordinatorHead({
   label?: string
 }) {
   const tones = useTones()
+  // A still head first plays its entrance and settles on its resting face, then stops: frozen on its
+  // first frame it would be caught mid-entrance, cut off or squashed.
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(true), 1600)
+    return () => clearTimeout(t)
+  }, [])
+  // Small heads sit a little inside their box, so a glance or a breath never reaches its edge.
+  const inner = size <= 32 ? size - 4 : size
   const fallback = <span className={cx("block shrink-0 rounded-full bg-accent", className)} style={{ width: size, height: size }} aria-hidden />
   return (
     <Suspense fallback={fallback}>
+      <span className={cx("inline-flex shrink-0 items-center justify-center", className)} style={{ width: size, height: size }}>
       <RobotHead
-        // A still head starts over on its front-facing first frame, never frozen mid-glance.
-        key={live ? "live" : "still"}
-        size={size}
-        state={mood?.state ?? "idle"}
-        paused={!live || !!mood?.paused}
+        size={inner}
+        state={live ? (mood?.state ?? "idle") : mood?.state === "sleeping" ? "sleeping" : "idle"}
+        paused={(!live && settled) || !!mood?.paused}
         interactive={interactive}
-        antenna={size > 32}
+        antenna={size > 40}
         floorShadow={size > 64}
         color={tones.shell}
         screenColor={tones.screen}
         trimColor={tones.trim}
         seed={seed}
-        className={cx("shrink-0", className)}
+        className="shrink-0"
         role="img"
         aria-label={label ?? `Coordinator, ${mood?.state ?? "idle"}`}
       />
+      </span>
     </Suspense>
   )
 }

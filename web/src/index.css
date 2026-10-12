@@ -6,8 +6,8 @@
  * right, everyone else's in grey on the left, the system's own words small and
  * centred between them. White by day, near-black by night; blue is the one
  * accent (your bubbles, the open conversation, the thing to do next), red and
- * green only when they mean something. Agents and people are told apart by
- * shape (agents are characters, people are circles), never by colour.
+ * green only when they mean something. Every member is a circle with their
+ * initials, as a contact without a picture; the coordinator alone has a face.
  *
  * The palette follows rakazo (github.com/elie222/rakazo, Apache-2.0); see NOTICE.
  * Each token is written once as light-dark(day, night). The system picks the
@@ -60,9 +60,6 @@
   /* A contact without a picture: Messages' soft grey gradient. */
   --avatar-top: light-dark(#a9a9b0, #7c7c84);
   --avatar-bottom: light-dark(#87878e, #5b5b62);
-  /* An agent with no colour yet: a quiet body, eyes a step darker. */
-  --char: light-dark(#d7d7dc, #3e3e44);
-  --char-ink: light-dark(#6c6c72, #a8a8b0);
   --pop-edge: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.08));
   --pop-shade: light-dark(rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0.7));
   --shadow-pop: 0 0 0 1px var(--pop-edge), 0 14px 36px -8px var(--pop-shade);
@@ -170,7 +167,8 @@ time,
 
 /*
  * The tail on the last bubble of a run, as Messages draws it: a small curl at the bottom corner on the
- * sender's side, drawn with two pseudo-elements in the bubble's colour and the canvas behind it.
+ * sender's side, drawn with two pseudo-elements in the bubble's colour and the canvas behind it. The
+ * carve is only as wide as the curl, so it never paints over the sender's face beside the bubble.
  */
 .bubble-tail {
   position: relative;
@@ -190,8 +188,8 @@ time,
   border-bottom-left-radius: 16px 14px;
 }
 .bubble-tail.from-me::after {
-  right: -26px;
-  width: 26px;
+  right: -10px;
+  width: 10px;
   background: var(--canvas);
   border-bottom-left-radius: 10px;
 }
@@ -202,8 +200,8 @@ time,
   border-bottom-right-radius: 16px 14px;
 }
 .bubble-tail.from-them::after {
-  left: -26px;
-  width: 26px;
+  left: -10px;
+  width: 10px;
   background: var(--canvas);
   border-bottom-right-radius: 10px;
 }
@@ -258,23 +256,6 @@ button {
 }
 .animate-flash {
   animation: flash 1.6s ease-out;
-}
-
-/* A working agent blinks now and then: the only motion that isn't an answer to you, and a slow one. */
-@keyframes character-blink {
-  0%,
-  92%,
-  100% {
-    transform: scaleY(1);
-  }
-  95% {
-    transform: scaleY(0.12);
-  }
-}
-.character-working .character-eyes {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: character-blink 4.2s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

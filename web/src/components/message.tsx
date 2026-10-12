@@ -32,8 +32,8 @@ export function EventRow({ m, state, now, onOpenTask, openLabel = "Open" }: { m:
   const taskRef = m.ev && "task" in m.ev ? m.ev.task : m.ev?.op === "task.add" ? m.seq : null
   const forged = ignored(state.trust.get(m.seq))
   return (
-    <p id={`m${m.seq}`} className={cx("mx-auto max-w-[min(560px,90%)] py-0.5 text-center text-meta leading-[17px] text-ink-3 [text-wrap:balance]", forged && "line-through opacity-60")}>
-      <span className="font-medium text-ink-2">{memberName(state.members.get(m.from), m.from)}</span> {describeEvent(m, state)}
+    <p id={`m${m.seq}`} className={cx("mx-auto max-w-[min(60ch,90%)] py-0.5 text-center text-stamp leading-[15px] text-ink-3 [text-wrap:balance]", forged && "line-through opacity-60")}>
+      <span className="font-semibold">{memberName(state.members.get(m.from), m.from)}</span> {describeEvent(m, state)}
       <span>
         {" · "}
         <time title={formatFull(m.ts)}>{formatAgo(m.rts ?? m.ts, now)}</time>

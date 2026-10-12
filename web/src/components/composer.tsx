@@ -186,7 +186,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
     }
   }
 
-  const hint = disabled ? "Connecting…" : thread ? "Reply" : replyTo ? `Reply to ${nameOf(replyTo.from)}` : route?.view === "coordinator" ? `Message ${route.label}` : (placeholder ?? "Message")
+  const hint = disabled ? "Connecting…" : thread ? "Reply" : replyTo ? `Reply to ${nameOf(replyTo.from)}` : (placeholder ?? (route?.view === "coordinator" ? `Message ${route.label}` : "Message"))
 
   return (
     <div className={cx("relative mx-auto w-full shrink-0", thread ? "px-3 pt-2 pb-3" : "max-w-[900px] px-3 pt-2 pb-3 md:px-6")}>
@@ -331,7 +331,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
                   onClearReply()
                 }
               }}
-              className="bubble-text block max-h-[220px] min-h-[36px] min-w-0 flex-1 resize-none bg-transparent py-[7px] pr-1 pl-3.5 text-body outline-none placeholder:text-ink-3 focus-visible:outline-none"
+              className="bubble-text block max-h-[220px] min-h-[36px] min-w-0 flex-1 resize-none bg-transparent py-[7px] pr-1 pl-3.5 text-body outline-none placeholder:truncate placeholder:text-ink-3 focus-visible:outline-none"
             />
             <button
               type="button"

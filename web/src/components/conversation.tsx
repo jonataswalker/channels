@@ -652,11 +652,11 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
               onClick={() => (setInfo((v) => !v), setThreadRoot(null))}
               aria-expanded={info}
               aria-label={`Details: ${placeTitle}, ${subtitle}`}
-              className="group absolute left-1/2 flex max-w-[60%] -translate-x-1/2 flex-col items-center gap-1"
+              className="group absolute top-1/2 left-1/2 flex max-w-[60%] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5"
             >
-              <span className="flex -space-x-2.5" aria-hidden>
+              <span className="flex h-[30px] items-center -space-x-2.5" aria-hidden>
                 {coord && (place.kind === "main" || (place.kind === "dm" && place.with.includes(coord))) ? (
-                  <CoordinatorHead size={36} mood={mood} live seed={0.7} />
+                  <CoordinatorHead size={30} mood={mood} live seed={0.7} />
                 ) : place.kind === "main" && !faces.length ? (
                   <ChannelIconTile icon={icon} title={title} size={28} />
                 ) : (
@@ -796,7 +796,17 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   disabled={connection === "connecting"}
                   route={coordinator && place.kind === "main" ? { coordinator, label: nameOf(coordinator), view: "coordinator" } : undefined}
                   extra={extra}
-                  placeholder={place.kind === "main" ? "Message" : place.kind === "task" ? `Message ${task ? taskId(task.id) : "this task"}` : `Message ${nameOf(place.with.find((n) => n !== me) ?? "")}`}
+                  placeholder={
+                    place.kind === "main"
+                      ? state.coordinator && state.coordinator !== me
+                        ? `Message ${nameOf(state.coordinator)}`
+                        : "Message everyone"
+                      : place.kind === "task"
+                        ? task
+                          ? `Message in ${taskId(task.id)} · ${task.title}`
+                          : "Message in this task"
+                        : `Message ${nameOf(place.with.find((n) => n !== me) ?? "")} privately`
+                  }
                   send={async (body, opts) => {
                     atBottom.current = true
                     return send(body, opts)
@@ -931,17 +941,6 @@ function PlaceList({
     <nav aria-label="Conversations" className={cx("space-y-px", className)}>
       {row("main", places.get("main") ?? { place: MAIN, last: 0, count: 0 })}
       {tasks.map(([k, i]) => row(k, i))}
-      {done.length > 0 && (
-        <>
-          <button type="button" aria-expanded={earlier} onClick={() => setEarlier(!earlier)} className="flex h-6 w-full items-center gap-1 rounded-ctl px-2.5 text-left text-stamp font-semibold text-ink-3 hover:text-ink-2">
-            Earlier · {done.length}
-            <Icon icon={ArrowDown01Icon} size={11} className={cx("transition-transform", !earlier && "-rotate-90")} />
-          </button>
-          {earlier && done.map(([k, i]) => row(k, i))}
-        </>
-      )}
-      {dms.length > 0 && <p className="px-2.5 pt-1.5 pb-0.5 text-stamp font-semibold text-ink-3">Direct</p>}
-      {dms.map(([k, i]) => row(k, i))}
       {state.tasks.size > 0 && (
         <button
           type="button"
@@ -953,6 +952,17 @@ function PlaceList({
           All tasks
         </button>
       )}
+      {done.length > 0 && (
+        <>
+          <button type="button" aria-expanded={earlier} onClick={() => setEarlier(!earlier)} className="flex h-6 w-full items-center gap-1 rounded-ctl px-2.5 text-left text-stamp font-semibold text-ink-3 hover:text-ink-2">
+            Earlier · {done.length}
+            <Icon icon={ArrowDown01Icon} size={11} className={cx("transition-transform", !earlier && "-rotate-90")} />
+          </button>
+          {earlier && done.map(([k, i]) => row(k, i))}
+        </>
+      )}
+      {dms.length > 0 && <p className="px-2.5 pt-1.5 pb-0.5 text-stamp font-semibold text-ink-3">Direct</p>}
+      {dms.map(([k, i]) => row(k, i))}
     </nav>
   )
 }
