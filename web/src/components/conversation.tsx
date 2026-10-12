@@ -209,6 +209,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   const [drawerAt, setDrawerAt] = useState<{ agent: string; place: Place } | null>(null)
   const [replay, setReplay] = useState<number | null>(null)
   const [flagOpen, setFlagOpen] = useState<string | null>(null)
+  /** The Room is two columns across the whole pane: the header spans it too, instead of the conversation's column. */
+  const [roomWide, setRoomWide] = useState(false)
   const [wasFocus, setWasFocus] = useState(false)
   const [highlight, setHighlight] = useState<number | null>(null)
   /** New messages below while scrolled up. */
@@ -927,7 +929,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         <div className={cx("relative flex min-w-0 flex-1 flex-col bg-canvas", (root || info) && "hidden md:flex")}>
           {/* Who you're talking with, on the conversation's column: a face, the name, and what's going on. */}
           <header className="shrink-0 bg-canvas">
-            <div className="mx-auto flex h-14 w-full max-w-[792px] items-center gap-1 px-2 md:px-4">
+            <div className={cx("mx-auto flex h-14 w-full items-center gap-1", focus && roomWide ? "px-4" : "max-w-[792px] px-2 md:px-4")}>
               <IconButton label="Channels" className="md:hidden" onClick={onBack}>
                 <Icon icon={ArrowLeft01Icon} size={20} />
               </IconButton>
@@ -1022,6 +1024,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   onReplay={setReplay}
                   flagOpen={flagOpen}
                   onFlagOpen={setFlagOpen}
+                  onWide={setRoomWide}
                   composer={composerHere}
                   drawer={drawerView}
                 />

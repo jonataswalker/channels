@@ -138,6 +138,8 @@ export interface RoomProps {
   /** The point the timeline replays, as the message it stands at (null: live). */
   replay: number | null
   onReplay: (seq: number | null) => void
+  /** Whether the room is two columns (the full pane wide), told whenever it changes. */
+  onWide: (wide: boolean) => void
   /** The field you talk to the coordinator in: under the dialogue, wherever the dialogue sits. */
   composer: ReactNode
   /** An agent's conversation, when one is open: in the dialogue's column when the room is wide, over the room when not. */
@@ -163,6 +165,9 @@ export function Room(p: RoomProps) {
     return () => watch.disconnect()
   }, [])
   const wide = paneW >= WIDE_ROOM
+  // The header above follows the room's width when it's two columns (see conversation.tsx).
+  const { onWide } = p
+  useEffect(() => onWide(wide), [onWide, wide])
   useLayoutEffect(() => {
     const el = stage.current
     if (!el) return
