@@ -35,15 +35,25 @@ export function saveMainView(room: string, view: MainView): void {
   }
 }
 
-/** The head's size: big, but never more than about a third of the pane's height; smaller on a phone. */
-function useHeadSize(): number {
-  const pick = () => (innerWidth < 768 ? 160 : Math.round(Math.min(300, Math.max(220, innerHeight * 0.3))))
-  const [size, setSize] = useState(pick)
+/**
+ * The head's size: big, but never more than about a third of the pane's height; smaller on a phone.
+ * With cards under its words (compact) it steps back, so they fit beside it on a laptop screen.
+ */
+const headSize = (compact: boolean) =>
+  innerWidth < 768 ? (compact ? 112 : 160) : compact ? Math.round(Math.min(180, Math.max(160, innerHeight * 0.19))) : Math.round(Math.min(300, Math.max(220, innerHeight * 0.3)))
+
+function useHeadSize(compact: boolean): number {
+  const [size, setSize] = useState(() => headSize(compact))
+  const [was, setWas] = useState(compact)
+  if (was !== compact) {
+    setWas(compact)
+    setSize(headSize(compact))
+  }
   useEffect(() => {
-    const on = () => setSize(pick())
+    const on = () => setSize(headSize(compact))
     addEventListener("resize", on)
     return () => removeEventListener("resize", on)
-  }, [])
+  }, [compact])
   return size
 }
 
@@ -113,6 +123,7 @@ export function CoordinatorFocus({
   starters,
   onStarter,
   onShowConversation,
+  newCount,
   now,
 }: {
   name: string
@@ -129,9 +140,14 @@ export function CoordinatorFocus({
   starters: string[]
   onStarter: (text: string) => void
   onShowConversation: () => void
+  /** Said in Main since you last looked, that this view doesn't show. */
+  newCount: number
   now: number
 }) {
-  const size = useHeadSize()
+  const compact = !!needs
+  const size = useHeadSize(compact)
+  // Drawn once at its full size and scaled: growing or shrinking, the head eases instead of jumping.
+  const full = useHeadSize(false)
   const { text, revealing } = useReveal(coordinatorSaid)
 
   // A long message shows its first lines, with Read all.
@@ -150,29 +166,42 @@ export function CoordinatorFocus({
     setLong(el.scrollHeight > el.clientHeight + 2)
   }, [text, all, revealing])
 
-  // Scrolling up past the top, or a swipe down, brings back the whole conversation.
   const pane = useRef<HTMLElement>(null)
-  const pulled = useRef(0)
+  // More below than fits: the bottom edge fades, so a cut never looks like an accident.
+  const [more, setMore] = useState(false)
+  const measure = () => {
+    const el = pane.current
+    if (el) setMore(el.scrollHeight - el.scrollTop - el.clientHeight > 4)
+  }
+  useEffect(() => {
+    const el = pane.current
+    if (!el) return
+    const watch = new ResizeObserver(() => measure())
+    watch.observe(el)
+    if (el.firstElementChild) watch.observe(el.firstElementChild)
+    return () => watch.disconnect()
+  }, [])
 
   const empty = !coordinatorSaid && !youSaid
   // You spoke last: your words stay up top and the head thinks; its last answer stays for context.
   const head = waiting && mood && mood.state !== "sleeping" && mood.state !== "error" ? { ...mood, state: "thinking" as const } : revealing && mood?.state !== "sleeping" ? { ...mood, state: "speaking" as const } : mood
 
   return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
     <section
       ref={pane}
       aria-label={`Up close with ${name}`}
-      className="flex-1 overflow-y-auto"
-      onWheel={(e) => {
-        if ((pane.current?.scrollTop ?? 0) > 0 || e.deltaY >= 0) return void (pulled.current = 0)
-        pulled.current += -e.deltaY
-        if (pulled.current > 120) onShowConversation()
-      }}
+      className="min-h-0 flex-1 overflow-y-auto"
+      onScroll={measure}
     >
-      <div className="mx-auto flex min-h-full w-full max-w-[680px] flex-col items-center px-5 pb-6">
+      <div className="mx-auto flex w-full max-w-[680px] flex-col items-center px-5 pb-8">
         {/* The head, with room above it to hop and below it for its shadow. */}
-        <div className="flex shrink-0 flex-col items-center pt-[max(28px,6vh)]">
-          <CoordinatorHead size={size} mood={head} live interactive seed={0.7} label={`${name}, ${head?.state ?? "idle"}`} />
+        <div className={cx("flex shrink-0 flex-col items-center transition-[padding] duration-300 ease-out", compact ? "pt-[max(16px,3vh)]" : "pt-[max(28px,6vh)]")}>
+          <div className="flex justify-center transition-[height] duration-300 ease-out" style={{ height: size }}>
+            <div className="origin-top transition-transform duration-300 ease-out" style={{ transform: `scale(${size / full})` }}>
+              <CoordinatorHead size={full} mood={head} live interactive seed={0.7} label={`${name}, ${head?.state ?? "idle"}`} />
+            </div>
+          </div>
           <p className="mt-5 text-title font-semibold tracking-[-0.01em]">{name}</p>
           {mood?.state === "sleeping" && <p className="mt-0.5 text-meta text-ink-3">{mood.paused ? "Paused with every agent, until you resume them" : "Away right now: it reads what you say when it's back"}</p>}
           {team.length > 0 && (
@@ -193,8 +222,12 @@ export function CoordinatorFocus({
           )}
         </div>
 
+        {/* For a screen reader, its words once, whole, as they arrive. */}
+        <p aria-live="polite" className="sr-only">
+          {coordinatorSaid ? `${name}: ${coordinatorSaid.body}` : ""}
+        </p>
         {/* The dialogue: what you said, then its answer. */}
-        <div className="mt-[max(24px,4vh)] flex w-full flex-col">
+        <div className={cx("flex w-full flex-col", compact ? "mt-5" : "mt-[max(24px,4vh)]")}>
           {empty ? (
             <div className="animate-rise flex flex-col items-center text-center">
               <p className="text-display font-semibold">Tell {name} what you want done.</p>
@@ -215,9 +248,10 @@ export function CoordinatorFocus({
                 </p>
               )}
               {coordinatorSaid ? (
-                <article key={coordinatorSaid.seq} className={cx("relative", !revealing && "animate-arrived")} aria-live="polite">
-                  <div ref={words} className={cx("bubble-text text-hero text-ink [&_pre]:text-ui [&_code]:text-[0.85em]", !all && "max-h-[240px] overflow-hidden")}>
-                    <Markdown>{text}</Markdown>
+                <article key={coordinatorSaid.seq} className={cx("relative", !revealing && "animate-arrived")}>
+                  {/* Arriving word by word, it's plain text (half a code fence would flicker); whole, it's rendered. */}
+                  <div ref={words} aria-hidden={revealing || undefined} className={cx("bubble-text text-hero text-ink [&_pre]:text-ui [&_code]:text-[0.85em]", !all && "max-h-[240px] overflow-hidden")}>
+                    {revealing ? <p className="whitespace-pre-wrap">{text}</p> : <Markdown>{text}</Markdown>}
                   </div>
                   {!all && long && !revealing && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-canvas to-transparent" />}
                   {waiting && <p className="mt-3 text-meta text-ink-3">{name} is on it…</p>}
@@ -235,27 +269,36 @@ export function CoordinatorFocus({
               )}
             </>
           )}
-          {needs && <div className="mt-6 w-full">{needs}</div>}
+          {needs && <div className="mt-5 w-full">{needs}</div>}
         </div>
 
-        <span className="min-h-6 flex-1" />
-        <button
-          type="button"
-          onClick={onShowConversation}
-          className="mt-4 flex items-center gap-1 rounded-full px-3 py-1 text-meta text-ink-3 transition-colors hover:bg-wash hover:text-ink"
-        >
-          <Icon icon={ArrowDown01Icon} size={12} className="rotate-180" />
-          Show conversation
-        </button>
       </div>
     </section>
+      <div className="relative shrink-0">
+        {/* More below than fits: the bottom edge fades, so a cut never looks like an accident. */}
+        <div aria-hidden className={cx("pointer-events-none absolute inset-x-0 bottom-full h-10 bg-gradient-to-t from-canvas to-transparent transition-opacity duration-200", more ? "opacity-100" : "opacity-0")} />
+        {/* The whole conversation, always in reach, never scrolled away. */}
+        <div className="flex justify-center pt-1">
+          <button
+            type="button"
+            onClick={onShowConversation}
+            title="Show conversation (Esc in the message field)"
+            className="flex items-center gap-1.5 rounded-full px-3 py-1 text-meta text-ink-3 transition-colors hover:bg-wash hover:text-ink"
+          >
+            <Icon icon={ArrowDown01Icon} size={12} className="rotate-180" />
+            Show conversation
+            {newCount > 0 && <span className="text-ink-2">· {newCount} new</span>}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
 /** In the whole conversation, the way back to the coordinator up close. */
 export function FocusButton({ name, onClick }: { name: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="flex items-center gap-1 rounded-full px-2.5 py-1 text-meta text-ink-3 transition-colors hover:bg-wash hover:text-ink" title={`Just ${name}, up close`}>
+    <button type="button" onClick={onClick} className="flex items-center gap-1 rounded-full px-2.5 py-1 text-meta text-ink-3 transition-colors hover:bg-wash hover:text-ink" title={`Just ${name}, up close (Esc in the message field)`}>
       Focus
       <Icon icon={ArrowRight01Icon} size={12} />
     </button>

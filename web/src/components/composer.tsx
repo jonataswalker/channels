@@ -46,8 +46,8 @@ interface Props {
   placeholder?: string
   /** Text to put in the field (a suggested first message); a new `n` puts it in again. */
   seed?: { text: string; n: number }
-  /** ↑ in an empty field, when nothing else wants it (the coordinator's focus view: back to the conversation). */
-  onEmptyUp?: () => void
+  /** Esc in the field, when nothing else wants it (no reply, no @ list): switches between the coordinator up close and the whole conversation. */
+  onEscape?: () => void
 }
 
 /** Who a message is for: the people @mentioned at its start. */
@@ -56,7 +56,7 @@ function recipients(body: string, names: Set<string>): string[] {
   return [...lead.matchAll(/@([\p{L}\p{N}_.-]+)/gu)].map((m) => m[1]!).filter((n) => names.has(n))
 }
 
-export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route, extra, placeholder, seed, onEmptyUp }: Props) {
+export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route, extra, placeholder, seed, onEscape }: Props) {
   const [body, setBody] = useState("")
   const [files, setFiles] = useState<{ name: string; mime: string; data: string }[]>([])
   const [dropping, setDropping] = useState(false)
@@ -339,10 +339,6 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
                     return setMention(null)
                   }
                 }
-                if (e.key === "ArrowUp" && onEmptyUp && !body && !files.length) {
-                  e.preventDefault()
-                  return onEmptyUp()
-                }
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault()
                   void submit()
@@ -351,6 +347,9 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
                 if (e.key === "Escape" && replyTo && !thread) {
                   e.stopPropagation()
                   onClearReply()
+                } else if (e.key === "Escape" && onEscape && !thread) {
+                  e.preventDefault()
+                  onEscape()
                 }
               }}
               className="bubble-text block max-h-[220px] min-h-[36px] min-w-0 flex-1 resize-none bg-transparent py-2 pr-1 pl-3.5 text-body outline-none placeholder:truncate placeholder:text-ink-3 focus-visible:outline-none"

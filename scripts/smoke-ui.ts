@@ -420,7 +420,9 @@ try {
   await page.getByText("smoke, up close", { exact: true }).first().waitFor()
   await page.getByRole("button", { name: "Focus" }).click()
   await upClose.waitFor()
-  await showConversation.click()
+  // Esc in the field switches back, and the field keeps the focus.
+  await page.getByRole("textbox", { name: "Message" }).press("Escape")
+  await upClose.waitFor({ state: "hidden" })
   console.log(`ok  ${at}`)
 
   at = "No longer coordinator"

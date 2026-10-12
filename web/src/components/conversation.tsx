@@ -257,22 +257,30 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     (v: MainView) => {
       setMainViewState(v)
       saveMainView(roomId, v)
+      // The control that switched is gone with the view it was in: the field is where you go on from.
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']")?.focus())
     },
     [roomId]
   )
+  // Up close: Main in coordinator mode opens on the coordinator's face and its last words (hero.tsx).
+  const focus = !!coordinator && hereKey === "main" && mainView === "focus" && search === null && !board && openTask === null
   // Its last words to you, and yours to it, in Main (replies included: up close there are no threads).
+  // Yours only when they reach it: a reply to another agent's escalation or an @dev message isn't to it.
   const dialogue = useMemo(() => {
-    if (!coordinator) return { theirs: undefined, mine: undefined }
+    if (!coordinator) return { theirs: undefined, mine: undefined, answered: false }
     let theirs: Message | undefined
     let mine: Message | undefined
     for (const m of messages) {
       if (m.kind === "event" || ignored(state.trust.get(m.seq)) || placeKey(placeOf.get(m.seq) ?? MAIN) !== "main") continue
       if (m.from === coordinator && (!m.to?.length || m.to.includes(me) || m.to.includes("*"))) theirs = m
-      else if (m.from === me) mine = m
+      else if (m.from === me && (!m.to?.length || m.to.includes(coordinator))) mine = m
     }
-    return { theirs, mine }
+    // It answered once it says anything anywhere after yours (Main, a direct thread, a task's), or answers yours.
+    const answered = !!mine && messages.some((m) => m.from === coordinator && m.kind !== "event" && (m.seq > mine.seq || !!m.re?.includes(mine.seq)) && !ignored(state.trust.get(m.seq)))
+    return { theirs, mine, answered }
   }, [coordinator, messages, state.trust, placeOf, me])
-  const waiting = !!dialogue.mine && (!dialogue.theirs || dialogue.mine.seq > dialogue.theirs.seq)
+  // Thinking about your words, for at most two minutes: then its face goes back to what it's really doing.
+  const waiting = !!dialogue.mine && !dialogue.answered && now - (dialogue.mine.rts ?? dialogue.mine.ts) < 120_000
   const [needsSignal, setNeedsSignal] = useState(0)
   const [starter, setStarter] = useState<{ text: string; n: number } | undefined>(undefined)
 
@@ -306,7 +314,9 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     },
     [seen, messages, me, placeOf, reaches, state]
   )
-  const lastHere = places.get(hereKey)?.last ?? 0
+  // Up close, Main is seen only as far as what it shows: its last words and yours, not what else was said there.
+  const shownUpClose = Math.max(dialogue.theirs?.seq ?? 0, dialogue.mine?.seq ?? 0)
+  const lastHere = focus ? shownUpClose : (places.get(hereKey)?.last ?? 0)
   useEffect(() => {
     if (!document.hidden && !board && lastHere) markSeenIn(roomId, { [hereKey]: lastHere })
   }, [hereKey, lastHere, roomId, board])
@@ -546,13 +556,11 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         ? "Reconnecting…"
         : (online.size ? `${memberCount} members, ${online.size} online` : `${memberCount} ${memberCount === 1 ? "member" : "members"}`) +
           (state.mode.coordinatorOnly ? (state.coordinator ? " · coordinator mode" : " · coordinator mode, no coordinator yet") : "")
-  // Up close, the coordinator's own line says what's going on; the header just names the channel.
-  const focusView = !!coordinator && mainView === "focus" && search === null && !board && openTask === null
   // What's going on, in one live line under the name: who coordinates, who's working, what needs you.
   const working = active.filter((m) => isAgent(m) && memberLoad(state, m.name, now).current.length > 0).length
   const needsMe = escalations.length + reviews.length + (isOwner ? requests.length : 0)
   const headline =
-    connection === "connecting" || connection === "reconnecting" || (focusView && place.kind === "main")
+    connection === "connecting" || connection === "reconnecting" || focus
       ? subtitle
       : place.kind === "task"
         ? task
@@ -580,7 +588,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     : undefined
 
   // Up close, in one quiet line: who it coordinates, what's in progress, what needs you. Each part opens it.
-  const focus = !!coordinator && hereKey === "main" && mainView === "focus" && search === null && !board && openTask === null
   const doing = [...state.tasks.values()].filter((t) => t.state === "doing")
   const agentsHere = active.filter((m) => isAgent(m) && m.name !== coordinator).length
   const team: TeamPart[] = [
@@ -818,6 +825,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   starters={STARTERS}
                   onStarter={(text) => setStarter((was) => ({ text, n: (was?.n ?? 0) + 1 }))}
                   onShowConversation={() => setMainView("conversation")}
+                  newCount={unreadIn("main").n}
                   now={now}
                 />
               ) : (
@@ -895,7 +903,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   route={coordinator && place.kind === "main" ? { coordinator, label: nameOf(coordinator), view: "coordinator" } : undefined}
                   extra={extra}
                   seed={focus ? starter : undefined}
-                  onEmptyUp={focus ? () => setMainView("conversation") : undefined}
+                  onEscape={coordinator && hereKey === "main" && !board && openTask === null ? () => setMainView(focus ? "conversation" : "focus") : undefined}
                   placeholder={
                     place.kind === "main"
                       ? state.coordinator && state.coordinator !== me
