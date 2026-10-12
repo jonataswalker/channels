@@ -57,7 +57,8 @@ describe("agent rows", () => {
     const status = await msg(ann, { kind: "status", body: "halfway through the rows" });
     const chat = await msg(ann, { body: "lunch?" });
     const addB = await msg(bob, { ev: { op: "task.add", title: "Feed", owner: "bob" } });
-    const block = await msg(bob, { ev: { op: "task.update", task: addB.seq, state: "blocked", note: "waiting on tokens" } });
+    // Blocked is a blocking question nobody has answered yet (tasks have no blocked state now).
+    const block = await msg(bob, { kind: "blocking", body: "waiting on tokens", to: ["jonatas"] });
     const ms = [add, start, status, chat, addB, block];
     const s = fold(ms, roster);
     const now = T0 + 60 * 60_000;

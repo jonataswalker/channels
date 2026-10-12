@@ -3,7 +3,6 @@ import { useMemo, useState, type ReactNode } from "react"
 import type { Message } from "@mc/protocol.ts"
 import { colorOf, taskId, type ChannelState, type Task } from "@mc/state.ts"
 import { taskFeed, taskPrs } from "@mc/work.ts"
-import { fitsLine } from "@mc/format.ts"
 import { formatAgo, formatFull, memberName } from "@/lib/format"
 import { Feed, PrLink } from "./feed"
 import { Icon } from "./icon"
@@ -12,9 +11,9 @@ import { Markdown } from "./markdown"
 import { isAgent } from "./message"
 import { LABEL, StateMark } from "./tasks"
 
-const ORDER = ["blocked", "doing", "review", "todo", "done", "cancelled"] as const
+const ORDER = ["doing", "review", "todo", "done"] as const
 
-/** The board's order: blocked first, then in progress, review, to do, done; oldest first within each. */
+/** The board's order: in progress, review, open, done; oldest first within each. */
 export function boardOrder(state: ChannelState): number[] {
   return [...state.tasks.values()].sort((a, b) => ORDER.indexOf(a.state) - ORDER.indexOf(b.state) || a.id - b.id).map((t) => t.id)
 }
@@ -96,7 +95,7 @@ export function TaskPage({
                 </div>
               )}
               <div className="mt-6 lg:hidden">
-                <Properties task={task} state={state} now={now} items={items} onOpen={onOpen} />
+                <Properties task={task} state={state} now={now} items={items} />
               </div>
               <h2 className="mt-8 mb-2 text-title font-semibold">Activity</h2>
               <Feed items={items} state={state} now={now} />
@@ -104,7 +103,7 @@ export function TaskPage({
             </div>
           </div>
           <aside className="hidden w-[272px] shrink-0 border-l border-edge px-5 pt-8 lg:block">
-            <Properties task={task} state={state} now={now} items={items} onOpen={onOpen} />
+            <Properties task={task} state={state} now={now} items={items} />
           </aside>
         </div>
       )}
@@ -112,13 +111,9 @@ export function TaskPage({
   )
 }
 
-function Properties({ task, state, now, items, onOpen }: { task: Task; state: ChannelState; now: number; items: ReturnType<typeof taskFeed>; onOpen: (id: number) => void }) {
-  const unblocks = [...state.tasks.values()].filter((t) => t.after.includes(task.id))
+function Properties({ task, state, now, items }: { task: Task; state: ChannelState; now: number; items: ReturnType<typeof taskFeed> }) {
   const prs = taskPrs(items)
-  const claims = task.owner ? state.claims.filter((c) => c.owner === task.owner) : []
   const owner = task.owner ? state.members.get(task.owner) : undefined
-  // The latest handover that named a place to pick the work up from.
-  const handoff = task.notes.findLast((n) => n.handoff?.branch || n.handoff?.commit)?.handoff
   return (
     <dl className="grid grid-cols-2 gap-4 lg:block lg:space-y-4">
       <Prop label="Status">
@@ -135,40 +130,12 @@ function Properties({ task, state, now, items, onOpen }: { task: Task; state: Ch
           <span className="text-ink-3">Nobody yet</span>
         )}
       </Prop>
-      {task.needs.length > 0 && (
-        <Prop label="Needs">
-          <span className="grid gap-1">
-            <span className="flex flex-wrap gap-1">
-              {task.needs.map((n) => (
-                <span key={n} className="rounded-row bg-wash px-1.5 text-meta text-ink-2">
-                  {n}
-                </span>
-              ))}
-            </span>
-            {task.state !== "done" && task.state !== "cancelled" && <span className="text-meta text-ink-3">{fitsLine(state, task, now)}</span>}
-          </span>
-        </Prop>
-      )}
       {task.review && (
         <Prop label="Review">
           <span className="text-ink-2">
             {task.review === "*" ? "Anyone who hasn’t worked on it" : memberName(state.members.get(task.review), task.review)}
             {task.approvedBy ? `, approved by ${memberName(state.members.get(task.approvedBy), task.approvedBy)}` : task.state === "review" ? ", waiting" : ""}
           </span>
-        </Prop>
-      )}
-      {handoff && (
-        <Prop label="Pick it up from">
-          <span className="font-mono text-meta text-ink-2">
-            {handoff.branch ?? ""}
-            {handoff.commit ? ` @ ${handoff.commit}` : ""}
-          </span>
-        </Prop>
-      )}
-      <Prop label="Waits on">{task.after.length ? <TaskLinks ids={task.after} state={state} onOpen={onOpen} /> : <span className="text-ink-3">Nothing</span>}</Prop>
-      {unblocks.length > 0 && (
-        <Prop label="Unblocks">
-          <TaskLinks ids={unblocks.map((t) => t.id)} state={state} onOpen={onOpen} />
         </Prop>
       )}
       {prs.length > 0 && (
@@ -179,15 +146,6 @@ function Properties({ task, state, now, items, onOpen }: { task: Task; state: Ch
                 <Icon icon={GitPullRequestIcon} size={16} className="text-ink-3" />
                 <PrLink pr={pr} />
               </span>
-            ))}
-          </span>
-        </Prop>
-      )}
-      {claims.length > 0 && (
-        <Prop label="Claims">
-          <span className="grid gap-0.5 font-mono text-meta text-ink-2">
-            {claims.map((c) => (
-              <span key={c.path}>{c.path}</span>
             ))}
           </span>
         </Prop>
@@ -207,23 +165,6 @@ function Prop({ label, children }: { label: string; children: ReactNode }) {
       <dt className="mb-1.5 text-meta font-medium text-ink-3">{label}</dt>
       <dd className="flex items-center gap-2 text-ui">{children}</dd>
     </div>
-  )
-}
-
-function TaskLinks({ ids, state, onOpen }: { ids: number[]; state: ChannelState; onOpen: (id: number) => void }) {
-  return (
-    <span className="grid gap-1">
-      {ids.map((d) => {
-        const t = state.tasks.get(d)
-        return (
-          <button key={d} type="button" onClick={() => onOpen(d)} className="flex items-center gap-2 text-left hover:text-ink">
-            {t && <StateMark state={t.state} />}
-            <span className="text-ink-3 tabular-nums">{taskId(d)}</span>
-            <span className="truncate">{t?.title}</span>
-          </button>
-        )
-      })}
-    </span>
   )
 }
 

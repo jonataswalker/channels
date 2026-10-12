@@ -3,9 +3,9 @@
 import { loadJson, loadSummary, memberLoad, showsLoad } from "./load.ts";
 import { inlineText } from "./membership.ts";
 import { GENERAL_ROOM, ignored, imageMarker } from "./protocol.ts";
-import type { Card, Handoff, Message, TaskState, Trust } from "./protocol.ts";
+import type { Card, Message, OldTaskState, TaskState, Trust } from "./protocol.ts";
 import { describeScopes, presetOf, readScopes, SCOPE_LABELS, type Scope } from "./scopes.ts";
-import { colorOf, fits, humanOf, isPerson, missingNeeds, taskId, waitingOn, type ChannelState, type Claim, type Fact, type Task } from "./state.ts";
+import { colorOf, humanOf, isPerson, taskId, type ChannelState, type Fact, type Task } from "./state.ts";
 
 export function ago(ts: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - ts) / 1000));
@@ -30,33 +30,19 @@ export function parseDuration(s: string): number {
   return total;
 }
 
-const STATE_VERB: Record<TaskState, string> = {
-  todo: "moved back to to-do",
+const STATE_VERB: Record<TaskState | OldTaskState, string> = {
+  todo: "reopened",
   doing: "started",
-  blocked: "is blocked on",
   review: "sent for review",
   done: "finished",
+  // Older clients' states.
+  blocked: "is blocked on",
   cancelled: "cancelled",
 };
 
-/** How a dependency reads in `waits on T27 (in review)`. */
-export function depPhrase(state: string): string {
-  return state === "review" ? "in review" : state;
-}
-
-/** `added T12; waits on T27 (in review)`. Done and cancelled deps are already satisfied, so they are left off. */
-export function formatAdded(state: ChannelState, id: number, after: number[]): string {
-  const open = after.filter((d) => {
-    const st = state.tasks.get(d)?.state;
-    return st !== "done" && st !== "cancelled";
-  });
-  if (!open.length) return `added ${taskId(id)}`;
-  return `added ${taskId(id)}; waits on ${open.map((d) => `${taskId(d)} (${depPhrase(state.tasks.get(d)?.state ?? "?")})`).join(", ")}`;
-}
-
-/** `T69 waits on T68 (todo)`. */
-export function formatAfter(state: ChannelState, id: number, deps: number[]): string {
-  return `${taskId(id)} waits on ${deps.map((d) => `${taskId(d)} (${depPhrase(state.tasks.get(d)?.state ?? "?")})`).join(", ")}`;
+/** A task's state as people read it: "todo" on the wire is open. */
+export function stateWord(state: TaskState): string {
+  return state === "todo" ? "open" : state === "review" ? "in review" : state;
 }
 
 export function looksLikeLine(ids: number[]): string {
@@ -104,25 +90,26 @@ export function describeEvent(m: Message, state?: ChannelState): string {
     case "seat.reclaim":
       return `moved ${ev.member}'s seat to a new key (${ev.from} → ${ev.to}): the old key is out`;
     case "task.add":
-      return `added task ${taskId(m.seq)} “${ev.title}”${ev.owner ? ` for ${ev.owner}` : ""}${ev.after?.length ? ` after ${ev.after.map(taskId).join(", ")}` : ""}${ev.needs?.length ? `; needs ${ev.needs.join(", ")}` : ""}${ev.review ? `; ${reviewPhrase(ev.review)}` : ""}`;
+      return `added task ${taskId(m.seq)} “${ev.title}”${ev.owner ? ` for ${ev.owner}` : ""}${ev.review ? `; ${reviewPhrase(ev.review)}` : ""}`;
     case "card":
       return `described itself: ${cardLine(ev) || "nothing"}`;
     case "task.claim":
       return `claimed ${task(ev.task)}`;
     case "task.update": {
-      if (ev.handoff) return `handed ${task(ev.task)} to ${ev.owner ?? "the board"}${handoffPhrase(ev.handoff)}${note(ev.note)}`;
       if (ev.state === "done" && state?.tasks.get(ev.task)?.review && state.tasks.get(ev.task)?.approvedBy === m.from) return `approved ${task(ev.task)}${note(ev.note)}`;
       if (ev.review !== undefined && !ev.state) return ev.review ? `asked for ${task(ev.task)} to be reviewed: ${reviewPhrase(ev.review)}` : `dropped the review on ${task(ev.task)}`;
       if (ev.state === "blocked") return `is blocked on ${task(ev.task)}${note(ev.note)}`;
+      // Handed over: given to someone, back to open for them to start.
+      if (ev.owner && (!ev.state || ev.state === "todo")) return `assigned ${task(ev.task)} to ${ev.owner}${note(ev.note)}`;
       if (ev.state) return `${STATE_VERB[ev.state]} ${task(ev.task)}${note(ev.note)}`;
       if (ev.owner) return `assigned ${task(ev.task)} to ${ev.owner}${note(ev.note)}`;
       if (ev.owner === null) return `unassigned ${task(ev.task)}${note(ev.note)}`;
       if (ev.title) return `renamed ${taskId(ev.task)} to “${ev.title}”`;
-      if (ev.after?.length) return `set ${task(ev.task)} to wait on ${ev.after.map(taskId).join(", ")}`;
       return `noted on ${task(ev.task)}${note(ev.note)}`;
     }
+    // Older clients' claims: still said, though they hold nothing now.
     case "claim":
-      return `claimed ${ev.paths.join(", ")} for ${Math.round(ev.ttl / 60)}m${note(ev.note)}`;
+      return `claimed ${ev.paths.join(", ")} (claims are gone; this holds nothing)${note(ev.note)}`;
     case "release":
       return ev.paths?.length ? `released ${ev.paths.join(", ")}` : "released all claims";
     case "fact.set":
@@ -141,14 +128,6 @@ function reviewPhrase(review: string): string {
   return review === "*" ? "review by anyone who hasn't worked on it" : `review by ${inlineText(review, 40)}`;
 }
 
-/** " (branch grok/x @ 3f9a2c1, 4 files)" for a handoff, or "". */
-function handoffPhrase(h: Handoff | undefined): string {
-  if (!h) return "";
-  const at = h.commit ? ` @ ${inlineText(h.commit, 12)}` : "";
-  const parts = [h.branch ? `branch ${inlineText(h.branch, 120)}${at}` : at.trim(), h.files?.length ? `${h.files.length} file${h.files.length === 1 ? "" : "s"}` : ""].filter(Boolean);
-  return parts.length ? ` (${parts.join(", ")})` : "";
-}
-
 /** "macos arm64 · claude-code · ojow/channels@main · tools: docker, gpu · note", one line. */
 export function cardLine(c: Card | undefined): string {
   if (!c) return "";
@@ -162,17 +141,6 @@ export function cardLine(c: Card | undefined): string {
     inlineText(c.note, 200),
   ];
   return parts.filter(Boolean).join(" · ");
-}
-
-/** "fits: win (free), mac (busy)" / "nobody here has: gpu" for a task's needs; null when it needs nothing. */
-export function fitsLine(state: ChannelState, t: Pick<Task, "needs">, now = Date.now()): string | null {
-  if (!t.needs.length) return null;
-  const who = fits(state, t, (n) => memberLoad(state, n, now).level);
-  if (who.length) return `fits: ${who.map((w) => `${w.name} (${w.level})`).join(", ")}`;
-  // Nobody has all of it: say which needs nobody covers, so it's clear what's missing.
-  const agents = [...state.members.values()].filter((m) => m.active && !isPerson(m));
-  const uncovered = t.needs.filter((n) => !agents.some((m) => !missingNeeds(m, [n]).length));
-  return uncovered.length ? `nobody here has: ${uncovered.map((n) => inlineText(n, 40)).join(", ")}` : "no one agent has all of it";
 }
 
 /**
@@ -225,18 +193,10 @@ export function formatMessage(m: Message, trust?: Trust, state?: ChannelState, m
   return `#${m.seq} ${who(inlineText(m.from, 40), state, me)} → ${to}${room}${kind}${re}${flag}: ${body}${imgs}`;
 }
 
-function taskLine(state: ChannelState, t: Task): string {
-  const waits = waitingOn(state, t);
+function taskLine(t: Task): string {
   const owner = t.owner ? ` @${inlineText(t.owner, 40)}` : "";
-  const wait = waits.length ? ` (after ${waits.map(taskId).join(", ")})` : "";
-  const needs = t.needs.length ? ` [needs ${t.needs.map((x) => inlineText(x, 40)).join(", ")}]` : "";
-  const review = t.review && t.state !== "done" && t.state !== "cancelled" ? ` [${reviewPhrase(t.review)}]` : "";
-  return `  ${taskId(t.id).padEnd(5)} ${t.state.padEnd(7)}${owner} ${inlineText(t.title, 200)}${wait}${needs}${review}`;
-}
-
-function claimLine(c: Claim, now: number): string {
-  const where = c.checkout ? ` in ${inlineText(c.owner, 40)}'s checkout (${inlineText(c.checkout, 200)}${c.machine ? `, on ${inlineText(c.machine, 80)}` : ""})` : "";
-  return `  ${inlineText(c.path, 300)}  @${inlineText(c.owner, 40)}, ${left(c.expires, now)}${where}${c.note ? ` — ${inlineText(c.note, 200)}` : ""}`;
+  const review = t.review && t.state !== "done" ? ` [${reviewPhrase(t.review)}]` : "";
+  return `  ${taskId(t.id).padEnd(5)} ${stateWord(t.state).padEnd(9)}${owner} ${inlineText(t.title, 200)}${review}`;
 }
 
 /** `build.cmd = cargo test  (win, 2h ago, 5h left)`. A value with several lines keeps its tail marked. */
@@ -382,19 +342,13 @@ export function formatStatus({ alias, me, state, online, unread, now = Date.now(
   }
 
   const tasks = [...state.tasks.values()];
-  const active = tasks.filter((t) => t.state !== "done" && t.state !== "cancelled");
+  const active = tasks.filter((t) => t.state !== "done");
   const done = tasks.filter((t) => t.state === "done").length;
-  const cancelled = tasks.filter((t) => t.state === "cancelled").length;
-  out.push("", `tasks (${active.length} open${done ? `, ${done} done` : ""}${cancelled ? `, ${cancelled} cancelled` : ""}):`);
+  out.push("", `tasks (${active.length} open${done ? `, ${done} done` : ""}):`);
   if (!active.length) out.push("  none — add one with: kiwi task add \"…\"");
-  const order = ["doing", "blocked", "review", "todo"];
+  const order = ["doing", "review", "todo"];
   active.sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || a.id - b.id);
-  for (const t of active) out.push(taskLine(state, t));
-
-  if (state.claims.length) {
-    out.push("", "claims:");
-    for (const c of state.claims) out.push(claimLine(c, now));
-  }
+  for (const t of active) out.push(taskLine(t));
   if (state.facts.size) {
     out.push("", "facts:");
     for (const f of [...state.facts.values()].sort((a, b) => a.key.localeCompare(b.key))) {
@@ -408,42 +362,22 @@ export function formatStatus({ alias, me, state, online, unread, now = Date.now(
 
 export function formatTasks(state: ChannelState, opts: { all?: boolean; owner?: string } = {}): string {
   let tasks = [...state.tasks.values()];
-  if (!opts.all) tasks = tasks.filter((t) => t.state !== "done" && t.state !== "cancelled");
+  if (!opts.all) tasks = tasks.filter((t) => t.state !== "done");
   if (opts.owner) tasks = tasks.filter((t) => t.owner === opts.owner);
   if (!tasks.length) return "no tasks";
-  return tasks.map((t) => taskLine(state, t).trimStart()).join("\n");
+  return tasks.map((t) => taskLine(t).trimStart()).join("\n");
 }
 
-export function formatTask(state: ChannelState, t: Task, now = Date.now()): string {
-  const out = [`${taskId(t.id)} ${inlineText(t.title, 200)}`, `  state: ${t.state}${t.owner ? ` · owner: ${inlineText(t.owner, 40)}` : " · unassigned"} · created by ${inlineText(t.createdBy, 40)} ${ago(t.createdAt, now)}`];
-  const waits = waitingOn(state, t);
-  if (t.after.length) {
-    const settled = t.after.every((d) => {
-      const st = state.tasks.get(d)?.state;
-      return st === "done" || st === "cancelled";
-    });
-    out.push(`  after: ${t.after.map((d) => `${taskId(d)} (${state.tasks.get(d)?.state ?? "?"})`).join(", ")}${waits.length ? "" : settled ? " — all done" : " — ready"}`);
-  }
-  if (t.needs.length) {
-    out.push(`  needs: ${t.needs.map((x) => inlineText(x, 40)).join(", ")}`);
-    if (t.state !== "done" && t.state !== "cancelled") out.push(`  ${fitsLine(state, t, now)}`);
-  }
+/** One task in full. `_state` is kept so callers needn't change (it used to resolve dependencies). */
+export function formatTask(_state: ChannelState, t: Task, now = Date.now()): string {
+  const out = [`${taskId(t.id)} ${inlineText(t.title, 200)}`, `  state: ${stateWord(t.state)}${t.owner ? ` · owner: ${inlineText(t.owner, 40)}` : " · unassigned"} · created by ${inlineText(t.createdBy, 40)} ${ago(t.createdAt, now)}`];
   if (t.review) out.push(`  ${reviewPhrase(t.review)}${t.approvedBy ? `; approved by ${inlineText(t.approvedBy, 40)}` : t.state === "review" ? "; waiting for it" : ""}`);
   if (t.detail) out.push("", markedText(t.detail));
   if (t.notes.length) {
     out.push("", "notes:");
-    for (const n of t.notes) {
-      const h = n.handoff ? `handed over${handoffPhrase(n.handoff)}${n.text ? ": " : ""}` : "";
-      out.push(`  #${n.seq} ${inlineText(n.by, 40)}, ${ago(n.ts, now)}: ${h}${markedText(n.text)}`);
-      const files = n.handoff?.files ?? [];
-      if (files.length) out.push(`    files: ${files.slice(0, 20).map((f) => inlineText(f, 200)).join(", ")}${files.length > 20 ? ` (+${files.length - 20})` : ""}`);
-    }
+    for (const n of t.notes) out.push(`  #${n.seq} ${inlineText(n.by, 40)}, ${ago(n.ts, now)}: ${markedText(n.text)}`);
   }
   return out.join("\n");
-}
-
-export function formatClaims(state: ChannelState, now = Date.now()): string {
-  return state.claims.length ? state.claims.map((c) => claimLine(c, now).trimStart()).join("\n") : "no active claims";
 }
 
 /**

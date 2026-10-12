@@ -9,7 +9,7 @@
 //   - The file system is read-only (writes fail), and each run gets a new one,
 //     so nothing a script does outlives it.
 //   - Only the read-only text commands below exist. There is no network, python,
-//     javascript or sqlite, and nothing that sends, claims or changes the channel:
+//     javascript or sqlite, and nothing that sends or changes the channel:
 //     writes stay on the typed CLI commands and MCP tools.
 //   - The "hardened" limit profile, plus our own caps on script size, wall time
 //     and output, so a bad script ends with an error instead of hanging.
@@ -20,7 +20,7 @@ import * as Exit from "effect/Exit";
 import { Bash, InMemoryFs, type CommandName, type IFileSystem } from "just-bash";
 import { Cursor, Keystore } from "./config.ts";
 import { openSession, runAgent, wants, type AgentSession } from "./agent.ts";
-import { describeEvent, formatClaims, formatMessage, formatStatus, formatTask, markedText, memberJson, statusJson } from "./format.ts";
+import { describeEvent, formatMessage, formatStatus, formatTask, markedText, memberJson, statusJson } from "./format.ts";
 import { ignored, type Message } from "./protocol.ts";
 import { taskId, type ChannelState } from "./state.ts";
 
@@ -61,7 +61,7 @@ export const README = `Channel files (read-only; every run starts fresh). Writes
   /channel                 the current channel
     README                 this file
     me                     {"name","role","channel"}
-    status                 what \`kiwi status\` prints (members, load, open asks, tasks, claims, facts)
+    status                 what \`kiwi status\` prints (members, load, open asks, tasks, facts)
     status.json            members with role and load, as \`kiwi status --json\`
     log.jsonl              every verified message, one JSON object per line: seq, at, from, to, kind, re, body, op, images
     msgs/000042.txt        one message per file, in the \`kiwi log\` one-line format
@@ -69,7 +69,6 @@ export const README = `Channel files (read-only; every run starts fresh). Writes
     tasks/T12.md           one task per file: state, owner, deps, detail, notes
     members/<name>.json    role, about, kind, owner, sponsor, lastSeen, load
     facts/<key>            each shared fact's value
-    claims                 active path claims
   /channels/<alias>/…      other channels this same name belongs to. Not this one.
                            All channels: /channel plus /channels/*. Loaded when
                            the script mentions /channels.
@@ -111,7 +110,6 @@ function channelTree(v: ChannelView, now: number): Record<string, string> {
     files[`members/${segment(m.name)}.json`] = JSON.stringify(json, null, 2) + "\n";
   }
   for (const f of state.facts.values()) files[`facts/${segment(f.key)}`] = markedText(f.value) + "\n";
-  files["claims"] = formatClaims(state, now) + "\n";
   return files;
 }
 

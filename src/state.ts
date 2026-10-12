@@ -1,12 +1,12 @@
 // Shared channel state, folded from the message log.
 //
 // Every client folds the same signed events in the same (relay-assigned)
-// order, so they all agree on who owns which task, which paths are claimed,
-// and what the facts are, without the relay ever reading any of it.
+// order, so they all agree on who owns which task and what the facts are,
+// without the relay ever reading any of it.
 // Conflicts resolve deterministically: the earlier sequence number wins.
 
 import { inlineText } from "./membership.ts";
-import { GENERAL_ROOM, ignored, MAX_CHARTER, MAX_ROOM_NAME, MAX_ROOMS, MAX_TAGS, ROOM_ID_RE, type Card, type Color, type Handoff, type Message, type TaskState, type Trust } from "./protocol.ts";
+import { GENERAL_ROOM, ignored, MAX_CHARTER, MAX_ROOM_NAME, MAX_ROOMS, MAX_TAGS, ROOM_ID_RE, type Card, type Color, type Message, type OldTaskState, type TaskState, type Trust } from "./protocol.ts";
 import { readScopes, refusal, SCOPES, scopesOf, type Scope } from "./scopes.ts";
 
 export interface Member {
@@ -67,8 +67,6 @@ export interface TaskNote {
   by: string;
   ts: number;
   text: string;
-  /** Set when this note handed the task over: where to pick the work up. */
-  handoff?: Handoff;
 }
 
 export interface Task {
@@ -80,30 +78,13 @@ export interface Task {
   createdBy: string;
   createdAt: number;
   updatedAt: number;
-  /** Tasks that must be done before this one. */
-  after: number[];
   notes: TaskNote[];
-  /** What doing it takes, as tags matched against members' cards (lowercase). */
-  needs: string[];
   /** Who must approve it before it's done: a member, or "*" for anyone who hasn't worked on it. */
   review?: string;
   /** Who approved it, when a review let it be done. */
   approvedBy?: string;
   /** Everyone who has owned it or moved it along: none of them may approve it under a "*" review. */
   workedBy: string[];
-}
-
-export interface Claim {
-  owner: string;
-  path: string;
-  seq: number;
-  since: number;
-  expires: number;
-  note?: string;
-  /** This computer's label, when the claim recorded one. */
-  machine?: string;
-  /** Git checkout the claim was made from, so another agent can see which tree it guards. */
-  checkout?: string;
 }
 
 export interface Fact {
@@ -119,8 +100,6 @@ export interface Fact {
 export interface ChannelState {
   members: Map<string, Member>;
   tasks: Map<number, Task>;
-  /** Claims active at fold time. */
-  claims: Claim[];
   facts: Map<string, Fact>;
   trust: Map<number, Trust>;
   /** Events that lost a race or broke a rule, with the reason. */
@@ -178,7 +157,7 @@ export interface GuardFloor {
 
 /**
  * What an agent may still send while the channel is on hold: answers to people (every recipient a
- * person) and housekeeping that changes nothing (announcing itself, letting go of claims).
+ * person) and housekeeping that changes nothing (announcing itself; "release" is older clients letting go of claims).
  */
 export function allowedOnHold(m: Pick<Message, "kind" | "to" | "ev">, isPersonName: (name: string) => boolean): boolean {
   if (m.kind === "event") return m.ev?.op === "hello" || m.ev?.op === "release";
@@ -239,40 +218,15 @@ export function taskId(id: number): string {
   return `T${id}`;
 }
 
+/** A state as it folds now: an older client's "blocked" is still being done, its "cancelled" is done. */
+export function currentState(s: TaskState | OldTaskState): TaskState {
+  return s === "blocked" ? "doing" : s === "cancelled" ? "done" : s;
+}
+
 /** Parse "T12", "t12", "#12" or "12". */
 export function parseTaskId(s: string): number | null {
   const m = /^(?:[Tt#])?(\d+)$/.exec(s.trim());
   return m ? Number(m[1]) : null;
-}
-
-/** `file#Symbol` is a claim on one function. Anything else, including a trailing slash, is the whole path. */
-export function splitClaim(path: string): { file: string; symbol?: string } {
-  const hash = path.lastIndexOf("#");
-  if (hash > 0) {
-    const symbol = path.slice(hash + 1);
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(symbol)) return { file: path.slice(0, hash).replace(/\/+$/, ""), symbol };
-  }
-  return { file: path.replace(/\/+$/, "") };
-}
-
-/**
- * Two claims overlap when one path contains the other ("*" covers everything).
- * `file#A` and `file#B` do not: a symbol claim shares the file. A whole-file claim still locks every symbol in it.
- */
-export function overlaps(a: string, b: string): boolean {
-  const ca = splitClaim(a);
-  const cb = splitClaim(b);
-  const x = ca.file;
-  const y = cb.file;
-  if (x === "*" || y === "*") return true;
-  if (x !== y) return x.startsWith(y + "/") || y.startsWith(x + "/");
-  if (!ca.symbol || !cb.symbol) return true;
-  return ca.symbol === cb.symbol;
-}
-
-/** Why a new claim lost: name the other checkout when the claim recorded one. */
-export function claimConflict(c: Claim): string {
-  return c.checkout ? `${c.path} is claimed by ${c.owner} in ${c.owner}'s checkout (${c.checkout})` : `${c.path} is claimed by ${c.owner}`;
 }
 
 /**
@@ -404,7 +358,6 @@ export function fold(
     }
   };
   const tasks = new Map<number, Task>();
-  let claims: Claim[] = [];
   const facts = new Map<string, Fact>();
   const trust = new Map<number, Trust>();
   const rejected = new Map<number, string>();
@@ -631,8 +584,6 @@ export function fold(
           const scopes = ev.scopes === null ? [...SCOPES] : (readScopes(ev.scopes) ?? []);
           scopesByKey.set(ev.pk, scopes);
           scopeSets.set(ev.pk, { seq: m.seq, scopes });
-          // Losing claims lets go of the ones held now; tasks they own stay theirs until reassigned.
-          if (!scopes.includes("claims")) claims = claims.filter((c) => c.owner !== ev.member);
           break;
         }
 
@@ -666,9 +617,7 @@ export function fold(
             createdBy: m.from,
             createdAt: at,
             updatedAt: at,
-            after: (ev.after ?? []).filter((d) => tasks.has(d)),
             notes: [],
-            needs: normTags(ev.needs),
             ...(ev.review?.trim() ? { review: ev.review.trim() } : {}),
             workedBy: ev.owner ? [ev.owner] : [],
           });
@@ -684,7 +633,6 @@ export function fold(
           const task = tasks.get(ev.task);
           if (!task) reject(`no task ${taskId(ev.task)}`);
           else if (task.state === "done") reject(`${taskId(task.id)} is already done`);
-          else if (task.state === "cancelled") reject(`${taskId(task.id)} is cancelled`);
           else if (task.owner && task.owner !== m.from) reject(`${taskId(task.id)} is owned by ${task.owner}`);
           else {
             task.owner = m.from;
@@ -708,8 +656,12 @@ export function fold(
             break;
           }
           const review = ev.review === undefined ? task.review : ev.review?.trim() || undefined;
+          // Older clients' states: blocked is still being done (the note says why), cancelled is done.
+          const state = ev.state && currentState(ev.state);
+          const note = ev.note || (ev.state === "blocked" ? "blocked" : ev.state === "cancelled" ? "cancelled" : undefined);
           // Done, with a review: only the reviewer (or for "*", anyone who hasn't worked on it) says so.
           // People may always. Handing it to someone first doesn't make the doer a reviewer.
+          // (An older client's "cancelled" never went through review, so it doesn't now either.)
           if (ev.state === "done" && task.state !== "done" && review) {
             const owner = ev.owner === undefined ? task.owner : ev.owner || undefined;
             const ok = isPerson(member) || (review === "*" ? m.from !== owner && !task.workedBy.includes(m.from) : m.from === review);
@@ -718,49 +670,25 @@ export function fold(
               break;
             }
           }
-          if (ev.after?.length) {
-            const why = appendAfter(tasks, task, ev.after);
-            if (why) {
-              reject(why);
-              break;
-            }
-          }
           if (ev.review !== undefined) task.review = review;
           if (ev.state === "done" && task.state !== "done" && task.review) task.approvedBy = m.from;
-          if (ev.state && ev.state !== "done") task.approvedBy = undefined;
+          if (state && state !== "done") task.approvedBy = undefined;
           if (ev.owner !== undefined) task.owner = ev.owner || undefined;
           if (ev.owner) worked(task, ev.owner);
           // Moving it along as its owner, or sending it for review, is working on it; a reviewer sending it back isn't.
-          if (ev.state && ev.state !== "done" && ev.state !== "cancelled" && (m.from === task.owner || ev.state === "review")) worked(task, m.from);
-          if (ev.state) task.state = ev.state;
+          if (state && state !== "done" && (m.from === task.owner || state === "review")) worked(task, m.from);
+          if (state) task.state = state;
           if (ev.title) task.title = ev.title.slice(0, 200);
-          if (ev.note || ev.handoff) task.notes.push({ seq: m.seq, by: m.from, ts: at, text: ev.note ?? "", ...(ev.handoff ? { handoff: ev.handoff } : {}) });
+          if (note) task.notes.push({ seq: m.seq, by: m.from, ts: at, text: note });
           // Unassigning work in progress puts it back on the board.
           if (ev.owner === null && task.state === "doing") task.state = "todo";
           task.updatedAt = at;
           break;
         }
 
-        case "claim": {
-          const live = claims.filter((c) => c.expires > at);
-          const ttl = Math.min(Math.max(Number(ev.ttl) || 0, 60), 24 * 3600) * 1000;
-          const conflict = ev.paths
-            .map((p) => live.find((c) => c.owner !== m.from && overlaps(c.path, p)))
-            .find(Boolean);
-          if (conflict) {
-            reject(claimConflict(conflict));
-            break;
-          }
-          claims = live.filter((c) => !(c.owner === m.from && ev.paths.includes(c.path)));
-          const place = { ...(ev.machine ? { machine: ev.machine } : {}), ...(ev.checkout ? { checkout: ev.checkout } : {}) };
-          for (const path of ev.paths) {
-            claims.push({ owner: m.from, path, seq: m.seq, since: at, expires: at + ttl, note: ev.note, ...place });
-          }
-          break;
-        }
-
+        case "claim":
         case "release":
-          claims = claims.filter((c) => c.owner !== m.from || (ev.paths?.length ? !ev.paths.includes(c.path) : false));
+          // Claims are gone: what older clients still send changes nothing.
           break;
 
         case "fact.set": {
@@ -798,7 +726,6 @@ export function fold(
   return {
     members,
     tasks,
-    claims: claims.filter((c) => c.expires > now),
     facts,
     trust,
     scopeSets,
@@ -822,41 +749,7 @@ function worked(task: Task, name: string): void {
   if (!task.workedBy.includes(name)) task.workedBy.push(name);
 }
 
-/** A dependency that no longer blocks: finished, in review, or cancelled. */
-export function depSatisfied(state: TaskState | undefined): boolean {
-  return state === "done" || state === "review" || state === "cancelled";
-}
-
-/** Tasks still waiting on unfinished dependencies. Review, done and cancelled count as ready. */
-export function waitingOn(state: ChannelState, task: Task): number[] {
-  return task.after.filter((d) => !depSatisfied(state.tasks.get(d)?.state));
-}
-
-/** True if making `task` wait on `dep` would loop (including waiting on itself). */
-export function wouldCycle(tasks: Map<number, Task>, task: number, dep: number): boolean {
-  if (dep === task) return true;
-  const seen = new Set<number>();
-  const stack = [dep];
-  while (stack.length) {
-    const id = stack.pop()!;
-    if (id === task) return true;
-    if (!seen.add(id)) continue;
-    const next = tasks.get(id);
-    if (next) for (const d of next.after) stack.push(d);
-  }
-  return false;
-}
-
-function appendAfter(tasks: Map<number, Task>, task: Task, deps: number[]): string | undefined {
-  for (const d of deps) {
-    if (!tasks.has(d)) return `no task ${taskId(d)}`;
-    if (wouldCycle(tasks, task.id, d)) return `${taskId(task.id)} waiting on ${taskId(d)} would cycle`;
-  }
-  for (const d of deps) if (!task.after.includes(d)) task.after.push(d);
-  return undefined;
-}
-
-const OPEN_FOR_TITLE = new Set<TaskState>(["todo", "doing", "blocked", "review"]);
+const OPEN_FOR_TITLE = new Set<TaskState>(["todo", "doing", "review"]);
 
 function normTitle(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -878,7 +771,7 @@ export function titlesLookAlike(a: string, b: string): boolean {
   return shared / Math.min(wa.length, wb.size) >= 0.6;
 }
 
-/** Open tasks (not done, not cancelled) whose title looks like `title`. */
+/** Open tasks (not done) whose title looks like `title`. */
 export function similarOpenTasks(state: ChannelState, title: string): Task[] {
   return [...state.tasks.values()].filter((t) => OPEN_FOR_TITLE.has(t.state) && titlesLookAlike(title, t.title)).sort((a, b) => a.id - b.id);
 }
@@ -910,42 +803,7 @@ export function colorOf(state: ChannelState, name: string): Color | null {
   return person ? (person.color ?? null) : null;
 }
 
-/** Tags as matched: lowercase, trimmed, no empties or repeats. */
+/** A card's tools as kept: lowercase, trimmed, no empties or repeats. */
 export function normTags(tags: readonly string[] | undefined): string[] {
   return [...new Set((tags ?? []).map((t) => String(t).trim().toLowerCase()).filter(Boolean))].slice(0, MAX_TAGS);
-}
-
-/**
- * Everything a member can be matched by: its card (os, arch, harness, model, tools, the repo and its
- * name alone, the branch) and its role's words. Lowercase.
- */
-export function memberTags(m: Member): Set<string> {
-  const c = m.card;
-  const out = new Set<string>();
-  const add = (x: string | undefined) => x && out.add(x.trim().toLowerCase());
-  if (c) {
-    for (const x of [c.os, c.arch, c.harness, c.model, c.repo, c.branch]) add(x);
-    if (c.repo?.includes("/")) add(c.repo.split("/").pop());
-    for (const t of c.tools ?? []) add(t);
-  }
-  for (const w of (m.role ?? "").split(/[\s,/]+/)) add(w);
-  return out;
-}
-
-/** What `need` asks of a member that it doesn't have. */
-export function missingNeeds(m: Member, needs: readonly string[]): string[] {
-  const has = memberTags(m);
-  return needs.filter((n) => !has.has(n));
-}
-
-/**
- * The agents that have everything a task needs, least busy first (then by name). People don't carry
- * cards; they pick work up themselves.
- */
-export function fits(state: ChannelState, task: Pick<Task, "needs">, load: (name: string) => "free" | "busy" | "overloaded"): { name: string; level: "free" | "busy" | "overloaded" }[] {
-  const order = { free: 0, busy: 1, overloaded: 2 };
-  return [...state.members.values()]
-    .filter((m) => m.active && !isPerson(m) && !missingNeeds(m, task.needs).length)
-    .map((m) => ({ name: m.name, level: load(m.name) }))
-    .sort((a, b) => order[a.level] - order[b.level] || a.name.localeCompare(b.name));
 }

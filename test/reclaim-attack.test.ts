@@ -154,7 +154,6 @@ describe("reclaim attacks", () => {
       members.map((m) => ({ name: m.name, pk: m.pk, role: m.role, owner: m.owner, at: m.at, active: m.active, kind: m.kind })),
     );
     expect([...state.tasks.values()].map((t) => t.title)).toEqual(["fix the PC edge"]);
-    expect(state.claims.map((c) => c.path)).toEqual(["src/pc"]);
     expect(messages.filter((m) => m.from === "win" && m.body === "still mine").every((m) => state.trust.get(m.seq) === "verified")).toBe(true);
     expect(messages.some((m) => m.body === secret)).toBe(true);
     expect(task).toBeGreaterThan(0);

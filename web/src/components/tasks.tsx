@@ -2,16 +2,16 @@ import { ArrowDown01Icon, Cancel01Icon, Note01Icon, Tick02Icon } from "@hugeicon
 import { useState } from "react"
 
 import type { TaskState } from "@mc/protocol.ts"
-import { taskId, waitingOn, type ChannelState, type Task } from "@mc/state.ts"
+import { taskId, type ChannelState, type Task } from "@mc/state.ts"
 import { formatAgo, memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { Icon } from "./icon"
 import { Alert, Button, IconButton, errorText, toast } from "./kit"
 
-export const LABEL: Record<TaskState, string> = { doing: "In progress", blocked: "Blocked", review: "In review", todo: "To do", done: "Done", cancelled: "Cancelled" }
-const ORDER: TaskState[] = ["blocked", "doing", "review", "todo", "done", "cancelled"]
+export const LABEL: Record<TaskState, string> = { doing: "In progress", review: "In review", todo: "Open", done: "Done" }
+const ORDER: TaskState[] = ["doing", "review", "todo", "done"]
 
-/** A task's state as a small circle: empty, half full, dashed, red, or checked. Ink only, except blocked. */
+/** A task's state as a small circle: empty, half full, dashed, or checked. */
 export function StateMark({ state }: { state: TaskState }) {
   if (state === "done") {
     return (
@@ -20,9 +20,6 @@ export function StateMark({ state }: { state: TaskState }) {
       </span>
     )
   }
-  if (state === "cancelled") {
-    return <span title="Cancelled" className="block size-4 shrink-0 rounded-full border-[1.5px] border-ink-3 opacity-60" />
-  }
   return (
     <span
       title={LABEL[state]}
@@ -30,26 +27,23 @@ export function StateMark({ state }: { state: TaskState }) {
         "block size-4 shrink-0 rounded-full border-[1.5px]",
         state === "todo" && "border-ink-3",
         state === "doing" && "border-ink-2 bg-[conic-gradient(var(--ink-2)_0_50%,transparent_50%_100%)]",
-        state === "review" && "border-dashed border-ink-2",
-        state === "blocked" && "border-alert bg-[radial-gradient(var(--alert)_0_38%,transparent_40%)]"
+        state === "review" && "border-dashed border-ink-2"
       )}
     />
   )
 }
 
-function TaskRow({ task, state, now, onOpen }: { task: Task; state: ChannelState; now: number; onOpen: () => void }) {
-  const waits = waitingOn(state, task)
+function TaskRow({ task, now, onOpen }: { task: Task; now: number; onOpen: () => void }) {
   return (
     <button type="button" onClick={onOpen} className="-mx-3 flex w-[calc(100%+24px)] items-start gap-3 rounded-ctl px-3 py-2 text-left transition-colors hover:bg-wash">
       <span className="flex pt-[3px]">
         <StateMark state={task.state} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cx("block text-body leading-snug", (task.state === "done" || task.state === "cancelled") && "text-ink-2")}>{task.title}</span>
+        <span className={cx("block text-body leading-snug", task.state === "done" && "text-ink-2")}>{task.title}</span>
         <span className="mt-0.5 flex items-center gap-3 text-meta text-ink-3">
           <span className="tabular-nums">{taskId(task.id)}</span>
           <span className="truncate">{task.owner ?? "Unassigned"}</span>
-          {waits.length > 0 && <span className="shrink-0">Waits on {waits.map(taskId).join(", ")}</span>}
           {task.notes.length > 0 && <span className="shrink-0">{task.notes.length === 1 ? "1 note" : `${task.notes.length} notes`}</span>}
           <span className="shrink-0">{formatAgo(task.updatedAt, now)}</span>
         </span>
@@ -147,7 +141,7 @@ export function reviewLine(task: Task, nameOf: (n: string) => string): string | 
 export function TaskCard({ task, state, now, onOpen, highlighted }: { task: Task; state: ChannelState; now: number; onOpen: () => void; highlighted?: boolean }) {
   const nameOf = (n: string) => memberName(state.members.get(n), n)
   const review = reviewLine(task, nameOf)
-  const closed = task.state === "done" || task.state === "cancelled"
+  const closed = task.state === "done"
   return (
     <button
       type="button"
@@ -165,7 +159,7 @@ export function TaskCard({ task, state, now, onOpen, highlighted }: { task: Task
         <span className={cx("block text-body leading-snug", closed && "text-ink-2")}>{task.title}</span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-ink-3">
           <span className="tabular-nums">{taskId(task.id)}</span>
-          <span className={cx(task.state === "blocked" && "font-medium text-alert")}>{LABEL[task.state]}</span>
+          <span>{LABEL[task.state]}</span>
           <span className="truncate">{task.owner ? nameOf(task.owner) : "Unassigned"}</span>
           {review && <span className={cx(task.state === "review" && "font-medium text-ink-2")}>{review}</span>}
           <span className="shrink-0">{formatAgo(task.updatedAt, now)}</span>
@@ -194,11 +188,11 @@ export function Tasks({ state, now, onOpen }: { state: ChannelState; now: number
         {ORDER.map((s) => {
           const list = all.filter((t) => t.state === s)
           if (!list.length) return null
-          const closed = s === "done" || s === "cancelled"
+          const closed = s === "done"
           return (
             <section key={s} className="mb-7">
               <div className="mb-1 flex items-baseline gap-2">
-                <h3 className={cx("text-ui font-semibold", s === "blocked" ? "text-alert" : "text-ink")}>{LABEL[s]}</h3>
+                <h3 className="text-ui font-semibold text-ink">{LABEL[s]}</h3>
                 <span className="text-meta text-ink-3 tabular-nums">{list.length}</span>
                 {closed && (
                   <button type="button" className="ml-auto text-meta font-medium text-ink-2 hover:text-ink" onClick={() => setShowDone((v) => !v)}>
@@ -206,7 +200,7 @@ export function Tasks({ state, now, onOpen }: { state: ChannelState; now: number
                   </button>
                 )}
               </div>
-              {(!closed || showDone) && list.map((t) => <TaskRow key={t.id} task={t} state={state} now={now} onOpen={() => onOpen(t.id)} />)}
+              {(!closed || showDone) && list.map((t) => <TaskRow key={t.id} task={t} now={now} onOpen={() => onOpen(t.id)} />)}
             </section>
           )
         })}

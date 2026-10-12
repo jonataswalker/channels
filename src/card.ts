@@ -1,12 +1,12 @@
 // What this agent is and has, read from the machine it runs on: the card it shows the channel, so
-// work that needs Windows, a GPU or a given repo goes to someone who has it. Only coarse facts:
-// the OS, the CPU, which harness runs it, which tools are on PATH, and the git checkout it's in
-// (already visible in its claims). Nothing from files, and nothing the person didn't put there.
+// people can see who runs where and with what. Only coarse facts: the OS, the CPU, which harness
+// runs it, which tools are on PATH, and the git repository and branch it's in. Nothing from files,
+// and nothing the person didn't put there.
 
 import { execFileSync } from "node:child_process";
-import type { Card, Handoff } from "./protocol.ts";
+import type { Card } from "./protocol.ts";
 
-/** Tools worth routing by, as the binary that shows each one is here. */
+/** Tools worth showing, as the binary that shows each one is here. */
 const TOOLS: [tag: string, bin: string][] = [
   ["git", "git"],
   ["docker", "docker"],
@@ -102,23 +102,4 @@ export function sameCard(a: Card | undefined, b: Card): boolean {
   const ta = [...(a.tools ?? [])].sort().join(",");
   const tb = [...(b.tools ?? [])].map((t) => t.toLowerCase()).sort().join(",");
   return ta === tb;
-}
-
-/**
- * Where the work stands in this checkout, for handing it over: the branch, its commit, and the files
- * changed (uncommitted, and committed since it left its upstream). Plus whether the commit is pushed,
- * since the next owner can only fetch what's pushed.
- */
-export function handoffHere(cwd = process.cwd()): { handoff: Handoff; pushed: boolean | null } {
-  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
-  const commit = git(["rev-parse", "--short", "HEAD"], cwd);
-  const dirty = (git(["status", "--porcelain"], cwd) ?? "").split("\n").map((l) => l.slice(3).trim()).filter(Boolean);
-  const upstream = git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd);
-  const ahead = upstream ? (git(["diff", "--name-only", `${upstream}...HEAD`], cwd) ?? "").split("\n").filter(Boolean) : [];
-  const files = [...new Set([...ahead, ...dirty.map((f) => f.split(" -> ").pop()!)])].slice(0, 200);
-  const unpushed = upstream ? Number(git(["rev-list", "--count", `${upstream}..HEAD`], cwd) ?? "0") : null;
-  return {
-    handoff: { ...(branch && branch !== "HEAD" ? { branch } : {}), ...(commit ? { commit } : {}), ...(files.length ? { files } : {}) },
-    pushed: commit ? (unpushed === null ? false : unpushed === 0) : null,
-  };
 }

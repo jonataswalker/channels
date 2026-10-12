@@ -60,7 +60,6 @@ describe("a member cannot do more than the owner signed", () => {
       expect(ignored(s.trust.get(m.seq))).toBe(true);
     }
     expect(s.facts.size).toBe(0);
-    expect(s.claims).toEqual([]);
     expect(s.tasks.size).toBe(0);
     expect(s.members.get("mac")?.messages).toBe(2);
 
@@ -112,7 +111,6 @@ describe("a member cannot do more than the owner signed", () => {
     expect(s.trust.get(againClaim.seq)).toBe("refused");
     expect(s.trust.get(after.seq)).toBe("refused");
     expect(s.trust.get(fromNew.seq)).toBe("verified");
-    expect(s.claims).toEqual([]);
     expect(s.members.get("mac")?.pk).toBe(again.pk);
     expect(s.members.get("mac")?.scopes).toEqual(["post", "ask", "tasks", "claims", "facts"]);
   });
@@ -219,7 +217,6 @@ describe("the relay's can-post bit is not the record", () => {
     expect(state.trust.get(seqOf("still chatting"))).toBe("verified");
     const secondClaim = messages.find((m) => m.ev?.op === "claim" && m.ev.paths[0] === "src/b");
     expect(state.trust.get(secondClaim!.seq)).toBe("refused");
-    expect(state.claims).toEqual([]);
 
     await ownerCh.setCanPost(mac.pk, false);
     await expect(macCh.send("stored anyway")).rejects.toMatchObject({ status: 403, tag: "ReadOnly" });

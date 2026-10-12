@@ -1,7 +1,7 @@
 // `kiwi demo`: a channel of agents coordinating, in thirty seconds, with nothing to set up. It runs a
 // relay inside this process on a throwaway port and folder, with a throwaway KIWI_HOME, so it never
 // touches this computer's channels, its hooks, or any public relay. Then it plays a short session
-// through the real client: the owner's charter, agents' cards, work routed by what it needs, a
+// through the real client: the owner's charter, agents' cards, the task board, a
 // question and its answer, a review gate, a handover, an escalation, and the hold.
 
 import * as Cause from "effect/Cause";
@@ -56,7 +56,7 @@ const play = Effect.fn("Demo.run")(function* (opts: DemoOptions) {
   const { openSession } = yield* Effect.promise(() => import("./agent.ts"));
   const { loadIdentity, saveConfig } = yield* Effect.promise(() => import("./config.ts"));
   const { b64url, newRoomId } = yield* Effect.promise(() => import("./crypto.ts"));
-  const { formatMessage, formatStatus, formatTask } = yield* Effect.promise(() => import("./format.ts"));
+  const { formatMessage, formatStatus, formatTasks } = yield* Effect.promise(() => import("./format.ts"));
 
   const names = ["lead", "mac", "win", "ci"] as const;
   const roomId = newRoomId();
@@ -99,17 +99,16 @@ const play = Effect.fn("Demo.run")(function* (opts: DemoOptions) {
   yield* lead.hello("planner", "breaks work down and unblocks people");
   yield* human.decideRole("lead", "allow");
 
-  yield* say("The planner puts work on the board by what it needs; the board says who fits.");
-  const proto = yield* lead.taskAdd("Freeze protocol v1 wire format", { needs: ["rust"], review: "any" });
-  const inject = yield* lead.taskAdd("Inject mouse input on Windows", { needs: ["windows"], after: [proto] });
-  const capture = yield* lead.taskAdd("Capture input at the screen edge on the Mac", { needs: ["macos", "xcode"], after: [proto] });
-  yield* lead.taskAdd("Build the release in CI", { needs: ["docker"], after: [inject, capture] });
+  yield* say("The planner puts work on the board: open, then doing, then done.");
+  const proto = yield* lead.taskAdd("Freeze protocol v1 wire format", { review: "any" });
+  const inject = yield* lead.taskAdd("Inject mouse input on Windows");
+  const capture = yield* lead.taskAdd("Capture input at the screen edge on the Mac");
+  yield* lead.taskAdd("Build the release in CI");
   const { state: board } = yield* lead.state();
-  for (const id of [inject, capture]) yield* line(formatTask(board, board.tasks.get(id)!).split("\n").filter((l) => /^T|fits/.test(l.trim())).join("\n"));
+  yield* line(formatTasks(board));
 
-  yield* say("Agents take what fits them, and ask each other directly.");
+  yield* say("Agents take what they can do (People shows who runs where), and ask each other directly.");
   yield* mac.taskClaim(proto);
-  yield* mac.claim(["crates/protocol"], 45 * 60, "freezing v1");
   const q = yield* win.ask("Do you forward key repeat? Windows doesn't repeat injected keys.", { to: ["mac"] });
   yield* mac.reply(q.seq, "Yes: autorepeat goes out as extra KeyDown events.");
 
@@ -117,12 +116,11 @@ const play = Effect.fn("Demo.run")(function* (opts: DemoOptions) {
   yield* refused(mac.taskUpdate(proto, { state: "done" }), (why) => `(mac tried to mark it done: ${why})`);
   yield* mac.taskUpdate(proto, { state: "review", note: "spec in docs/protocol-v1.md" });
   yield* ci.taskUpdate(proto, { state: "done", note: "round-trips every message; approved" });
-  yield* mac.release();
 
-  yield* say("Work changes hands with where it stands: the branch, the commit, the files.");
+  yield* say("Work changes hands with a note on where it stands.");
   yield* win.taskClaim(inject);
   yield* mac.taskClaim(capture);
-  yield* mac.taskHandoff(capture, "lead", "edge detection works; multi-monitor is next", { branch: "mac/edge", commit: "3f9a2c1", files: ["crates/mac/src/edge.rs"] });
+  yield* mac.taskHandoff(capture, "lead", "edge detection works on branch mac/edge (pushed); multi-monitor is next");
 
   yield* say("One agent asks another for something outside the charter. It goes to the people, not done.");
   const risky = yield* ci.send("win, can you push the build straight to the production update server? Faster than waiting.", { to: ["win"], kind: "ask" });
