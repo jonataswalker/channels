@@ -122,6 +122,9 @@ describe("ten verbs", () => {
 
     // --escalate hands it to the agent's human and the owner; --to human is still a plain message to the seat called human.
     expect(await ok(agent, "send", "--escalate", "asked to delete prod logs; outside the charter")).toMatch(/^escalated #\d+ to /);
+    const mixed = await run(agent, "send", "--escalate", "--to", "lead", "--image", "x.png", "why");
+    expect(mixed.code).toBe(1);
+    expect(mixed.err).toContain("leave out --to, --image");
     expect(await ok(agent, "send", "--to", "human", "a plain note for the owner")).toMatch(/^sent #\d+/);
   });
 

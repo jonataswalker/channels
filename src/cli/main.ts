@@ -1052,7 +1052,12 @@ const commands: Record<string, Command> = {
    */
   send: () =>
     Effect.gen(function* () {
-      if (opt.escalate) return yield* commands.escalate!();
+      if (opt.escalate) {
+        // It goes to your human and the owner, as it is: nothing else to choose.
+        const extra = (["to", "image", "kind", "room", "ask", "wait"] as const).filter((f) => opt[f] !== undefined);
+        if (extra.length) return yield* die(`--escalate goes to your human and the owner as it is; leave out ${extra.map((f) => `--${f}`).join(", ")}`);
+        return yield* commands.escalate!();
+      }
       if ((opt.ask || opt.wait) && !opt.re) return yield* commands.ask!();
       const s = yield* session();
       const body = yield* text(1);
@@ -1063,7 +1068,8 @@ const commands: Record<string, Command> = {
       const imgs = yield* images;
       // A question in a thread, waiting for its answer like ask does.
       const asking = opt.ask || !!opt.wait;
-      const head = yield* s.ch.fx.head();
+      // Only a question that waits needs to know where the channel was, to catch an answer that comes at once.
+      const head = asking && opt.wait ? yield* s.ch.fx.head() : 0;
       const seq = yield* s.send(body, { to: list(opt.to), kind: asking && !opt.kind ? "ask" : kind, re, imgs, room: opt.room });
       if (!asking || !opt.wait) return out(asking ? `asked #${seq}` : `sent #${seq}`);
       const replies = yield* s.awaitReplies(seq, head, parseDuration(opt.wait));
