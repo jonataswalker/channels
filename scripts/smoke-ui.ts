@@ -178,7 +178,7 @@ try {
   await page.getByRole("dialog").getByRole("textbox").fill("smoke")
   await page.getByRole("button", { name: "Create channel" }).click()
   await page.waitForURL(/#mc2-/)
-  await page.getByPlaceholder(/^Write to the channel/).waitFor()
+  await page.getByRole("textbox", { name: "Message" }).waitFor()
   // An empty channel opens on how to add an agent: one command, with its join code.
   at = "Add an agent card"
   const addAgent = page.getByRole("region", { name: "Add an agent" })
@@ -203,15 +203,30 @@ try {
     await guest.close()
   }
 
-  await opens("People", () => page.getByRole("button", { name: /\d+ members?$/ }).click())
-  await opens("Invite", () => page.getByRole("button", { name: "Invite" }).click())
-  await opens("Invite → A person", async () => {
-    await page.getByRole("button", { name: "Invite" }).click()
-    await page.getByRole("dialog").getByRole("tab", { name: "A person" }).or(page.getByRole("dialog").getByRole("button", { name: "A person" })).first().click()
-  })
-  await eachItem("Channel menu", page.getByRole("button", { name: "Channel menu" }), (l) => l.endsWith("…"))
+  // The channel's details, as Messages shows a chat's Info: the faces and name in the header open them.
+  const details = page.getByRole("button", { name: /^Details:/ })
+  const panel = page.getByRole("complementary", { name: "Details" })
+  /** Open the details (if they aren't), then do something in them. */
+  const inDetails = async (fn: () => Promise<void>) => {
+    if (!(await panel.isVisible())) await details.click()
+    await panel.waitFor()
+    await fn()
+  }
+  at = "Details"
+  await inDetails(async () => {})
+  console.log(`ok  ${at}`)
+  await opens("Invite", () => inDetails(() => panel.getByRole("button", { name: "Invite", exact: true }).click()))
+  await opens("Invite → A person", () =>
+    inDetails(async () => {
+      await panel.getByRole("button", { name: "Invite", exact: true }).click()
+      await page.getByRole("dialog").getByRole("tab", { name: "A person" }).or(page.getByRole("dialog").getByRole("button", { name: "A person" })).first().click()
+    })
+  )
+  for (const item of ["Charter", "Rename channel", "Use in a terminal…"]) await opens(`Details → ${item}`, () => inDetails(() => panel.getByRole("button", { name: new RegExp(`^${item}`) }).click()))
+  // Escape (which closes each dialog above) may have closed the details too.
+  if (await panel.isVisible()) await panel.getByRole("button", { name: "Close details" }).click()
   at = "send and reply"
-  await page.getByPlaceholder(/^Write to the channel/).fill("smoke test")
+  await page.getByRole("textbox", { name: "Message" }).fill("smoke test")
   await page.keyboard.press("Enter")
   const row = page.getByText("smoke test", { exact: true }).first()
   await row.waitFor()
@@ -221,7 +236,7 @@ try {
   await page.getByRole("button", { name: "Close thread" }).click()
   console.log("ok  Thread panel")
   // Once there's something going on, the owner's stop button is in the header.
-  await opens("Pause agents", () => page.getByRole("button", { name: "Pause agents" }).click())
+  await opens("Pause agents", () => page.getByRole("button", { name: "Pause agents" }).first().click())
 
   // The sent message is sealed in this browser. A reload paints it and the
   // socket asks only for seqs after that row. "smoke test" contains a space,
@@ -267,7 +282,7 @@ try {
   await page.getByText("smoke test", { exact: true }).first().waitFor()
   const since = await sinceOnReload
   if (!(Number(since) > 0)) throw new Error(`reload streamed since ${since}; expected only newer seqs`)
-  await page.getByRole("complementary").getByRole("button", { name: /smoke \(dev\)/ }).waitFor()
+  await page.getByRole("complementary").getByRole("button", { name: /smoke \(dev\)/ }).first().waitFor()
   console.log(`ok  reload fetches only what is new (since ${since})`)
 
   // An agent joins from a computer linked to this account: the link page, the request, approval.
@@ -316,8 +331,7 @@ try {
   // Your seat in a terminal (T1389): kiwi tui <code> on another computer shows a code, the dialog shows
   // the same, and "It matches" hands the seat over sealed. Nothing with a key is copied.
   at = "pair a terminal"
-  await page.getByRole("button", { name: "Channel menu" }).click()
-  await page.getByRole("menuitem", { name: "Use in a terminal…" }).click()
+  await inDetails(() => panel.getByRole("button", { name: /^Use in a terminal/ }).click())
   const pairDialog = page.getByRole("dialog").filter({ hasText: "Use in a terminal" })
   // The whole command: the box splits it into one span per flag.
   const pairCmd = (await pairDialog.locator("code").filter({ hasText: /^kiwi tui mc2-/ }).innerText({ timeout: 10000 })).replace(/\s+/g, " ").trim()
@@ -342,44 +356,56 @@ try {
   console.log(`ok  ${at}`)
 
   await kiwi(["-c", "smoke", "--as", "bot", "task", "add", "Smoke task", "--owner", "bot"])
-  // A task shows as a live card in the conversation, and opens as its own page (T1150).
-  at = "Task card and page"
-  await page.getByRole("button", { name: /Smoke task/ }).first().click({ timeout: 15000 })
+  // A task has its own conversation, listed under the channel; it opens on the task's card, and the card on its page.
+  at = "Task conversation and page"
+  const conversations = page.getByRole("navigation", { name: "Channels" }).getByRole("navigation", { name: "Conversations" })
+  await conversations.getByRole("button", { name: /Smoke task/ }).click({ timeout: 15000 })
+  await page.getByRole("main").getByRole("button", { name: /^(?!Details).*Smoke task T\d+/ }).first().click()
   await page.getByRole("region", { name: /^Task T\d+/ }).getByRole("heading", { name: "Activity" }).waitFor()
   await page.getByRole("button", { name: "Close task" }).click()
+  // In a task's conversation, a message goes to the task's thread.
+  await page.getByRole("textbox", { name: "Message" }).fill("smoke in the task")
+  await page.keyboard.press("Enter")
+  await page.getByText("smoke in the task", { exact: true }).first().waitFor()
+  await conversations.getByRole("button", { name: /^Main/ }).click()
+  if (await page.getByText("smoke in the task", { exact: true }).count()) throw new Error("a message in a task's conversation showed in main")
   console.log(`ok  ${at}`)
-  // What the owner can do to a member: each item behind their ⋯ in People.
+  // What the owner can do to a member: each item behind their face in the details.
   for (const item of ["Set role…", "Remove from channel…"])
-    await opens(`People → bot → ${item}`, async () => {
-      await page.getByRole("button", { name: /\d+ members?$/ }).click()
-      await page.getByRole("button", { name: "More for bot" }).click()
-      await page.getByRole("menuitem", { name: item }).click()
-    })
+    await opens(`Details → bot → ${item}`, () =>
+      inDetails(async () => {
+        await panel.getByRole("button", { name: "More for bot" }).click()
+        await page.getByRole("menuitem", { name: item }).click()
+      })
+    )
 
-  // One click makes bot the coordinator, and coordinator-only follows the role (T1389); another undoes both.
+  // A new channel starts in coordinator mode; one click makes bot the coordinator, another takes it back.
   at = "Make coordinator"
-  // By its label's start: what follows "People, " changes with the mode.
-  const peopleButton = page.getByRole("button", { name: /^People, / })
-  await peopleButton.click()
-  await page.getByRole("button", { name: "More for bot" }).click()
-  await page.getByRole("menuitem", { name: "Make coordinator" }).click()
   await page.getByText(/turned on coordinator-only/).first().waitFor({ timeout: 15000 })
-  await peopleButton.click()
-  await page.getByText(/People talk with .*, the coordinator/).waitFor()
-  await page.getByRole("button", { name: "More for bot" }).click()
+  await inDetails(async () => {
+    await panel.getByRole("button", { name: "More for bot" }).click()
+    await page.getByRole("menuitem", { name: "Make coordinator" }).click()
+  })
+  await panel.getByText(/People talk with .*, the coordinator/).waitFor({ timeout: 15000 })
+  await panel.getByRole("button", { name: "More for bot" }).click()
   await page.getByRole("menuitem", { name: "No longer coordinator" }).click()
   // The mode goes off first (so nobody re-appoints in between), then the role: the role is the newest line.
   await page.getByText(/cleared bot's role/).first().waitFor({ timeout: 15000 })
-  await peopleButton.click()
-  if (await page.getByText(/People talk with .*, the coordinator/).isVisible()) throw new Error("coordinator-only stayed on")
-  await page.keyboard.press("Escape")
-  console.log(`ok  ${at}`)
+  await panel.getByText(/No coordinator yet/).waitFor({ timeout: 15000 })
+  // A direct conversation with a member, from their face.
+  await panel.getByRole("button", { name: "More for bot" }).click()
+  await page.getByRole("menuitem", { name: "Message privately" }).click()
+  await page.getByRole("textbox", { name: "Message" }).fill("smoke, privately")
+  await page.keyboard.press("Enter")
+  await conversations.getByRole("button", { name: /^bot/ }).waitFor({ timeout: 15000 })
+  await conversations.getByRole("button", { name: /^Main/ }).click()
+  console.log(`ok  ${at} and a direct conversation`)
 
   at = "Tasks view"
-  await page.getByRole("button", { name: /^Tasks/ }).click()
-  await page.getByRole("button", { name: /Smoke task/ }).first().waitFor()
-  await page.getByRole("button", { name: "Everything" }).click()
-  await page.getByPlaceholder(/^Write to the channel/).waitFor()
+  await conversations.getByRole("button", { name: /^All tasks/ }).click()
+  await page.getByRole("main").getByRole("button", { name: /Smoke task/ }).first().waitFor()
+  await conversations.getByRole("button", { name: /^Main/ }).click()
+  await page.getByRole("textbox", { name: "Message" }).waitFor()
   console.log("ok  Tasks view")
 
   // What's new where (T1245): with another channel open, the agent writes in this one. The next
@@ -390,7 +416,7 @@ try {
   await page.getByRole("dialog").getByRole("textbox").fill("smoke-2")
   await page.getByRole("button", { name: "Create channel" }).click()
   await page.waitForURL((u) => u.href !== channel && /#mc2-/.test(u.href))
-  await page.getByPlaceholder(/^Write to the channel/).waitFor()
+  await page.getByRole("textbox", { name: "Message" }).waitFor()
   await kiwi(["-c", "smoke", "--as", "bot", "send", "news from the bot"])
   // The listing is asked for at most every 5 minutes: forget the last one, then refocus.
   await page.evaluate(() => {

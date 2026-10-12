@@ -79,7 +79,7 @@ export function Notes({ state, now, onClear }: { state: ChannelState; now: numbe
     }
   }
   return (
-    <section aria-label="Notes" className="mt-3 rounded-card border border-edge bg-raised">
+    <section aria-label="Notes" className="mt-4 overflow-hidden rounded-card bg-raised shadow-[0_0_0_1px_var(--line)]">
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-ui">
         <Icon icon={Note01Icon} size={15} className="shrink-0 text-ink-3" />
         <span className="font-medium">Notes</span>
@@ -152,7 +152,7 @@ export function TaskCard({ task, state, now, onOpen, highlighted }: { task: Task
       id={`m${task.id}`}
       onClick={onOpen}
       className={cx(
-        "my-2 flex w-full items-start gap-3 rounded-card border border-edge bg-raised px-4 py-2.5 text-left transition-colors hover:bg-wash",
+        "mx-auto my-3 flex w-full max-w-[480px] items-start gap-3 rounded-bubble bg-raised px-4 py-3 text-left shadow-[0_0_0_1px_var(--line),0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:bg-wash",
         highlighted && "ring-2 ring-[var(--accent)]"
       )}
     >
@@ -160,8 +160,8 @@ export function TaskCard({ task, state, now, onOpen, highlighted }: { task: Task
         <StateMark state={task.state} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cx("block text-body leading-snug", closed && "text-ink-2")}>{task.title}</span>
-        <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-ink-3">
+        <span className={cx("block text-body leading-snug font-semibold tracking-[-0.015em]", closed && "text-ink-2")}>{task.title}</span>
+        <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-ink-3">
           <span className="tabular-nums">{taskId(task.id)}</span>
           <span>{labelOf(task)}</span>
           <span className="truncate">{task.owner ? nameOf(task.owner) : "Unassigned"}</span>

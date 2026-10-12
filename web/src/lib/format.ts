@@ -50,6 +50,22 @@ export function formatShort(ts: number, now = Date.now()): string {
   return dateFmt.format(d)
 }
 
+const stampWeekday = new Intl.DateTimeFormat(undefined, { weekday: "long" })
+const stampDate = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short" })
+const stampYear = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" })
+
+/** The stamp between messages, as Messages words it: "Today at 14:08", "Sunday at 16:49", "Sun, 18 Jan at 16:49". */
+export function formatStamp(ts: number, now = Date.now()): string {
+  const d = new Date(ts)
+  const today = new Date(now)
+  const at = formatTime(ts)
+  if (d.toDateString() === today.toDateString()) return `Today at ${at}`
+  if (d.toDateString() === new Date(now - 86_400_000).toDateString()) return `Yesterday at ${at}`
+  if (now - ts < 6 * 86_400_000) return `${stampWeekday.format(d)} at ${at}`
+  if (d.getFullYear() === today.getFullYear()) return `${stampDate.format(d)} at ${at}`
+  return `${stampYear.format(d)} at ${at}`
+}
+
 export function formatAgo(ts: number, now: number): string {
   const s = Math.max(0, Math.round((now - ts) / 1000))
   if (s < 45) return "just now"

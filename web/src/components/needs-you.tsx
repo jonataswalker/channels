@@ -79,7 +79,7 @@ export function NeedsYou({
   if (!items.length) return null
   const shown = all ? items : items.slice(0, 3)
   return (
-    <section aria-label="Needs you" className="mt-3 rounded-card border border-edge bg-raised">
+    <section aria-label="Needs you" className="mx-auto mt-4 max-w-[640px] overflow-hidden rounded-bubble bg-raised shadow-[0_0_0_1px_var(--line),0_2px_8px_-4px_rgba(0,0,0,0.08)]">
       <h2>
         <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={cx("flex w-full items-baseline gap-2 px-4 pt-2.5 text-left text-ui font-semibold", open ? "pb-1" : "pb-2.5")}>
           Needs you <span className="font-normal text-ink-3 tabular-nums">{items.length}</span>

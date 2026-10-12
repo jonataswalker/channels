@@ -1,4 +1,4 @@
-import { Add01Icon, ArrowDown01Icon, ChartColumnIcon, ComputerIcon, Key01Icon, LockIcon, Login01Icon, Logout01Icon, Search01Icon, Settings01Icon, SmartPhone01Icon } from "@hugeicons/core-free-icons"
+import { ArrowDown01Icon, ChartColumnIcon, ComputerIcon, Key01Icon, LockIcon, Login01Icon, Logout01Icon, PencilEdit02Icon, Search01Icon, Settings01Icon, SmartPhone01Icon, Add01Icon } from "@hugeicons/core-free-icons"
 import { useState } from "react"
 
 import { displayName, useAuth } from "@/lib/auth"
@@ -8,8 +8,10 @@ import { useIcons, useMemberIcons } from "@/lib/icons"
 import { atChannelLimit, type MyUsage } from "@/lib/usage"
 import { formatShort } from "@/lib/format"
 import { lockVault, useVault } from "@/lib/vault"
+import { setPlaceSlot } from "@/lib/place-slot"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
+import { CoordinatorHead } from "./coordinator-head"
 import { Icon } from "./icon"
 import { Button, IconButton, Monogram, Wordmark } from "./kit"
 import { Menu, MenuItem, MenuNote, MenuSeparator } from "./ui/menu"
@@ -60,7 +62,6 @@ export function Sidebar({
 }) {
   const auth = useAuth()
   const [query, setQuery] = useState("")
-  const [open, setOpen] = useState(true)
   const vault = useVault()
   const q = query.trim().toLowerCase()
   const newsOf = new Map(rows.map((c, i) => [c.room, news[i]]))
@@ -69,15 +70,15 @@ export function Sidebar({
   useMemberIcons(rows.filter((c) => c.state === "member").map((c) => c.code))
 
   return (
-    <aside className={cx("h-full w-full shrink-0 flex-col bg-rail md:w-[260px]", className)}>
-      {/* Who you are, then search and new: the rail's one row of chrome. */}
-      <header className="flex h-12 shrink-0 items-center gap-1 pr-2 pl-3">
+    <aside className={cx("h-full w-full shrink-0 flex-col bg-rail md:w-[300px] md:shadow-[inset_-1px_0_0_var(--line)]", className)}>
+      {/* Who you are, then go-to and new: the list's one row of chrome. */}
+      <header className="flex h-13 shrink-0 items-center gap-1 pt-1 pr-2.5 pl-3">
         {auth.status === "signed-in" ? (
           <Menu
             className="w-60"
             trigger={
-              <button type="button" className="flex min-w-0 items-center gap-2 rounded-row py-1 pr-1.5 pl-1 transition-colors hover:bg-wash data-popup-open:bg-wash">
-                <Monogram name={displayName(auth.user)} size={20} />
+              <button type="button" className="flex min-w-0 items-center gap-2 rounded-ctl py-1 pr-1.5 pl-1 transition-colors hover:bg-wash data-popup-open:bg-wash">
+                <Monogram name={displayName(auth.user)} size={22} />
                 <span className="truncate text-ui font-semibold">{displayName(auth.user)}</span>
                 <Icon icon={ArrowDown01Icon} size={14} className="shrink-0 text-ink-3" />
               </button>
@@ -98,81 +99,88 @@ export function Sidebar({
         )}
         <span className="flex-1" />
         {(auth.status !== "signed-out" || rows.length > 0) && (
-          <>
-        <IconButton label={`Go to… (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"}K)`} className="size-7" onClick={onPalette}>
-          <Icon icon={Search01Icon} size={15} />
-        </IconButton>
-        <Menu
-          align="end"
-          className="w-52"
-          trigger={
-            <IconButton label="New channel or join" className="size-7">
-              <Icon icon={Add01Icon} size={16} />
-            </IconButton>
-          }
-        >
-          <MenuItem icon={Add01Icon} onClick={onNew}>New channel</MenuItem>
-          <MenuItem icon={Login01Icon} onClick={onJoin}>Join with a code</MenuItem>
-        </Menu>
-          </>
+          <Menu
+            align="end"
+            className="w-52"
+            trigger={
+              <IconButton label="New channel or join" round className="size-8">
+                <Icon icon={PencilEdit02Icon} size={16} />
+              </IconButton>
+            }
+          >
+            <MenuItem icon={Add01Icon} onClick={onNew}>New channel</MenuItem>
+            <MenuItem icon={Login01Icon} onClick={onJoin}>Join with a code</MenuItem>
+          </Menu>
         )}
       </header>
 
-      {rows.length > 6 && (
-        <label className="mx-3 mt-1 mb-1 flex h-8 items-center gap-2 rounded-ctl bg-wash px-2.5 text-ink-3">
-          <Icon icon={Search01Icon} size={14} className="shrink-0" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Find a channel"
-            className="min-w-0 flex-1 bg-transparent text-ui text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
-          />
-        </label>
+      {/* Search, as in Messages: a pill at the top of the list. ⌘K goes anywhere. */}
+      {(auth.status !== "signed-out" || rows.length > 0) && (
+        <div className="flex shrink-0 items-center gap-1.5 px-3 pt-1 pb-2">
+          <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-ctl bg-wash-2 px-2.5 text-ink-3">
+            <Icon icon={Search01Icon} size={14} className="shrink-0" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+              placeholder="Search"
+              aria-label="Search channels"
+              className="min-w-0 flex-1 bg-transparent text-ui text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
+            />
+          </label>
+          <IconButton label={`Go to… (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"}K)`} className="size-8" onClick={onPalette}>
+            <span className="text-meta font-medium text-ink-3">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "^K"}</span>
+          </IconButton>
+        </div>
       )}
 
-      <nav aria-label="Channels" className="flex-1 overflow-y-auto px-2 pt-2 pb-3">
-        {rows.length > 0 && (
-        <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="mb-0.5 flex h-7 w-full items-center gap-1 rounded-row px-2 text-left text-meta font-medium text-ink-3 transition-colors hover:text-ink-2">
-          Channels
-          <Icon icon={ArrowDown01Icon} size={12} className={cx("transition-transform", !open && "-rotate-90")} />
-        </button>
-        )}
-        {open &&
-          shown.map((c) => {
-            const selected = c.code === active
-            const reachable = c.state === "member"
-            const n = newsOf.get(c.room)
-            // The open channel shows its own news; its row says only what needs you.
-            const fresh = !selected && !!n?.fresh
-            return (
-              <div key={c.room}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(c.code)}
-                  aria-current={selected ? "page" : undefined}
-                  title={rowNote(c)}
-                  className={cx(
-                    "flex h-8 w-full items-center gap-2 rounded-row px-2 text-left text-ui transition-colors",
-                    selected ? "bg-pick font-medium text-ink" : fresh || n?.needs ? "font-medium text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink"
-                  )}
-                >
-                  <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={20} />
-                  <span className={cx("min-w-0 flex-1 truncate", !reachable && !fresh && "text-ink-3")}>{c.title}</span>
-                  {n?.needs ? (
-                    <span aria-label={n.needs === 1 ? "A question for you" : `${n.needs} questions for you`} className="shrink-0 rounded-full bg-ink px-1.5 text-meta font-semibold text-canvas tabular-nums">
-                      {n.needs}
-                    </span>
-                  ) : fresh ? (
-                    <span aria-label="New messages" className="size-1.5 shrink-0 rounded-full bg-ink" />
-                  ) : reachable ? (
-                    <span className="shrink-0 text-meta text-ink-3 tabular-nums">{formatShort(c.ts)}</span>
-                  ) : c.state !== "pending" ? (
-                    <Icon icon={LockIcon} size={12} className="shrink-0 text-ink-3" />
-                  ) : null}
-                </button>
-              </div>
-            )
-          })}
+      <nav aria-label="Channels" className="flex-1 overflow-y-auto px-2 pb-3">
+        {shown.map((c) => {
+          const selected = c.code === active
+          const reachable = c.state === "member"
+          const n = newsOf.get(c.room)
+          // The open channel shows its own news; its row says only what needs you.
+          const fresh = !selected && !!n?.fresh
+          return (
+            <div key={c.room}>
+              <button
+                type="button"
+                onClick={() => onSelect(c.code)}
+                aria-current={selected ? "page" : undefined}
+                title={rowNote(c)}
+                className={cx(
+                  "group relative flex w-full items-start gap-2.5 rounded-card py-2.5 pr-2.5 pl-4 text-left transition-colors",
+                  selected ? "bg-pick text-accent-ink" : "hover:bg-wash"
+                )}
+              >
+                {c.recent?.byCoordinator && reachable ? <CoordinatorHead size={40} label="The coordinator spoke last" /> : <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={40} />}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline gap-2">
+                    <span className={cx("min-w-0 flex-1 truncate text-ui font-semibold", !selected && !reachable && "text-ink-2")}>{c.title}</span>
+                    {n?.needs ? (
+                      <span
+                        aria-label={n.needs === 1 ? "A question for you" : `${n.needs} questions for you`}
+                        className={cx("shrink-0 rounded-full px-1.5 text-meta font-semibold tabular-nums", selected ? "bg-accent-ink text-accent" : "bg-accent text-accent-ink")}
+                      >
+                        {n.needs}
+                      </span>
+                    ) : reachable ? (
+                      <span className={cx("shrink-0 text-meta tabular-nums", selected ? "text-accent-ink/80" : "text-ink-3")}>{formatShort(c.ts)}</span>
+                    ) : c.state !== "pending" ? (
+                      <Icon icon={LockIcon} size={12} className={cx("shrink-0", selected ? "text-accent-ink/80" : "text-ink-3")} />
+                    ) : null}
+                  </span>
+                  <span className={cx("mt-px line-clamp-2 text-ui leading-[17px]", selected ? "text-accent-ink/85" : fresh ? "text-ink" : "text-ink-3")}>{rowNote(c)}</span>
+                </span>
+                {/* Unread: the blue dot left of the avatar, as in Messages (last in the row, so the row is still named for its channel). */}
+                {(fresh || !!n?.needs) && !selected && <span aria-label="New messages" className="absolute top-1/2 left-1 size-2 -translate-y-1/2 rounded-full bg-accent" />}
+              </button>
+              {/* The open channel's conversations nest here (rendered by the conversation). */}
+              {selected && <div ref={setPlaceSlot} />}
+              {!selected && <div className="mr-2.5 ml-[66px] h-px bg-line" />}
+            </div>
+          )
+        })}
         {rows.length > 0 && shown.length === 0 && <p className="px-3 py-6 text-ui text-ink-3">No channel matches “{query}”.</p>}
         {rows.length === 0 && (
           <p className="px-3 py-4 text-ui leading-normal text-ink-3">

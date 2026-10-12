@@ -1,7 +1,7 @@
 // Screenshots of every screen of the dashboard, for design work: each surface in dark and light,
 // wide and narrow, as the owner, as someone invited, and signed out. Seeds a realistic channel
-// first (an agent on a linked computer, messages, a thread, tasks, notes, a room, a
-// pending join request), the same way scripts/smoke-ui.ts walks the flows.
+// first (a coordinator and an agent working a task, messages, a thread, a task's conversation, a
+// direct one, notes, a pending join request), the same way scripts/smoke-ui.ts walks the flows.
 //
 //   bun run web:build && bun scripts/shoot-ui.ts [outdir]
 //
@@ -41,6 +41,7 @@ function kiwi(args: string[], watch?: (out: string) => void): Promise<string> {
 }
 let pendingOut = ""
 const bot = (...args: string[]) => kiwi(["-c", "kiwi", "--as", "atlas", ...args])
+const win = (...args: string[]) => kiwi(["-c", "kiwi-w", "--as", "win", ...args])
 
 const relay = spawn("bun", ["src/relay/bun.ts", "--hostname", "127.0.0.1", "--port", String(PORT), "--data", join(data, "relay"), "--dev-sign-in"], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] })
 await new Promise<void>((ok, fail) => {
@@ -99,15 +100,10 @@ async function shoot(page: Page, tag: string, name: string, open?: () => Promise
 try {
   // ---------- seed: the owner, a channel, an agent on a linked computer, a pending request ----------
   const owner = await browser.newPage({ viewport: WIDE })
+  owner.on("pageerror", (e) => console.log(`page error: ${e.message}`))
   await owner.goto(BASE)
   await signIn(owner, "Jonatas")
   await passkey(owner)
-  await owner.getByRole("button", { name: "Save channels to a passkey" }).click()
-  const saving = owner.getByRole("dialog").filter({ hasText: "Save your recovery code" })
-  await saving.waitFor()
-  await saving.getByRole("checkbox").check()
-  await saving.getByRole("button", { name: "Done" }).click()
-  await saving.waitFor({ state: "hidden" })
 
   const plus = owner.getByRole("button", { name: "New channel or join" })
   await plus.click()
@@ -127,27 +123,55 @@ try {
   await owner.getByRole("button", { name: "Yes, link it" }).click({ timeout: 20000 })
   await setup
   await owner.goto(channel)
-  const joining = kiwi(["join", code, "kiwi", "--relay", BASE, "--as", "atlas", "--role", "backend"])
-  // Needs you: compare the code, let it in.
   const needs = owner.getByRole("region", { name: "Needs you" })
-  const letIn = needs.getByRole("button", { name: "It matches: let in" })
-  const showCode = needs.getByRole("button", { name: "Show code" })
-  await letIn.or(showCode).first().waitFor({ timeout: 30000 })
-  if (await showCode.count()) await showCode.click()
-  await letIn.click({ timeout: 30000 })
-  await joining
+  /** An agent asks in; the owner compares its code under Needs you and lets it in. */
+  const admit = async (args: string[]) => {
+    console.log(`admitting ${args.join(" ")}`)
+    const joining = kiwi(["join", code, ...args, "--relay", BASE], (o) => void (pendingOut = o))
+    const letIn = needs.getByRole("button", { name: "It matches: let in" })
+    const showCode = needs.getByRole("button", { name: "Show code" })
+    await letIn.or(showCode).first().waitFor({ timeout: 30000 })
+    if (await showCode.count()) await showCode.click()
+    await letIn.click({ timeout: 30000 })
+    await joining
+  }
+  await admit(["kiwi", "--as", "atlas", "--role", "backend"])
+  // atlas coordinates: people talk with it, and the channel is in coordinator mode from the start.
+  const details = () => owner.getByRole("button", { name: /^Details:/ })
+  await details().click()
+  await owner.getByRole("button", { name: "More for atlas" }).click()
+  await owner.getByRole("menuitem", { name: "Make coordinator" }).click()
+  await owner.getByText(/People talk with/).first().waitFor({ timeout: 15000 })
+  await owner.getByRole("button", { name: "Close details" }).click()
+  await admit(["kiwi-w", "--as", "win", "--role", "frontend"])
+  // The passkey offer waits for an agent's first card; save the channels to it, so the list stays quiet.
+  const offer = owner.getByRole("button", { name: "Save channels to a passkey" })
+  if (await offer.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await offer.click()
+    const saving = owner.getByRole("dialog").filter({ hasText: "Save your recovery code" })
+    await saving.waitFor()
+    await saving.getByRole("checkbox").check()
+    await saving.getByRole("button", { name: "Done" }).click()
+    await saving.waitFor({ state: "hidden" })
+  }
 
-  // The conversation: chat, a question, a thread, a long message with code, tasks, notes.
-  const composer = () => owner.getByPlaceholder(/^Write (to the channel|in #)/)
+  // The main conversation: the person and the coordinator. A question, a thread, a long message with code.
+  const composer = () => owner.getByRole("textbox", { name: "Message" })
   await composer().fill("Morning. The relay deploy is done; can someone check the Effect router numbers?")
   await owner.keyboard.press("Enter")
   await owner.waitForTimeout(400)
-  await bot("send", "On it. Steady load first, then the cold runs.")
+  await bot("send", "On it. I’ll have win run the steady load first, then the cold runs.")
   await bot("send", "Numbers are in:\n\n- p50 0.3ms, p95 1ms\n- no refusals in 800 rooms\n\nThe change is in `src/relay/route.ts`, one prebuilt program per request:\n\n```ts\nconst program = answer(dispatch(routes, guards, otherwise))\n```")
   await bot("ask", "--to", "jonatas", "Ship it as 0.8.12, or wait for the web?")
-  const firstTask = /T\d+/.exec(await bot("task", "add", "Write fewer rows per message", "--owner", "atlas"))?.[0] ?? "T0"
+  // Work: each task has its own conversation, where the agents working it talk.
+  const firstTask = /T(\d+)/.exec(await bot("task", "add", "Write fewer rows per message", "--owner", "win"))
   await bot("task", "add", "Polish the conversation feed")
-  await bot("send", `${firstTask}: rows per message are down from 6 to 4. https://github.com/ojowwalker77/channels/pull/41`)
+  if (firstTask) {
+    await win("send", "--re", firstTask[1]!, "Starting. Rows per message are 6 today; aiming for 4.")
+    await bot("send", "--re", firstTask[1]!, "Keep the event rows; fold only the duplicates.")
+    await win("send", "--re", firstTask[1]!, "Down from 6 to 4. https://github.com/ojowwalker77/channels/pull/41")
+    await win("task", "start", `T${firstTask[1]}`, "steady numbers look fine")
+  }
   await bot("set", "relay.version", "667ce081")
   await bot("set", "canary", "off")
   await owner.reload()
@@ -158,11 +182,18 @@ try {
   await owner.keyboard.press("Enter")
   await owner.waitForTimeout(400)
   await owner.getByRole("button", { name: "Close thread" }).click()
-  await bot("task", "start", firstTask, "steady numbers look fine")
   // Work waiting on a person's review, and a decision an agent hands to its person: both under Needs you.
-  const reviewed = /T\d+/.exec(await bot("task", "add", "Cache sealed history in the browser", "--owner", "atlas", "--review", "any"))?.[0] ?? "T0"
-  await bot("task", "review", reviewed, "reload fetches only what is new")
-  await bot("escalate", "Should I delete the 800 test rooms on the old relay? It frees space, and it can't be undone.")
+  const reviewed = /T\d+/.exec(await win("task", "add", "Cache sealed history in the browser", "--owner", "win", "--review", "any"))?.[0] ?? "T0"
+  await win("task", "review", reviewed, "reload fetches only what is new")
+  await win("escalate", "Should I delete the 800 test rooms on the old relay? It frees space, and it can't be undone.")
+  // A direct conversation: the person and the coordinator, privately.
+  await details().click()
+  await owner.getByRole("button", { name: "More for atlas" }).click()
+  await owner.getByRole("menuitem", { name: "Message privately" }).click()
+  await composer().fill("Between us: is win overloaded? Tell me before you hand it more.")
+  await owner.keyboard.press("Enter")
+  await owner.waitForTimeout(400)
+  await owner.goto(channel)
 
   // An agent asking to join, left pending (its CLI waits in the background).
   void kiwi(["join", code, "kiwi-2", "--relay", BASE, "--as", "scout", "--role", "frontend"], (o) => void (pendingOut = o)).catch(() => {})
@@ -185,6 +216,14 @@ try {
       await setTheme(owner, theme)
       await owner.getByText("Ship it as 0.8.12").first().waitFor({ timeout: 15000 }).catch(() => {})
 
+      const narrow = vp === "narrow"
+      const detailsBtn = () => owner.getByRole("button", { name: /^Details:/ })
+      const convs = () => (narrow ? owner.getByRole("complementary", { name: "Details" }) : owner.getByRole("navigation", { name: "Channels" })).getByRole("navigation", { name: "Conversations" })
+      /** On a phone the conversations live in the details; beside the list, under the channel. */
+      const toPlace = async (name: RegExp) => {
+        if (narrow) await detailsBtn().click()
+        await convs().getByRole("button", { name }).first().click()
+      }
       await shoot(owner, tag, "01-channel")
       await owner.mouse.wheel(0, -4000)
       await shoot(owner, tag, "02-channel-top")
@@ -192,25 +231,50 @@ try {
         await owner.locator("button[aria-label='Reply']").last().dispatchEvent("click")
         await owner.getByRole("button", { name: "Close thread" }).waitFor()
       }, () => owner.getByRole("button", { name: "Close thread" }).click())
-      await shoot(owner, tag, "04-tasks", () => owner.getByRole("button", { name: /^Tasks/ }).click(), () => owner.getByRole("button", { name: "Everything" }).click())
-      await shoot(owner, tag, "05-task-page", async () => {
-        await owner.getByRole("button", { name: /Write fewer rows/ }).first().click()
+      await shoot(owner, tag, "04-tasks", () => toPlace(/^All tasks/), () => toPlace(/^Main/))
+      await shoot(owner, tag, "05-task-thread", () => toPlace(/Write fewer rows/), async () => {})
+      await shoot(owner, tag, "06-task-page", async () => {
+        await owner.getByRole("main").getByRole("button", { name: /^(?!Details).*Write fewer rows per message T\d+/ }).first().click()
         await owner.getByRole("heading", { name: "Activity" }).waitFor()
       }, async () => {
         await owner.getByRole("button", { name: "Close task" }).click()
+        await toPlace(/^Main/)
       })
-      await shoot(owner, tag, "06-people", () => owner.getByRole("button", { name: /\d+ members?$/ }).click())
-      await shoot(owner, tag, "07-invite", () => owner.getByRole("button", { name: "Invite" }).click())
-      await shoot(owner, tag, "08-channel-menu", () => owner.getByRole("button", { name: "Channel menu" }).click())
-      await shoot(owner, tag, "09-account-menu", () => owner.getByRole("complementary").getByRole("button", { name: /Jonatas/i }).click())
-      await shoot(owner, tag, "10-settings", async () => {
-        await owner.getByRole("complementary").getByRole("button", { name: /Jonatas/i }).click()
-        await owner.getByRole("menuitem", { name: "Settings…" }).click()
+      await shoot(owner, tag, "07-details", () => detailsBtn().click(), () => owner.getByRole("button", { name: "Close details" }).click())
+      await shoot(owner, tag, "08-direct", () => toPlace(/atlas/), async () => {
+        await toPlace(/^Main/)
       })
-      await shoot(owner, tag, "11-palette", () => owner.getByRole("button", { name: /^Go to…/ }).click())
-      await shoot(owner, tag, "12-notes", () => owner.getByRole("button", { name: /^Notes/ }).click(), () => owner.getByRole("button", { name: /^Notes/ }).click())
-      await shoot(owner, tag, "13-pause", () => owner.getByRole("button", { name: "Pause agents" }).click())
-      await shoot(owner, tag, "15-new-channel-menu", () => owner.getByRole("button", { name: "New channel or join" }).click())
+      await shoot(owner, tag, "09-invite", async () => {
+        await detailsBtn().click()
+        await owner.getByRole("button", { name: "Invite", exact: true }).click()
+      }, async () => {
+        await owner.keyboard.press("Escape")
+        await owner.getByRole("button", { name: "Close details" }).click()
+      })
+      await shoot(owner, tag, "10-account-menu", async () => {
+        if (narrow) await owner.getByRole("button", { name: "Channels" }).click()
+        await owner.locator("aside header button").first().click()
+      }, async () => {
+        await owner.keyboard.press("Escape")
+        if (narrow) await owner.goto(channel)
+      })
+      await shoot(owner, tag, "11-palette", async () => {
+        if (narrow) await owner.getByRole("button", { name: "Channels" }).click()
+        await owner.getByRole("button", { name: /^Go to…/ }).click()
+      }, async () => {
+        await owner.keyboard.press("Escape")
+        if (narrow) await owner.goto(channel)
+      })
+      await shoot(owner, tag, "12-notes", async () => {
+        await detailsBtn().click()
+        await owner.getByRole("button", { name: /^Notes/ }).click()
+      }, () => owner.getByRole("button", { name: "Close details" }).click())
+      await shoot(owner, tag, "13-pause", () => owner.getByRole("button", { name: "Pause agents" }).first().click())
+      await shoot(owner, tag, "14-list", async () => {
+        if (narrow) await owner.getByRole("button", { name: "Channels" }).click()
+      }, async () => {
+        if (narrow) await owner.goto(channel)
+      })
       await owner.goto(fresh)
       await owner.getByRole("region", { name: "Add an agent" }).waitFor({ timeout: 10000 }).catch(() => {})
       await shoot(owner, tag, "16-add-agent")
@@ -231,6 +295,11 @@ try {
       await out.close()
     }
   }
+} catch (e) {
+  // Where it stopped, for whoever reads the failure.
+  for (const ctx of browser.contexts()) for (const [i, pg] of ctx.pages().entries()) await pg.screenshot({ path: join(OUT, `failed-${i}.png`) }).catch(() => {})
+  console.log(`last CLI output: ${pendingOut.trim().split("\n").slice(-3).join(" | ")}`)
+  throw e
 } finally {
   await browser.close()
   for (const p of running) p.kill()
