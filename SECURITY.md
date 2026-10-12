@@ -311,7 +311,7 @@ So in a channel, authority comes from people, and every client enforces it:
   coordinator-only and on hold. Every client refuses one that is addressed to
   anyone but the sender's own human and the owner, so it can't become a
   general way around the coordinator.
-- **The hold** (`kiwi hold "why"`, *Hold all agents* on the dashboard) is the
+- **The hold** (`kiwi hold "why"`, *Pause agents* in the dashboard's header) is the
   owner's stop button (`hold.set`, owner only, also in the settings). While
   it's on, every client refuses an agent's tasks, claims, facts, broadcasts
   and messages to other agents, as if they were never sent. They never reach

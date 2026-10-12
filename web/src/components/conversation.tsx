@@ -1,31 +1,30 @@
-import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, Search01Icon } from "@hugeicons/core-free-icons"
+import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, PauseIcon, PlayIcon, Search01Icon } from "@hugeicons/core-free-icons"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { createPortal } from "react-dom"
 
 import { b64url } from "@mc/crypto.ts"
 import { droppedCount } from "@mc/format.ts"
-import { GENERAL_ROOM, ignored, type Color, type Message } from "@mc/protocol.ts"
+import { ignored, type Color, type Message } from "@mc/protocol.ts"
 import { describeScopes, wireScopes } from "@mc/scopes.ts"
 import type { Member as RosterMember } from "@mc/membership.ts"
 import type { HumanSession } from "@mc/client.ts"
 import { seatedComputers } from "@/lib/computers"
-import { newRoomId, colorOf, keptFromPeople, taskId, type Room } from "@mc/state.ts"
+import { colorOf, keptFromPeople, taskId, type Task } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
 import { channelTitle, forgetChannel, LEFT_CHANNEL, loadMember, loadRecent, saveMember, saveRecent, useChannel, useClock, useKnownChannels, type StoredMember } from "@/lib/channel"
 import { markSeen, setOpenNews } from "@/lib/news"
-import { refreshIcon, useIcons, useLiveIcon } from "@/lib/icons"
+import { useIcons, useLiveIcon } from "@/lib/icons"
 import { excerpt, memberName } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { Composer } from "./composer"
-import { RoomDialog, RoomMenu, RoomRail, roomOfMessage, useRooms, useRoomsSlot } from "./rooms"
-import { ChannelControls, ChannelMenu, HoldBanner, InviteButton, People, RequestsBanner, type Filter } from "./controls"
+import { AddAgent } from "./add-agent"
+import { ChannelControls, ChannelMenu, HoldBanner, HoldDialog, InviteButton, People, type Filter } from "./controls"
 import { Icon } from "./icon"
-import { Button, IconButton, Spinner, Tabs, TextField, toast } from "./kit"
+import { Button, IconButton, Spinner, TextField, errorText, toast } from "./kit"
 import { DayMark, EventGroup, EventRow, MessageRow, isAgent, standsAlone, type ThreadSummary } from "./message"
+import { NeedsYou, type JoinedVia } from "./needs-you"
 import { TaskPage } from "./task-page"
-import { WorkOverview } from "./work"
-import { Tasks } from "./tasks"
+import { Notes, TaskCard, Tasks } from "./tasks"
 import { ThreadPanel } from "./thread"
 
 /** Messages this close together from one sender read as one run. */
@@ -71,12 +70,14 @@ function useChannelNews(room: string, top: number, arrivals: number, inOtherRoom
  * computer it was), so every client, older ones too, reads them as the owner's; and computers already
  * seated in this person's other channels get a seat here too (a new channel included).
  */
-function useTendSeats({ ch, isOwner, roster, human, refreshRoster }: {
+function useTendSeats({ ch, isOwner, roster, human, refreshRoster, onJoined }: {
   ch: ReturnType<typeof useChannel>["ch"]
   isOwner: boolean
   roster: RosterMember[]
   human: HumanSession | null
   refreshRoster: () => Promise<void>
+  /** "2 agents joined via mac-mini": one line per computer, for Needs you. */
+  onJoined: (via: JoinedVia) => void
 }) {
   const seated = useRef(false)
   const busy = useRef(false)
@@ -95,7 +96,7 @@ function useTendSeats({ ch, isOwner, roster, human, refreshRoster }: {
         // "2 agents joined via mac-mini", once per computer, rather than a line per agent.
         const via = new Map<string, number>()
         for (const m of roster) if (m.signedBy && done.resigned.includes(m.name)) via.set(m.viaName ?? "your computer", (via.get(m.viaName ?? "your computer") ?? 0) + 1)
-        for (const [name, n] of via) toast(`${n === 1 ? "An agent" : `${n} agents`} joined via ${name}`)
+        if (via.size) onJoined(via)
         if (done.seated.length || done.resigned.length) await refreshRoster()
       } catch {
         // Tried again the next time the channel opens; nothing here is urgent.
@@ -103,7 +104,7 @@ function useTendSeats({ ch, isOwner, roster, human, refreshRoster }: {
         busy.current = false
       }
     })()
-  }, [ch, isOwner, human, fresh, roster, refreshRoster])
+  }, [ch, isOwner, human, fresh, roster, refreshRoster, onJoined])
 }
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
@@ -115,14 +116,23 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     member,
     auth.status === "loading" ? null : auth.token,
   )
-  useTendSeats({ ch, isOwner, roster, human: auth.status === "loading" ? null : auth.token, refreshRoster })
+  const [joinedVia, setJoinedVia] = useState<JoinedVia>(() => new Map())
+  const onJoined = useCallback(
+    (via: JoinedVia) =>
+      setJoinedVia((was) => {
+        const next = new Map(was)
+        for (const [name, n] of via) next.set(name, (next.get(name) ?? 0) + n)
+        return next
+      }),
+    []
+  )
+  useTendSeats({ ch, isOwner, roster, human: auth.status === "loading" ? null : auth.token, refreshRoster, onJoined })
   useLiveIcon(member)
   const icon = useIcons().get(member.access.roomId) ?? null
   const now = useNow()
-  const [tab, setTabState] = useState<"chat" | "tasks">("chat")
-  // Once someone picks a tab, it stays theirs; until then, coordinator-only mode opens on Work for people.
-  const picked = useRef(false)
-  const setTab = useCallback((t: "chat" | "tasks") => ((picked.current = true), setTabState(t)), [])
+  // One screen: the conversation, or its tasks as a list (a chip, not a tab).
+  const [tab, setTab] = useState<"chat" | "tasks">("chat")
+  const [pausing, setPausing] = useState(false)
   // undefined: the default view (the coordinator's, in coordinator-only mode for people); null: Everything.
   const [chosen, setFilter] = useState<Filter | null | undefined>(undefined)
   const [search, setSearch] = useState<string | null>(null)
@@ -151,20 +161,11 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   const reaches = useCallback((m: Message) => !(iAmPerson && keptFromPeople(state, m)), [iAmPerson, state])
   const forMe = useMemo(() => messages.filter((m) => m.from !== me && m.to?.includes(me) && reaches(m)), [messages, me, reaches])
 
-  // Rooms: the conversation shows one at a time; the inboxes (To you, Unanswered, the coordinator's
-  // view) and search reach across them, and say which room each message is in.
-  const rooms = useRooms(member.access.roomId, state, messages, me, reaches)
-  const manyRooms = state.rooms.size > 1
-  const roomsSlot = useRoomsSlot()
-  const [roomDialog, setRoomDialog] = useState<{ room: Room | null } | null>(null)
   const openAsks = useMemo(() => state.openAsks.filter(reaches), [state.openAsks, reaches])
 
   // Coordinator-only: a person talks with the coordinator, and sees that exchange by default.
   const meM = state.members.get(me)
   const coordinator = state.mode.coordinatorOnly && meM && !isAgent(meM) && state.coordinator !== me ? state.coordinator : null
-  useEffect(() => {
-    if (coordinator && !picked.current) setTabState("tasks")
-  }, [coordinator])
   const filter = useMemo<Filter | null>(
     () => (chosen === undefined ? (coordinator ? { kind: "coordinator" } : null) : chosen?.kind === "coordinator" && !coordinator ? null : chosen),
     [chosen, coordinator]
@@ -182,10 +183,23 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   }, [coordinator, messages, me, reaches])
   const openTasks = useMemo(() => [...state.tasks.values()].filter((t) => t.state !== "done" && t.state !== "cancelled").length, [state.tasks])
   const arrivals = useMemo(() => messages.filter((m) => m.from !== me && reaches(m)).length, [messages, me, reaches])
-  const inOtherRooms = useMemo(() => [...rooms.unread].reduce((n, [id, c]) => (id === rooms.active ? n : n + c), 0), [rooms.unread, rooms.active])
   // Needs you: a question to you (or to everyone) that nobody else has answered yet.
   const needs = useMemo(() => openAsks.filter((m) => m.from !== me && (m.to?.includes(me) || m.to?.includes("*"))).length, [openAsks, me])
-  useChannelNews(member.access.roomId, Math.max(head, messages.at(-1)?.seq ?? 0), arrivals, inOtherRooms, needs)
+  useChannelNews(member.access.roomId, Math.max(head, messages.at(-1)?.seq ?? 0), arrivals, 0, needs)
+
+  // Needs you: escalations to this person nobody answered, and work waiting on their review.
+  const escalations = useMemo(() => openAsks.filter((m) => m.esc && m.from !== me && m.to?.includes(me)), [openAsks, me])
+  const reviews = useMemo(
+    () =>
+      iAmPerson
+        ? [...state.tasks.values()].filter((t) => t.state === "review" && !!t.review && (t.review === me || (t.review === "*" && t.owner !== me && !t.workedBy.includes(me))))
+        : [],
+    [state.tasks, me, iAmPerson]
+  )
+  // Nobody to talk to yet: the conversation opens on how to add an agent.
+  const noAgents = !active.some((m) => isAgent(m))
+  // A brand-new channel: nothing said and nobody to say it. Filters and the stop button wait for agents.
+  const quiet = noAgents && !messages.some((m) => m.kind !== "event")
 
   // Remember the latest message and who's here, for the channel list.
   useEffect(() => {
@@ -238,7 +252,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             : filter?.kind === "from"
               ? messages.filter((m) => m.from === filter.name)
               : messages
-    if (!filter) list = list.filter((m) => roomOfMessage(state, m) === rooms.active)
     if (!flat) list = list.filter((m) => m.kind === "event" || rootOf(m.seq) === null)
     // Joins are noise; the member list already shows who's here. Forged messages, and ones the
     // owner's settings don't allow, are left out (the owner sees how many, below).
@@ -246,7 +259,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     const q = search?.trim().toLowerCase()
     if (q) list = list.filter((m) => m.body.toLowerCase().includes(q) || nameOf(m.from).toLowerCase().includes(q))
     return list
-  }, [filter, openAsks, forMe, withCoordinator, messages, search, nameOf, rootOf, state, rooms.active, revealed])
+  }, [filter, openAsks, forMe, withCoordinator, messages, search, nameOf, rootOf, state, revealed])
 
   const bySeq = useMemo(() => new Map(messages.map((m) => [m.seq, m])), [messages])
   const quoted = useCallback((seq: number) => bySeq.get(seq), [bySeq])
@@ -340,6 +353,9 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         </button>
       </p>
     )
+  // Each task shows once, as a live card where it was made; its later changes are in the card (and on its page).
+  const cards = new Set(visible.filter((m) => m.ev?.op === "task.add" && state.tasks.has(m.seq)).map((m) => m.seq))
+  const inCard = (m: Message) => !!m.ev && "task" in m.ev && typeof m.ev.task === "number" && cards.has(m.ev.task) && !ignored(state.trust.get(m.seq))
   let run: ReactNode[] = []
   let runKey = 0
   const flushRun = () => {
@@ -375,6 +391,12 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         fold = []
       }
       for (const ev of batch) {
+        if (cards.has(ev.seq)) {
+          flush()
+          rows.push(<TaskCard key={`t${ev.seq}`} task={state.tasks.get(ev.seq)!} state={state} now={now} onOpen={() => setOpenTask(ev.seq)} highlighted={highlight === ev.seq} />)
+          continue
+        }
+        if (inCard(ev)) continue
         if (standsAlone(ev, state, me)) {
           flush()
           rows.push(<EventRow key={ev.seq} m={ev} state={state} now={now} onOpenTask={setOpenTask} />)
@@ -402,7 +424,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         online={online.has(m.from)}
         color={colorOf(state, m.from)}
         direct={state.direct.has(m.seq) ? (state.coordinator ?? undefined) : undefined}
-        room={manyRooms && filter ? state.rooms.get(roomOfMessage(state, m))?.name : undefined}
         head={head}
         adjacentReply={adjacentReply}
         highlighted={highlight === m.seq}
@@ -469,6 +490,14 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
     { label: "To you", f: { kind: "mine" }, n: forMe.length },
     { label: "Unanswered", f: { kind: "open" }, n: openAsks.length },
   ]
+  const hold = isOwner
+    ? async (on: boolean, note?: string) => {
+        const ev = { op: "hold.set" as const, on, ...(note ? { note } : {}) }
+        const since = await send(on ? `on hold${note ? `: ${note}` : ""}` : "hold lifted", { kind: "event", ev })
+        // Then the channel's settings say it too, for clients holding only the log's tail.
+        await ch.setHold({ on, ...(note ? { note } : {}), since })
+      }
+    : undefined
 
   return (
     <ChannelControls
@@ -492,9 +521,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         // The seat keeps what it may do now, scope.set events included (they name the old key).
         await ch.reclaim(r, { ...opts, scopes: r.reclaims ? state.members.get(r.reclaims.name)?.scopes : undefined })
         await Promise.all([refreshRequests(), refreshRoster()])
-      }}
-      onColor={async (color) => {
-        await send(color ? `took ${color}` : "cleared their colour", { kind: "event", ev: { op: "color.set", member: me, color } })
       }}
       onScopes={async (m, scopes) => {
         const wire = wireScopes(scopes)
@@ -533,16 +559,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             }
           : undefined
       }
-      onHold={
-        isOwner
-          ? async (on, note) => {
-              const ev = { op: "hold.set" as const, on, ...(note ? { note } : {}) }
-              const since = await send(on ? `on hold${note ? `: ${note}` : ""}` : "hold lifted", { kind: "event", ev })
-              // Then the channel's settings say it too, for clients holding only the log's tail.
-              await ch.setHold({ on, ...(note ? { note } : {}), since })
-            }
-          : undefined
-      }
+      onHold={hold}
       onCharter={
         isOwner
           ? async (text) => {
@@ -561,14 +578,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             }
           : undefined
       }
-      onSetIcon={
-        isOwner
-          ? async (next) => {
-              await ch.setIcon(next)
-              await refreshIcon(member)
-            }
-          : undefined
-      }
       onCloseChannel={async () => {
         await ch.close()
         forgetChannel(member.code)
@@ -582,20 +591,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       terminalCommand={() => `kiwi tui --link '${location.origin}/#${encodeURIComponent(member.code)}&id=${b64url(new TextEncoder().encode(JSON.stringify(member.identity)))}'`}
     >
       <div className="flex h-full min-w-0 flex-1">
-        {(manyRooms || isOwner) &&
-          roomsSlot &&
-          createPortal(
-          <RoomRail
-            state={state}
-            active={rooms.active}
-            unread={rooms.unread}
-            onOpen={(id) => (rooms.open(id), setFilter(undefined), setThreadRoot(null))}
-            isOwner={isOwner}
-            onCreate={() => setRoomDialog({ room: null })}
-            onRename={(room) => setRoomDialog({ room })}
-          />,
-            roomsSlot
-          )}
         <div className={cx("relative flex min-w-0 flex-1 flex-col", root && "hidden md:flex")}>
           <header className="flex h-12 shrink-0 items-center gap-2 px-3 shadow-[inset_0_-1px_0_var(--line)] md:px-4">
             <IconButton label="Channels" className="md:hidden" onClick={onBack}>
@@ -604,23 +599,25 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             <ChannelIconTile icon={icon} title={title} size={20} />
             {/* One line: the channel, the room you're in (rooms are the chat's; tasks are channel-wide), who's here. */}
             <div className="flex min-w-0 flex-1 items-center gap-3">
-              <h1 className="min-w-0 truncate text-title font-semibold tracking-[-0.015em]">
-                {title}
-                {manyRooms && tab === "chat" && !filter && <span className="font-normal text-ink-3"> / #{state.rooms.get(rooms.active)?.name}</span>}
-              </h1>
+              <h1 className="min-w-0 truncate text-title font-semibold tracking-[-0.015em]">{title}</h1>
               <span className="hidden shrink-0 sm:flex">
                 <People here={here} subtitle={subtitle} live={connection === "live"} />
               </span>
             </div>
-            <Tabs
-              value={tab}
-              onChange={setTab}
-              options={[
-                { value: "chat", label: "Chat" },
-                { value: "tasks", label: <>Work{openTasks > 0 && <span className="text-ink-3 tabular-nums">{openTasks}</span>}</> },
-              ]}
-            />
-            <span className="mx-1 hidden h-4 w-px bg-line md:block" />
+            {/* The owner's stop button: every agent, at once. */}
+            {hold &&
+              (!quiet || state.hold) &&
+              (state.hold ? (
+                <Button size="sm" variant="secondary" aria-label="Resume agents" onClick={() => void hold(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error"))}>
+                  <Icon icon={PlayIcon} size={14} />
+                  <span className="hidden sm:inline">Resume agents</span>
+                </Button>
+              ) : (
+                <Button size="sm" variant="secondary" aria-label="Pause agents" onClick={() => setPausing(true)} title="Stop every agent at once">
+                  <Icon icon={PauseIcon} size={14} />
+                  <span className="hidden sm:inline">Pause agents</span>
+                </Button>
+              ))}
             <InviteButton />
             <IconButton label="Search" round active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={tab !== "chat"}>
               <Icon icon={Search01Icon} size={17} />
@@ -629,7 +626,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
           </header>
 
           <HoldBanner />
-          <RequestsBanner />
+          {pausing && hold && <HoldDialog onClose={() => setPausing(false)} onSave={(note) => hold(true, note)} />}
 
           {openTask !== null ? (
             <TaskPage
@@ -643,29 +640,28 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
               noteBlocked={state.members.get(me)?.scopes.includes("tasks") === false ? "The owner hasn’t let you change tasks here, so you can’t comment on one." : null}
               onNote={async (note) => void (await send(`noted on ${taskId(openTask)}`, { kind: "event", ev: { op: "task.update", task: openTask, note } }))}
             />
-          ) : tab === "tasks" ? (
-            <Tasks
-              top={
-                <WorkOverview
-                  state={state}
-                  messages={messages}
-                  me={me}
-                  now={now}
-                  online={online}
-                  onOpenTask={setOpenTask}
-                  onOpenMessage={(seq) => {
-                    setTab("chat")
-                    jump(seq)
-                  }}
-                />
-              }
-              state={state}
-              now={now}
-              onOpen={setOpenTask}
-              onForgetFact={async (key) => void (await send(`cleared ${key}`, { kind: "event", ev: { op: "fact.del", key } }))}
-            />
           ) : (
             <>
+              {/* What needs a person, and what agents noted: above the conversation, always in view. */}
+              <div className="mx-auto w-full max-w-[760px] shrink-0 px-4 md:px-8">
+                <NeedsYou
+                  state={state}
+                  me={me}
+                  now={now}
+                  roomId={member.access.roomId}
+                  escalations={escalations}
+                  reviews={reviews}
+                  joinedVia={joinedVia}
+                  onDismissJoined={() => setJoinedVia(new Map())}
+                  nameOf={nameOf}
+                  onReply={async (m, text) => void (await send(text, { to: [m.from], re: [m.seq], kind: "msg" }))}
+                  onApproveTask={async (t: Task) => void (await send(`${taskId(t.id)} done`, { kind: "event", ev: { op: "task.update", task: t.id, state: "done", note: "approved" }, ...(t.owner ? { to: [t.owner] } : {}) }))}
+                  onSendBack={async (t: Task, why: string) => void (await send(`${taskId(t.id)} doing`, { kind: "event", ev: { op: "task.update", task: t.id, state: "doing", note: why }, ...(t.owner ? { to: [t.owner] } : {}) }))}
+                  onOpenTask={setOpenTask}
+                  onJump={(seq) => (setTab("chat"), jump(seq))}
+                />
+                <Notes state={state} now={now} onClear={async (key) => void (await send(`cleared ${key}`, { kind: "event", ev: { op: "fact.del", key } }))} />
+              </div>
               {search !== null && (
                 <div className="mx-auto w-full max-w-[760px] shrink-0 px-4 pt-3 md:px-8">
                   <TextField
@@ -678,16 +674,16 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 </div>
               )}
               {/* One row of quiet tabs, like the header's; on a phone it scrolls sideways instead of wrapping. */}
+              {!quiet && (
               <div className="mx-auto flex w-full max-w-[760px] shrink-0 flex-nowrap items-center gap-1 overflow-x-auto px-4 pt-3 pb-1 [scrollbar-width:none] md:px-8">
-                {manyRooms && <RoomMenu state={state} active={rooms.active} unread={rooms.unread} onOpen={(id) => (rooms.open(id), setFilter(undefined), setThreadRoot(null))} />}
                 {chips.map((c) => {
-                  const on = c.f === null ? filter === null : filter?.kind === c.f.kind
+                  const on = tab === "chat" && (c.f === null ? filter === null : filter?.kind === c.f.kind)
                   return (
                     <button
                       key={c.label}
                       type="button"
                       aria-pressed={on}
-                      onClick={() => setFilter(c.f)}
+                      onClick={() => (setFilter(c.f), setTab("chat"))}
                       className={cx(
                         "flex h-7 shrink-0 items-center gap-1.5 rounded-ctl px-2.5 text-ui font-medium transition-colors",
                         on ? "bg-wash-2 text-ink" : "text-ink-3 hover:text-ink"
@@ -698,7 +694,19 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                     </button>
                   )
                 })}
-                {filter?.kind === "from" && (
+                <button
+                  type="button"
+                  aria-pressed={tab === "tasks"}
+                  onClick={() => setTab(tab === "tasks" ? "chat" : "tasks")}
+                  className={cx(
+                    "flex h-7 shrink-0 items-center gap-1.5 rounded-ctl px-2.5 text-ui font-medium transition-colors",
+                    tab === "tasks" ? "bg-wash-2 text-ink" : "text-ink-3 hover:text-ink"
+                  )}
+                >
+                  Tasks
+                  {openTasks > 0 && <span className="tabular-nums opacity-70">{openTasks}</span>}
+                </button>
+                {filter?.kind === "from" && tab === "chat" && (
                   <button
                     type="button"
                     onClick={() => setFilter(null)}
@@ -710,7 +718,11 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   </button>
                 )}
               </div>
+              )}
 
+              {tab === "tasks" ? (
+                <Tasks state={state} now={now} onOpen={setOpenTask} />
+              ) : (
               <div
                 ref={scroller}
                 className="flex-1 overflow-y-auto"
@@ -724,7 +736,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   <Centered>
                     <Spinner />
                   </Centered>
-                ) : visible.length === 0 ? (
+                ) : visible.length === 0 && !(noAgents && !filter && !search) ? (
                   <Centered>
                     <p className="text-body font-semibold">{search ? "No results" : filter ? "Nothing here" : "No messages yet"}</p>
                     <p className="mt-1 max-w-xs text-ui leading-normal text-ink-2">
@@ -732,15 +744,19 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                         ? `No message mentions “${search}”.`
                         : filter
                           ? "Clear the filter to see the whole conversation."
-                          : "Invite an agent with the Invite button above. What it says shows up here the moment it’s sent."}
+                          : "What your agents say shows up here the moment it’s sent."}
                     </p>
                   </Centered>
                 ) : (
-                  <div className="mx-auto w-full max-w-[760px] px-4 pb-6 md:px-8">{rows}</div>
+                  <div className="mx-auto w-full max-w-[760px] px-4 pb-6 md:px-8">
+                    {noAgents && !filter && !search && <AddAgent code={member.code} isOwner={isOwner} />}
+                    {rows}
+                  </div>
                 )}
               </div>
+              )}
 
-              {behind > 0 && (
+              {behind > 0 && tab === "chat" && (
                 <button
                   type="button"
                   onClick={toBottom}
@@ -751,6 +767,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 </button>
               )}
 
+              {tab === "chat" && (
               <Composer
                 me={me}
                 people={people}
@@ -759,13 +776,12 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 onClearReply={() => setReplyTo(null)}
                 disabled={connection === "connecting"}
                 route={coordinator ? { coordinator, label: nameOf(coordinator), view: filter?.kind === "coordinator" ? "coordinator" : "everything" } : undefined}
-                room={rooms.active}
-                roomLabel={manyRooms ? state.rooms.get(rooms.active)?.name : undefined}
                 send={async (body, opts) => {
                   atBottom.current = true
                   return send(body, opts)
                 }}
               />
+              )}
             </>
           )}
         </div>
@@ -786,7 +802,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 disabled={connection === "connecting"}
                 send={send}
                 route={coordinator ? { coordinator, label: nameOf(coordinator), view: "everything" } : undefined}
-                room={roomOfMessage(state, root)}
               />
             }
           >
@@ -794,28 +809,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
           </ThreadPanel>
         )}
 
-        {roomDialog && (
-          <RoomDialog
-            state={state}
-            room={roomDialog.room}
-            onClose={() => setRoomDialog(null)}
-            onSave={async (name) => {
-              const edit = roomDialog.room
-              const id = edit?.id ?? newRoomId()
-              const ev = edit ? ({ op: "room.rename", id, name } as const) : ({ op: "room.create", id, name } as const)
-              const since = await send(edit ? `renamed #${edit.name} to #${name}` : `made the room #${name}`, { kind: "event", ev })
-              // Then the channel's settings carry the list too, for views holding only the log's tail:
-              // every room but general, and general only once it has a name of its own.
-              const list = [...state.rooms.values()].map((r) => (r.id === id ? { id, name } : { id: r.id, name: r.name }))
-              if (!edit) list.push({ id, name })
-              await ch.setRooms({ list: list.filter((r) => r.id !== GENERAL_ROOM || r.name !== GENERAL_ROOM), since })
-              if (!edit) {
-                rooms.open(id)
-                setFilter(undefined)
-              }
-            }}
-          />
-        )}
       </div>
     </ChannelControls>
   )

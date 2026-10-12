@@ -1,5 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog"
-import { Add01Icon, BookOpen01Icon, ComputerTerminal01Icon, Copy01Icon, Delete02Icon, Link01Icon, Logout01Icon, MoreHorizontalIcon, PauseIcon, PencilEdit01Icon, PlayIcon, UserAdd01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons"
+import { Add01Icon, BookOpen01Icon, ComputerTerminal01Icon, Copy01Icon, Delete02Icon, Link01Icon, Logout01Icon, MoreHorizontalIcon, PauseIcon, PencilEdit01Icon, UserAdd01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons"
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 
 import { loadLine, memberLoad, showsLoad, type Load } from "@mc/load.ts"
@@ -103,7 +103,8 @@ interface Api {
 const Ctx = createContext<Api | null>(null)
 
 const isCoordinator = (role: string | null | undefined) => role?.trim().toLowerCase() === COORDINATOR
-const useControls = () => useContext(Ctx)!
+/** The channel's controls, for views inside ChannelControls (the Needs you inbox approves with them). */
+export const useControls = () => useContext(Ctx)!
 
 const LEVEL = { free: "Free", busy: "Busy", overloaded: "Overloaded" } as const
 
@@ -764,7 +765,6 @@ export function ChannelMenu() {
   const auth = useAuth()
   const [renaming, setRenaming] = useState(false)
   const [charterOpen, setCharterOpen] = useState(false)
-  const [holding, setHolding] = useState(false)
   return (
     <>
       <Menu
@@ -786,11 +786,6 @@ export function ChannelMenu() {
         )}
         {p.isOwner && p.onRename && <MenuItem icon={PencilEdit01Icon} onClick={() => setRenaming(true)}>Rename channel…</MenuItem>}
         {(p.isOwner || p.state.charter) && <MenuItem icon={BookOpen01Icon} onClick={() => setCharterOpen(true)}>{p.isOwner ? "Charter…" : "Charter"}</MenuItem>}
-        {p.isOwner && p.onHold && (p.state.hold ? (
-          <MenuItem icon={PlayIcon} onClick={() => void p.onHold!(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error"))}>Lift the hold</MenuItem>
-        ) : (
-          <MenuItem icon={PauseIcon} onClick={() => setHolding(true)}>Hold all agents…</MenuItem>
-        ))}
         {p.terminalCommand && (
           <MenuItem
             icon={ComputerTerminal01Icon}
@@ -812,7 +807,6 @@ export function ChannelMenu() {
       </Menu>
       {p.onRename && renaming && <RenameDialog title={p.title ?? ""} onClose={() => setRenaming(false)} onSave={p.onRename} />}
       {charterOpen && <CharterDialog text={p.state.charter?.text ?? ""} onClose={() => setCharterOpen(false)} onSave={p.isOwner ? p.onCharter : undefined} />}
-      {holding && p.onHold && <HoldDialog onClose={() => setHolding(false)} onSave={(note) => p.onHold!(true, note)} />}
     </>
   )
 }
@@ -841,7 +835,7 @@ export function HoldBanner() {
 }
 
 /** The owner stops every agent at once, saying why. */
-function HoldDialog({ onClose, onSave }: { onClose: () => void; onSave: (note?: string) => Promise<void> }) {
+export function HoldDialog({ onClose, onSave }: { onClose: () => void; onSave: (note?: string) => Promise<void> }) {
   const [note, setNote] = useState("")
   const [busy, setBusy] = useState(false)
   const save = async () => {
@@ -865,7 +859,7 @@ function HoldDialog({ onClose, onSave }: { onClose: () => void; onSave: (note?: 
           void save()
         }}
       >
-        <Dialog.Title className="text-title font-semibold tracking-[-0.01em]">Hold all agents</Dialog.Title>
+        <Dialog.Title className="text-title font-semibold tracking-[-0.01em]">Pause every agent</Dialog.Title>
         <Dialog.Description className="mt-1 text-ui leading-normal text-ink-2">
           Every agent is told to stop at once. Until you lift the hold, every member’s client refuses an agent’s tasks, claims, facts and messages to other agents. Agents may still answer people.
         </Dialog.Description>
@@ -875,7 +869,7 @@ function HoldDialog({ onClose, onSave }: { onClose: () => void; onSave: (note?: 
             Cancel
           </Button>
           <Button type="submit" disabled={busy}>
-            Hold all agents
+            Pause agents
           </Button>
         </div>
       </form>

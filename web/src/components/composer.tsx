@@ -1,22 +1,13 @@
-import { ArrowDown01Icon, ArrowUp02Icon, Attachment01Icon, Cancel01Icon } from "@hugeicons/core-free-icons"
+import { ArrowUp02Icon, Attachment01Icon, Cancel01Icon } from "@hugeicons/core-free-icons"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type { SendOptions } from "@mc/client.ts"
-import { GENERAL_ROOM, MAX_IMAGE_BYTES, RASTER_MIMES, type Color, type Kind, type Message } from "@mc/protocol.ts"
+import { MAX_IMAGE_BYTES, RASTER_MIMES, type Color, type Message } from "@mc/protocol.ts"
 import { excerpt } from "@/lib/format"
 import { cx } from "@/lib/utils"
 import { Icon } from "./icon"
 import { IconButton, Monogram, errorText, toast } from "./kit"
-import { Menu, MenuRadioGroup, MenuRadioItem } from "./ui/menu"
 
-/** What a message is, in the words the menu uses. */
-const KINDS: { kind: Kind; label: string; hint: string }[] = [
-  { kind: "msg", label: "Message", hint: "Say something to the channel" },
-  { kind: "ask", label: "Question", hint: "Ask, and expect an answer" },
-  { kind: "blocking", label: "Blocker", hint: "You can’t go on without it" },
-  { kind: "status", label: "Update", hint: "Where things stand" },
-  { kind: "done", label: "Done", hint: "Something is finished" },
-]
 const MENTION = /(^|\s)@([\p{L}\p{N}_.-]*)$/u
 const LEADING = /^(?:\s*@([\p{L}\p{N}_.-]+)[\s,]*)+/u
 const IMAGE_TYPES = new Set<string>(RASTER_MIMES)
@@ -49,10 +40,6 @@ interface Props {
    * (an @agent stays in the text for them to pass on); in Everything it goes as written, copied to them.
    */
   route?: { coordinator: string; label: string; view: "coordinator" | "everything" }
-  /** The room this goes to (an id); general when left out. A thread's composer passes its root's. */
-  room?: string
-  /** Its name, said in the placeholder once a channel has more than one room. */
-  roomLabel?: string
 }
 
 /** Who a message is for: the people @mentioned at its start. */
@@ -61,9 +48,8 @@ function recipients(body: string, names: Set<string>): string[] {
   return [...lead.matchAll(/@([\p{L}\p{N}_.-]+)/gu)].map((m) => m[1]!).filter((n) => names.has(n))
 }
 
-export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route, room, roomLabel }: Props) {
+export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route }: Props) {
   const [body, setBody] = useState("")
-  const [kind, setKind] = useState<Kind>("msg")
   const [files, setFiles] = useState<{ name: string; mime: string; data: string }[]>([])
   const [dropping, setDropping] = useState(false)
   const [sending, setSending] = useState(false)
@@ -81,7 +67,6 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
     const q = mention.query.toLowerCase()
     return others.filter((p) => p.name.toLowerCase().startsWith(q) || p.label.toLowerCase().startsWith(q)).slice(0, 6)
   }, [mention, others])
-  const current = KINDS.find((k) => k.kind === kind)!
   // Coordinator-only: say plainly where an @agent message goes.
   const routeNote = useMemo(() => {
     if (!route) return null
@@ -178,14 +163,13 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
       else if (route && to?.length && !to.includes(route.coordinator)) to = [...to, route.coordinator]
       await send(text, {
         to,
-        kind,
+        // A person's message is just a message: a question needs no menu to be one.
+        kind: "msg",
         re: replyTo ? [replyTo.seq] : undefined,
-        ...(room && room !== GENERAL_ROOM ? { room } : {}),
         imgs: files.length ? files : undefined,
       })
       setBody("")
       setFiles([])
-      setKind("msg")
       if (!thread) onClearReply()
     } catch (err) {
       toast(`Not sent: ${errorText(err)}`, "error")
@@ -276,7 +260,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
           rows={1}
           value={body}
           disabled={disabled}
-          placeholder={disabled ? "Connecting…" : thread ? "Reply in this thread" : replyTo ? `Reply to ${nameOf(replyTo.from)}` : route?.view === "coordinator" ? `Write to ${route.label}. They pass it on.` : roomLabel ? `Write in #${roomLabel}. Type @ to address someone.` : "Write to the channel. Type @ to address someone."}
+          placeholder={disabled ? "Connecting…" : thread ? "Reply in this thread" : replyTo ? `Reply to ${nameOf(replyTo.from)}` : route?.view === "coordinator" ? `Write to ${route.label}. They pass it on.` : "Write to the channel. Type @ to address someone."}
           onChange={(e) => {
             setBody(e.target.value)
             trackMention(e.target.value, e.target.selectionStart)
@@ -325,36 +309,8 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
           className="block max-h-[220px] min-h-[48px] w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-body leading-[1.5] outline-none placeholder:text-ink-3 focus-visible:outline-none"
         />
 
-        {/* Two quiet things: what kind of message it is (left), attach and send (right). */}
+        {/* Where an @agent message goes (left), attach and send (right). */}
         <div className="flex items-center gap-1 px-2 pb-2">
-          {!thread && (
-            <Menu
-              side="top"
-              className="w-44"
-              trigger={
-                <button
-                  type="button"
-                  disabled={disabled}
-                  title={current.hint}
-                  className={cx(
-                    "flex h-7 items-center gap-1 rounded-row px-2 text-ui transition-colors",
-                    kind === "msg" ? "text-ink-3 hover:bg-wash hover:text-ink-2 data-popup-open:bg-wash" : "bg-wash-2 font-medium text-ink"
-                  )}
-                >
-                  {current.label}
-                  <Icon icon={ArrowDown01Icon} size={12} />
-                </button>
-              }
-            >
-              <MenuRadioGroup<Kind> value={kind} onChange={(k) => (setKind(k), requestAnimationFrame(() => area.current?.focus()))}>
-                {KINDS.map((k) => (
-                  <MenuRadioItem key={k.kind} value={k.kind}>
-                    <span title={k.hint}>{k.label}</span>
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </Menu>
-          )}
           {routeNote && <span className="ml-1 hidden min-w-0 truncate text-meta text-ink-3 sm:block">{routeNote}</span>}
           <span className="flex-1" />
           <IconButton label="Attach images" className="size-7" onClick={() => picker.current?.click()} disabled={disabled || files.length >= 8}>

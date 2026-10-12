@@ -10,7 +10,15 @@
 # download, not a release that was swapped. The `gh attestation verify`
 # line at the end is printed for you to run; this script does not run it.
 # Read the source: https://github.com/ojowwalker77/channels
+#
+# With `sh -s -- join CODE [...]` it then runs `kiwi join CODE [...]`, so one
+# pasted line installs kiwi and asks to join a channel. Nothing else is run.
 set -eu
+
+if [ "$#" -gt 0 ] && [ "$1" != join ]; then
+  echo "kiwi: the installer only runs \`kiwi join\` after installing (got: $1)" >&2
+  exit 1
+fi
 
 REPO="ojowwalker77/channels"
 VERSION="${KIWI_VERSION:-latest}"
@@ -62,3 +70,9 @@ case ":$PATH:" in
   *) echo "To run it as plain \`kiwi\`, add this to your shell profile: export PATH=\"$DIR:\$PATH\"" ;;
 esac
 echo "Check where it came from: gh attestation verify $DIR/kiwi --repo $REPO"
+
+if [ "$#" -gt 0 ]; then
+  echo
+  # stdin is this script's pipe: kiwi gets none.
+  "$DIR/kiwi" "$@" </dev/null
+fi

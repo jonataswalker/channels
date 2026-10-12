@@ -172,6 +172,15 @@ try {
   await page.getByRole("button", { name: "Create channel" }).click()
   await page.waitForURL(/#mc2-/)
   await page.getByPlaceholder(/^Write to the channel/).waitFor()
+  // An empty channel opens on how to add an agent: one command, with its join code.
+  at = "Add an agent card"
+  const addAgent = page.getByRole("region", { name: "Add an agent" })
+  await addAgent.waitFor()
+  const card = await addAgent.innerText()
+  if (!/sh -s -- join mc2-/.test(card)) throw new Error("the Add an agent card has no join command")
+  // Not the public relay: the line names this one, or kiwi would ask the public relay about this channel.
+  if (!card.includes(`--relay ${new URL(BASE).origin}`)) throw new Error("the Add an agent command doesn't name this relay")
+  console.log(`ok  ${at}`)
 
   // Someone who isn't in yet, opening the join link: the preview names the owner.
   // That fetch has to send the code's fingerprint, or /info answers 426 and the name never arrives.
@@ -194,25 +203,8 @@ try {
     await page.getByRole("dialog").getByRole("tab", { name: "A person" }).or(page.getByRole("dialog").getByRole("button", { name: "A person" })).first().click()
   })
   await eachItem("Channel menu", page.getByRole("button", { name: "Channel menu" }), (l) => l.endsWith("…"))
-  await opens("Composer kind", () => page.getByRole("button", { name: /^Message/ }).click())
-
-  // Rooms: the owner makes one (it opens), its menu offers a rename, then back to general.
-  await opens("New room", () => page.getByRole("button", { name: "New room" }).click())
-  at = "create a room"
-  await page.getByRole("button", { name: "New room" }).click()
-  await page.getByRole("textbox", { name: "Room name" }).fill("smoke-room")
-  await page.getByRole("button", { name: "Create room" }).click()
-  await page.getByPlaceholder(/^Write in #smoke-room/).waitFor()
-  console.log(`ok  ${at}`)
-  await opens("Room → Rename room…", async () => {
-    await page.getByRole("list", { name: "Rooms" }).getByText("smoke-room").hover()
-    await page.getByRole("button", { name: "More for #smoke-room" }).click()
-    await page.getByRole("menuitem", { name: "Rename room…" }).click()
-  })
-  await page.getByRole("list", { name: "Rooms" }).getByRole("button", { name: /general/ }).click()
-
   at = "send and reply"
-  await page.getByPlaceholder(/^Write (to the channel|in #general)/).fill("smoke test")
+  await page.getByPlaceholder(/^Write to the channel/).fill("smoke test")
   await page.keyboard.press("Enter")
   const row = page.getByText("smoke test", { exact: true }).first()
   await row.waitFor()
@@ -221,6 +213,8 @@ try {
   await page.getByRole("button", { name: "Close thread" }).waitFor()
   await page.getByRole("button", { name: "Close thread" }).click()
   console.log("ok  Thread panel")
+  // Once there's something going on, the owner's stop button is in the header.
+  await opens("Pause agents", () => page.getByRole("button", { name: "Pause agents" }).click())
 
   // The sent message is sealed in this browser. A reload paints it and the
   // socket asks only for seqs after that row. "smoke test" contains a space,
@@ -285,17 +279,18 @@ try {
   console.log(`ok  ${at}`)
   await page.goto(channel)
   const joining = kiwi(["join", code, "smoke", "--relay", BASE, "--as", "bot", "--role", "tester"])
-  const review = page.getByRole("button", { name: "Review", exact: true })
-  await review.waitFor({ timeout: 30000 })
-  await opens("Join requests", () => review.click())
+  // Needs you: the request, its code, and one click; what it can do is the default unless chosen.
+  const needs = page.getByRole("region", { name: "Needs you" })
+  const letIn = needs.getByRole("button", { name: "It matches: let in" })
+  const showCode = needs.getByRole("button", { name: "Show code" })
+  await letIn.or(showCode).first().waitFor({ timeout: 30000 })
+  if (await showCode.count()) await showCode.click()
+  await letIn.waitFor({ timeout: 30000 })
+  await opens("Needs you → Choose what it can do…", () => needs.getByRole("button", { name: "Choose what it can do…" }).click())
   at = "approve"
-  await review.click()
-  await page.getByRole("button", { name: "Review and approve" }).click()
-  await page.getByRole("button", { name: "Approve", exact: true }).click()
+  await letIn.click()
   await joining
-  // The requests sheet closes on its own once it's empty (T281); before that, close it.
-  await page.waitForTimeout(500)
-  if (await page.getByRole("dialog").count()) await page.keyboard.press("Escape")
+  await addAgent.waitFor({ state: "hidden", timeout: 15000 })
   console.log(`ok  ${at}`)
 
   // The same link with its exchange key seats the computer in this channel; its next agent lets itself in.
@@ -312,14 +307,12 @@ try {
   console.log(`ok  ${at}`)
 
   await kiwi(["-c", "smoke", "--as", "bot", "task", "add", "Smoke task", "--owner", "bot"])
-  await page.getByRole("tab", { name: /^Work/ }).click()
-  // A task opens as its own page (T1150): its activity feed, then back to the board.
-  at = "Task page"
+  // A task shows as a live card in the conversation, and opens as its own page (T1150).
+  at = "Task card and page"
   await page.getByRole("button", { name: /Smoke task/ }).first().click({ timeout: 15000 })
   await page.getByRole("region", { name: /^Task T\d+/ }).getByRole("heading", { name: "Activity" }).waitFor()
   await page.getByRole("button", { name: "Close task" }).click()
   console.log(`ok  ${at}`)
-  await page.getByRole("tab", { name: "Chat" }).click()
   // What the owner can do to a member: each item behind their ⋯ in People.
   for (const item of ["Set role…", "Remove from channel…"])
     await opens(`People → bot → ${item}`, async () => {
@@ -343,11 +336,12 @@ try {
   await page.getByText(/turned off coordinator-only/).first().waitFor({ timeout: 15000 })
   console.log(`ok  ${at}`)
 
-  at = "Work"
-  await page.getByRole("tab", { name: /^Work/ }).click()
-  await page.getByRole("tab", { name: "Chat" }).click()
-  await page.waitForTimeout(300)
-  console.log("ok  Work")
+  at = "Tasks view"
+  await page.getByRole("button", { name: /^Tasks/ }).click()
+  await page.getByRole("button", { name: /Smoke task/ }).first().waitFor()
+  await page.getByRole("button", { name: "Everything" }).click()
+  await page.getByPlaceholder(/^Write to the channel/).waitFor()
+  console.log("ok  Tasks view")
 
   // What's new where (T1245): with another channel open, the agent writes in this one. The next
   // listing carries its head, the row gets a dot, the tab a total, and Alt+↓ goes there.
