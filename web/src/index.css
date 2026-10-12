@@ -263,6 +263,83 @@ button {
   animation: arrived 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* The Room: a line of delegation draws from the coordinator to an agent, then fades. */
+@keyframes room-flight {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0.9;
+  }
+  55% {
+    stroke-dashoffset: 0;
+    opacity: 0.9;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+.room-flight {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: room-flight 1.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  filter: drop-shadow(0 0 4px var(--accent-wash));
+}
+/* An agent's latest line, replaced, fades in. */
+@keyframes room-caption {
+  from {
+    opacity: 0;
+  }
+}
+.room-caption {
+  animation: room-caption 0.4s ease-out;
+}
+/* An agent's conversation slides over from the right. */
+@keyframes room-drawer {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+.room-drawer {
+  animation: room-drawer 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes room-scrim {
+  from {
+    opacity: 0;
+  }
+}
+.room-scrim {
+  animation: room-scrim 0.2s ease-out;
+}
+/* Three dots while the coordinator works on an answer. */
+@keyframes room-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.room-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.room-dots > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: room-dot 1.2s infinite ease-in-out;
+}
+.room-dots > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.room-dots > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,

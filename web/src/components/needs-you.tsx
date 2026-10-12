@@ -35,6 +35,7 @@ export function NeedsYou({
   onJump,
   variant = "banner",
   openSignal = 0,
+  requestFilter,
 }: {
   now: number
   roomId: string
@@ -54,9 +55,11 @@ export function NeedsYou({
    * banner: a slim line at the top of the conversation that opens a popover. stack: the first two as
    * cards, the rest one tap away (the coordinator's focus view, under its words).
    */
-  variant?: "banner" | "stack"
+  variant?: "banner" | "stack" | "list"
   /** A new value opens it (the focus view's "needs you" link). */
   openSignal?: number
+  /** Only some join requests (the Room shows each on its own face); all of them when left out. */
+  requestFilter?: (r: JoinRequest) => boolean
 }) {
   const { p } = useControls()
   const [open, setOpen] = useState(false)
@@ -66,7 +69,7 @@ export function NeedsYou({
     if (openSignal) setOpen(true)
   }
   const box = useRef<HTMLElement>(null)
-  const requests = p.isOwner ? p.requests : []
+  const requests = (p.isOwner ? p.requests : []).filter((r) => !requestFilter || requestFilter(r))
   // Closes on a click elsewhere, or Escape, like any popover.
   useEffect(() => {
     if (!open || variant === "stack") return
@@ -101,6 +104,21 @@ export function NeedsYou({
   ]
   if (!items.length) return null
   const n = items.length
+  // list: every item as rows, for a popover someone else draws (a face's flag in the Room).
+  if (variant === "list") {
+    return (
+      <section aria-label="Needs you">
+        {requests.some((r) => r.check === "unchecked") && <p className="mx-4 mt-3 text-meta leading-normal text-ink-3">{TOO_MANY_REQUESTS}</p>}
+        <ul className="max-h-[60vh] divide-y divide-line overflow-y-auto">
+          {items.map((i) => (
+            <li key={i.key} className="px-4 py-3">
+              {i.node}
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
   if (variant === "stack") {
     const shown = open ? items : items.slice(0, 2)
     return (

@@ -630,6 +630,8 @@ export interface ChannelHandle {
   refreshRoster: () => Promise<void>
   /** The channel's newest seq when this view opened (0 until the relay says). */
   head: number
+  /** The channel as it stood just after message `seq`: the same fold, over the messages up to it (the Room's replay). */
+  foldAt: (seq: number) => ChannelState
 }
 
 /** What a channel view does with each step of opening and following a channel. */
@@ -908,6 +910,15 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
     [onGone]
   )
 
-  return { ch, connection, gone, messages, roster, state, online: live, isOwner, requests, send, refreshRequests, refreshRoster, head: start?.head ?? 0 }
+  const foldAt = useCallback(
+    (seq: number) => {
+      const upTo = messages.filter((m) => m.seq <= seq)
+      const at = upTo.at(-1)
+      return fold(upTo, rosterForFold, at ? (at.rts ?? at.ts) : now, modeFloor, roomsFloor, guardFloor)
+    },
+    [messages, rosterForFold, now, modeFloor, roomsFloor, guardFloor]
+  )
+
+  return { ch, connection, gone, messages, roster, state, online: live, isOwner, requests, send, refreshRequests, refreshRoster, head: start?.head ?? 0, foldAt }
 }
 
