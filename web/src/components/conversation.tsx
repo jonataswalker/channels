@@ -1,7 +1,6 @@
 import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, PauseIcon, PlayIcon, Search01Icon } from "@hugeicons/core-free-icons"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
-import { b64url } from "@mc/crypto.ts"
 import { droppedCount } from "@mc/format.ts"
 import { ignored, type Color, type Message } from "@mc/protocol.ts"
 import { describeScopes, wireScopes } from "@mc/scopes.ts"
@@ -588,7 +587,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         forgetChannel(member.code)
         onGone()
       }}
-      terminalCommand={() => `kiwi tui --link '${location.origin}/#${encodeURIComponent(member.code)}&id=${b64url(new TextEncoder().encode(JSON.stringify(member.identity)))}'`}
+      pairing={{ code: member.code, slot: () => ch.pairSlot(), list: (slot) => ch.pairs(slot), open: (id, nonce, slot) => ch.pairOpen(id, nonce, slot), answer: (p, slot) => ch.pairAnswer(p, member.identity, slot) }}
     >
       <div className="flex h-full min-w-0 flex-1">
         <div className={cx("relative flex min-w-0 flex-1 flex-col", root && "hidden md:flex")}>
