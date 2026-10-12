@@ -15,7 +15,7 @@ import { saveImages } from "../attach.ts";
 import { ChannelGone } from "../client.ts";
 import { home, writePrivate } from "../config.ts";
 import { fingerprint } from "../identity.ts";
-import { formatClaims, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, mayDo } from "../format.ts";
+import { formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, mayDo, stateWord, taskStateWord } from "../format.ts";
 import { inlineText, NAME_RE, type JoinRequest } from "../membership.ts";
 import { ignored, type Kind, type Message, type Presence, type TaskState } from "../protocol.ts";
 import { COORDINATOR, findRoom, isPerson, parseTaskId, taskId, type ChannelState } from "../state.ts";
@@ -871,7 +871,7 @@ class App {
       },
       {
         name: "status",
-        about: "members, tasks, claims, facts",
+        about: "members, tasks, facts",
         run: async () => {
           const { messages, state } = await this.fresh();
           const unread = await this.s.unreadCount(state, messages);
@@ -904,7 +904,7 @@ class App {
         args: "[all]",
         about: "the task board",
         run: async (arg) => this.out(formatTasks((await this.fresh()).state, { all: /^a/i.test(arg) })),
-        complete: (q) => ("all".startsWith(q) ? [{ label: "all", hint: "done and cancelled too", insert: "all", run: true }] : []),
+        complete: (q) => ("all".startsWith(q) ? [{ label: "all", hint: "done ones too", insert: "all", run: true }] : []),
       },
       {
         name: "task",
@@ -915,10 +915,10 @@ class App {
           if (/\s/.test(q)) {
             const [, verb] = /^\S+\s+(\S*)$/.exec(q) ?? [];
             if (verb === undefined || q.startsWith("add")) return [];
-            return ["done", "start", "block", "review", "cancel", "assign", "note", "drop"].filter((v) => v.startsWith(verb)).map((v) => ({ label: v, insert: v }));
+            return ["done", "start", "review", "assign", "note", "drop"].filter((v) => v.startsWith(verb)).map((v) => ({ label: v, insert: v }));
           }
-          const open = [...this.state.tasks.values()].filter((t) => t.state !== "done" && t.state !== "cancelled" && taskId(t.id).toLowerCase().startsWith(q.toLowerCase() || "t"));
-          return [{ label: "add", hint: "a new task", insert: "add" }, ...open.slice(0, 10).map((t) => ({ label: taskId(t.id), hint: `${t.state}${t.owner ? ` @${t.owner}` : ""} · ${inlineText(t.title, 50)}`, insert: taskId(t.id) }))].filter((x) => x.label.toLowerCase().startsWith(q.toLowerCase()));
+          const open = [...this.state.tasks.values()].filter((t) => t.state !== "done" && taskId(t.id).toLowerCase().startsWith(q.toLowerCase() || "t"));
+          return [{ label: "add", hint: "a new task", insert: "add" }, ...open.slice(0, 10).map((t) => ({ label: taskId(t.id), hint: `${stateWord(t.state)}${t.owner ? ` @${t.owner}` : ""} · ${inlineText(t.title, 50)}`, insert: taskId(t.id) }))].filter((x) => x.label.toLowerCase().startsWith(q.toLowerCase()));
         },
       },
       { name: "ask", args: "TEXT", about: "ask a question (it stays open until answered)", run: (arg) => (arg ? this.send(arg, { kind: "ask" }) : this.out("usage: /ask TEXT", bad)) },
@@ -981,7 +981,6 @@ class App {
         complete: (q) => [...this.state.rooms.values()].filter((r) => r.name.startsWith(q.replace(/^#/, ""))).map((r) => ({ label: `#${r.name}`, insert: r.name, run: true })),
       },
       { name: "facts", about: "shared facts", run: async () => this.out([...(await this.fresh()).state.facts.values()].map((f) => formatFact(f)).join("\n") || "no facts") },
-      { name: "claims", about: "claimed paths", run: async () => this.out(formatClaims((await this.fresh()).state)) },
       {
         name: "dropped",
         owner: true,
@@ -1181,9 +1180,9 @@ class App {
     }
     const [rawId, verb, ...rest] = arg.split(/\s+/);
     const id = rawId ? parseTaskId(rawId) : null;
-    if (id === null) return this.out("usage: /task add TITLE [@owner], or /task T7 [done|start|block|review|cancel|assign NAME|note TEXT|drop]", bad);
+    if (id === null) return this.out("usage: /task add TITLE [@owner], or /task T7 [done|start|review|assign NAME|note TEXT|drop]", bad);
     const note = rest.join(" ") || undefined;
-    const STATE: Record<string, TaskState> = { done: "done", start: "doing", doing: "doing", block: "blocked", blocked: "blocked", review: "review", cancel: "cancelled", todo: "todo" };
+    const STATE: Record<string, TaskState> = { done: "done", start: "doing", doing: "doing", review: "review", open: "todo", todo: "todo" };
     let state: ChannelState | undefined;
     if (!verb) {
       const t = (await this.fresh()).state.tasks.get(id);
@@ -1195,7 +1194,7 @@ class App {
     else if (verb === "note") state = note ? await this.busyWith("Saving", () => this.s.taskUpdate(id, { note })) : (this.out("usage: /task T7 note TEXT", bad), undefined);
     else return this.out(`unknown: /task ${taskId(id)} ${verb}`, bad);
     const t = state?.tasks.get(id);
-    if (t) this.out(`${taskId(id)} ${t.state}${t.owner ? ` @${t.owner}` : ""}: ${inlineText(t.title, 200)}`);
+    if (t) this.out(`${taskId(id)} ${taskStateWord(t)}${t.owner ? ` @${t.owner}` : ""}: ${inlineText(t.title, 200)}`);
   }
 }
 

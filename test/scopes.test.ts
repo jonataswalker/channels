@@ -61,7 +61,6 @@ describe("scopes in fold", () => {
     expect(s.rejected.get(ms[1]!.seq)).toBe("chat may not ask questions and say they're blocked");
     expect(s.rejected.get(ms[3]!.seq)).toBe("chat may not add, claim and update tasks");
     expect(s.tasks.size).toBe(0);
-    expect(s.claims).toEqual([]);
     expect(s.facts.size).toBe(0);
     expect(ignored(s.trust.get(ms[1]!.seq))).toBe(true);
   });
@@ -110,10 +109,9 @@ describe("scopes in fold", () => {
     expect(s.members.get("chat")!.scopes).toEqual(["post"]);
   });
 
-  test("losing claims lets go of the ones held; tasks stay theirs", async () => {
+  test("losing a scope leaves their tasks theirs", async () => {
     const ms = [await ev("full", { op: "task.add", title: "mine", owner: "full" }), await ev("full", { op: "claim", paths: ["src/a"], ttl: 600 }), await set("full", ["post", "tasks"])];
     const s = fold(ms, roster);
-    expect(s.claims).toEqual([]);
     expect([...s.tasks.values()].map((t) => t.owner)).toEqual(["full"]);
   });
 

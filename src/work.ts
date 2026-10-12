@@ -6,8 +6,8 @@
 import { describeEvent } from "./format.ts";
 import { inlineText } from "./membership.ts";
 import { ignored, type Message } from "./protocol.ts";
-import type { TaskState } from "./protocol.ts";
-import { isPerson, keptFromPeople, taskId, type ChannelState, type Claim, type Task } from "./state.ts";
+import type { OldTaskState, TaskState } from "./protocol.ts";
+import { currentState, isPerson, keptFromPeople, taskId, type ChannelState, type Task } from "./state.ts";
 
 /** Quiet this long, with nothing in progress, and an agent reads as idle. */
 export const IDLE_AFTER_MS = 15 * 60_000;
@@ -85,7 +85,6 @@ export interface AgentRow {
   status: AgentStatus;
   /** Since when they've been blocked or idle (for "Blocked 20 min"). */
   since: number;
-  claims: Claim[];
   prs: PrRef[];
   lastActive: number;
   online: boolean;
@@ -100,15 +99,14 @@ export function agentRows(state: ChannelState, messages: Message[], viewer: stri
     .map((a): AgentRow => {
       const mine = [...state.tasks.values()].filter((t) => t.owner === a.name).sort((x, y) => x.id - y.id);
       const doing = mine.find((t) => t.state === "doing");
-      const blockedTask = mine.find((t) => t.state === "blocked");
       const blockingAsk = state.openAsks.find((m) => m.from === a.name && m.kind === "blocking" && visibleTo(state, viewer, m));
       const said = [...messages].reverse().filter((m) => m.from === a.name && visibleTo(state, viewer, m));
       const line =
         said.find((m) => m.kind === "status") ?? said.find((m) => m.ev?.op === "task.update" && !!m.ev.note) ?? said.find((m) => m.kind !== "event");
       const statusLine = line ? { text: inlineText(textOf(line), 140), seq: line.seq, at: at(line) } : undefined;
       const lastActive = a.lastSeen;
-      const status: AgentStatus = blockedTask || blockingAsk ? "blocked" : doing ? "working" : online.has(a.name) ? "idle" : now - lastActive < IDLE_AFTER_MS ? "idle" : "offline";
-      const since = status === "blocked" ? Math.min(blockedTask?.updatedAt ?? Infinity, blockingAsk ? at(blockingAsk) : Infinity) : lastActive;
+      const status: AgentStatus = blockingAsk ? "blocked" : doing ? "working" : online.has(a.name) ? "idle" : now - lastActive < IDLE_AFTER_MS ? "idle" : "offline";
+      const since = status === "blocked" && blockingAsk ? at(blockingAsk) : lastActive;
       return {
         name: a.name,
         ...(a.role ? { role: a.role } : {}),
@@ -116,7 +114,6 @@ export function agentRows(state: ChannelState, messages: Message[], viewer: stri
         ...(statusLine?.text ? { statusLine } : {}),
         status,
         since,
-        claims: state.claims.filter((c) => c.owner === a.name && c.expires > now),
         prs: prsIn(state, messages, viewer, (m) => m.from === a.name).filter((p) => p.state === "open"),
         lastActive,
         online: online.has(a.name),
@@ -138,9 +135,9 @@ export interface Change {
   task?: number;
 }
 
-const CHANGE_OPS = new Set(["task.add", "task.claim", "task.update", "claim", "room.create", "mode.set"]);
+const CHANGE_OPS = new Set(["task.add", "task.claim", "task.update", "room.create", "mode.set"]);
 
-/** The latest task, claim and room events, newest first. */
+/** The latest task and room events, newest first. */
 export function recentChanges(state: ChannelState, messages: Message[], limit = 8): Change[] {
   const out: Change[] = [];
   for (let i = messages.length - 1; i >= 0 && out.length < limit; i--) {
@@ -176,7 +173,7 @@ export function needsPerson(state: ChannelState, viewer: string): Need[] {
 // ---------- a task's feed ----------
 
 /** What a feed row's mark shows: a task state, or what kind of change it was. */
-export type EventMark = TaskState | "add" | "assign" | "note" | "claim" | "other";
+export type EventMark = TaskState | "add" | "assign" | "note" | "other";
 
 /** One item of an activity feed: an event as a single row, or a thread as one card. */
 export type FeedItem =
@@ -225,12 +222,13 @@ export function taskFeed(state: ChannelState, messages: Message[], id: number, v
   return items.sort((a, b) => a.seq - b.seq || (a.type === "pr" ? 1 : 0) - (b.type === "pr" ? 1 : 0));
 }
 
-const VERB: Record<TaskState, string> = {
-  todo: "moved it back to to-do",
+const VERB: Record<TaskState | OldTaskState, string> = {
+  todo: "reopened it",
   doing: "started it",
-  blocked: "marked it blocked",
   review: "sent it for review",
   done: "finished it",
+  // Older clients' states.
+  blocked: "marked it blocked",
   cancelled: "cancelled it",
 };
 
@@ -244,11 +242,11 @@ function onTask(m: Message, state: ChannelState): { text: string; mark: EventMar
     case "task.claim":
       return { text: "took it", mark: "assign" };
     case "task.update":
-      if (ev.state) return { text: VERB[ev.state], mark: ev.state, ...note };
+      if (ev.owner && (!ev.state || ev.state === "todo")) return { text: `assigned it to ${ev.owner}`, mark: "assign", ...note };
+      if (ev.state) return { text: VERB[ev.state], mark: currentState(ev.state), ...note };
       if (ev.owner) return { text: `assigned it to ${ev.owner}`, mark: "assign", ...note };
       if (ev.owner === null) return { text: "unassigned it", mark: "assign", ...note };
       if (ev.title) return { text: `renamed it to “${inlineText(ev.title, 200)}”`, mark: "other", ...note };
-      if (ev.after?.length) return { text: `set it to wait on ${ev.after.map(taskId).join(", ")}`, mark: "other", ...note };
       return { text: "added a note", mark: "note", ...note };
     default:
       return { text: describeEvent(m, state), mark: "other" };
@@ -261,8 +259,7 @@ export function markOf(m: Message): EventMark {
   if (!ev) return "other";
   if (ev.op === "task.add") return "add";
   if (ev.op === "task.claim") return "assign";
-  if (ev.op === "task.update") return ev.state ?? (ev.owner !== undefined ? "assign" : ev.note ? "note" : "other");
-  if (ev.op === "claim" || ev.op === "release") return "claim";
+  if (ev.op === "task.update") return ev.state ? currentState(ev.state) : ev.owner !== undefined ? "assign" : ev.note ? "note" : "other";
   return "other";
 }
 

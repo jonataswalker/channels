@@ -114,7 +114,6 @@ describe("the hold", () => {
     expect(s.hold).toMatchObject({ by: "jon", note: "something's off with win" });
     for (const m of [task, claim, fact, toAgent, broadcast, star, mixed]) expect(s.trust.get(m.seq)).toBe("refused");
     expect(s.tasks.size).toBe(0);
-    expect(s.claims).toEqual([]);
     expect(s.facts.size).toBe(0);
     for (const m of [on, toPeople, release, hello, person]) expect(s.trust.get(m.seq)).toBe("verified");
     // A refused message reaches no agent.

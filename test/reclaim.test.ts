@@ -104,11 +104,10 @@ describe("seat reclaim", () => {
       [newKey.pk, true],
     ]);
 
-    // Tasks, claims and facts are the name's: they carry over. The old key's history still verifies.
+    // Tasks and facts are the name's: they carry over. The old key's history still verifies.
     const { messages } = await newCh.history(0);
     const state = fold(messages, members.map((m) => ({ name: m.name, pk: m.pk, role: m.role, owner: m.owner, at: m.at, active: m.active, kind: m.kind })));
     expect([...state.tasks.values()].map((t) => [t.title, t.owner])).toEqual([["fix the PC edge", "win"]]);
-    expect(state.claims.map((c) => [c.path, c.owner])).toEqual([["src/pc", "win"]]);
     expect(state.facts.get("pc.ip")?.value).toBe("10.0.0.9");
     expect(messages.filter((m) => m.from === "win").every((m) => state.trust.get(m.seq) === "verified")).toBe(true);
     // And the owner signed a record of it.

@@ -26,7 +26,7 @@ import { Cursor, DEFAULT_RELAY, home, Keystore, type ChannelConfig } from "../co
 import { b64url, decodeJoinCode, fromB64url, newRoomId, type ChannelAccess } from "../crypto.ts";
 import { describeMember, freeAgentName, handleFor, type JoinRequest } from "../membership.ts";
 import { baseName, here, seatsNear } from "../seats.ts";
-import { ago, cardLine, charterLines, describeEvent, fitsLine, holdLine, formatAdded, formatAfter, formatClaims, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, statusJson } from "../format.ts";
+import { ago, cardLine, charterLines, describeEvent, holdLine, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, stateWord, taskStateWord, statusJson } from "../format.ts";
 import { canPost, describeScopes, parseScopes, presetOf, SCOPES, type Scope } from "../scopes.ts";
 import { fingerprint, generateIdentity, type Identity } from "../identity.ts";
 import { PAIR_TTL_MS, pairNonce } from "../pair.ts";
@@ -38,8 +38,9 @@ import { forgetMachine, linkUrl, loadMachine, machineCode, machineFx, newMachine
 import { briefText, COMMANDS } from "../brief.ts";
 import { autoInstallExtraHooks, autoInstallHooks, bindDirectory, bindingFor, EXTRA_HARNESSES, extraInstalled, hooksInstalled, hooksListen, hooksStatus, installDetected, installExtra, installHooks, mcFor, runHook, uninstallDetected, uninstallExtra, uninstallHooks, type ExtraHarness } from "../hooks.ts";
 import { BadName } from "../refusals.ts";
-import { claimPlace } from "../where.ts";
-import { detectCard, handoffHere, inAgentHarness } from "../card.ts";
+import { detectCard, inAgentHarness } from "../card.ts";
+
+const CLAIMS_GONE = "claims are gone: say what you're working on in the task, or post it";
 
 const HELP = `kiwi ${VERSION} — Channels by Kiwi Init: real-time coordination for AI agents
 
@@ -61,10 +62,11 @@ Agents
   kiwi reply N "text"                            answer message #N: to its sender, in its room
   kiwi show N [dir]                              message #N in full, with its whole thread; its images saved
   kiwi log [-n 30] [--all] [--room R]            recent history (marks nothing read)
-  kiwi status [--json]                           one screen: who's here and online, the charter, tasks, claims,
-                                                 notes, and questions waiting on you
-  kiwi task add "title" [--owner NAME] [--review NAME|any] · task claim|start|block|review|done|note|show T7
-                                                 (kiwi task alone: the board)
+  kiwi status [--json]                           one screen: who's here and online, the charter, tasks, notes,
+                                                 and questions waiting on you
+  kiwi task add "title" [--owner NAME] [--review NAME|any]   a task: open, then doing, then done
+     task claim|start|done|note|show T7 · task review T7 (when it has a reviewer) · approve|reject T7
+     task assign T7 NAME ["what's next"] · drop T7 (back to the board)   (kiwi task alone: the board)
   kiwi note [KEY [VALUE] [--ttl 7d] | KEY --clear]   shared notes: all of them, one, set one, or remove one
   kiwi leave                                     leave the channel and forget it on this machine
 
@@ -79,7 +81,8 @@ People
   kiwi demo · doctor · hooks install|uninstall|status · mcp · channels · relay --help
 
 Older names still work: tail, wait, read, watch (listen); ask, escalate (send); thread, save (show);
-members, who, claims, facts, charter (status); set, get, unset (note); tasks; and the rest of the earlier commands.
+members, who, facts, charter (status); set, get, unset (note); tasks; and the rest of the earlier commands.
+Claims, task dependencies (--after) and matching by --needs are gone: say what you're working on in the task.
 
 Options: -c/--channel ALIAS, --as NAME (or KIWI_CHANNEL / KIWI_AS) only when a folder has several agents and no session
 tells them apart; --relay URL (or KIWI_RELAY)`;
@@ -1401,19 +1404,17 @@ const commands: Record<string, Command> = {
       // kiwi task alone: the board.
       if (!args[1]) return yield* commands.tasks!();
       const sub = args[1];
-      const STATE_FOR: Record<string, TaskState> = { start: "doing", block: "blocked", review: "review", done: "done", cancel: "cancelled" };
+      const STATE_FOR: Record<string, TaskState> = { start: "doing", review: "review", done: "done" };
       if (sub === "add") {
         const title = yield* text(2);
-        if (!title.trim()) return yield* die('usage: kiwi task add "title" [--owner NAME] [--after T3]');
-        const after = opt.after === undefined ? undefined : yield* Effect.forEach(list(opt.after) ?? [], taskIdOf).pipe(Effect.map((ids) => (ids.length ? ids : undefined)));
+        if (!title.trim()) return yield* die('usage: kiwi task add "title" [--owner NAME] [--review NAME|any]');
+        // Gone, and said so rather than refused, so an agent running older instructions still adds its task.
+        for (const gone of ["after", "needs"] as const) if (opt[gone] !== undefined) process.stderr.write(`kiwi: --${gone} is gone (tasks don't wait on or match anything now); put it in the title or --detail\n`);
         const { state: before } = yield* s.state();
-        const id = yield* s.taskAdd(title, { owner: opt.owner, after, detail: opt.detail, needs: list(opt.needs), ...(opt.review !== undefined ? { review: opt.review } : {}) });
+        const id = yield* s.taskAdd(title, { owner: opt.owner, detail: opt.detail, ...(opt.review !== undefined ? { review: opt.review } : {}) });
         const like = similarOpenTasks(before, title).map((t) => t.id);
-        const lines = [formatAdded(before, id, after ?? [])];
+        const lines = [`added ${taskId(id)}`];
         if (like.length) lines.push(looksLikeLine(like));
-        const { state } = yield* s.state();
-        const fit = state.tasks.get(id) && fitsLine(state, state.tasks.get(id)!);
-        if (fit && !opt.owner) lines.push(fit);
         return out(lines.join("\n"));
       }
       if (sub === "list") return yield* commands.tasks!();
@@ -1422,46 +1423,30 @@ const commands: Record<string, Command> = {
         const { state } = yield* s.state();
         return out(formatTask(state, state.tasks.get(id) ?? (yield* die(`no task ${taskId(id)}`))));
       }
-      if (sub === "match") {
-        const { state } = yield* s.state();
-        const t = state.tasks.get(id) ?? (yield* die(`no task ${taskId(id)}`));
-        return out(fitsLine(state, t) ?? `${taskId(id)} needs nothing in particular: anyone free can take it (kiwi task add --needs, next time)`);
-      }
-      if (sub === "handoff") {
-        const to = args[3] ?? (yield* die('usage: kiwi task handoff T7 NAME ["what\'s next"]'));
+      if (sub === "match" || sub === "after") return yield* die(`kiwi task ${sub} is gone: tasks don't wait on or match anything now. Pick what you can do from the board (kiwi task)`);
+      // Handing it over is giving it to someone with a note on where it stands (handoff is the older name).
+      if (sub === "assign" || sub === "handoff") {
+        const to = args[3] ?? (yield* die('usage: kiwi task assign T7 NAME ["where it stands, what\'s next"]'));
         const next = args.slice(4).join(" ") || opt.note || undefined;
-        const { handoff, pushed } = handoffHere();
-        const state = yield* s.taskHandoff(id, to, next, handoff);
+        const state = yield* s.taskHandoff(id, to, next);
         const t = state.tasks.get(id)!;
-        out(`${taskId(id)} is ${t.owner}'s now${handoff.branch ? `: pick it up from ${handoff.branch}${handoff.commit ? ` @ ${handoff.commit}` : ""}` : ""}${handoff.files?.length ? ` (${handoff.files.length} file${handoff.files.length === 1 ? "" : "s"})` : ""}`);
-        if (pushed === false && handoff.branch) process.stderr.write(`kiwi: ${handoff.branch} isn't pushed (or has unpushed commits): push it so ${t.owner} can fetch it\n`);
-        return;
+        return out(`${taskId(id)} is ${t.owner}'s now${next ? "" : ' (add where it stands next time: kiwi task assign T7 NAME "…")'}`);
       }
-      if (sub === "after") {
-        const deps = yield* Effect.forEach(
-          args
-            .slice(3)
-            .flatMap((a) => a.split(","))
-            .filter(Boolean),
-          taskIdOf,
-        );
-        if (!deps.length) return yield* die("usage: kiwi task after T69 T68");
-        const state = yield* s.taskAfter(id, deps);
-        return out(formatAfter(state, id, deps));
-      }
-      const note = (sub === "assign" ? undefined : args.slice(3).join(" ")) || opt.note || undefined;
+      const note = args.slice(3).join(" ") || opt.note || undefined;
       let state: ChannelState;
       if (sub === "claim") state = yield* s.taskClaim(id);
       else if (sub === "review") state = yield* s.taskUpdate(id, { state: "review", note, ...(opt.review !== undefined ? { review: opt.review } : {}) });
       else if (sub === "approve") state = yield* s.taskUpdate(id, { state: "done", note });
       else if (sub === "reject") state = yield* s.taskUpdate(id, { state: "doing", note: note ?? (yield* die('usage: kiwi task reject T7 "what needs to change"')) });
       else if (sub in STATE_FOR) state = yield* s.taskUpdate(id, { state: STATE_FOR[sub], note });
+      // Blocked (an older name) is a note on work in progress; cancelling finishes it, marked cancelled.
+      else if (sub === "block") state = yield* s.taskUpdate(id, { note: `blocked${note ? `: ${note}` : ""}` });
+      else if (sub === "cancel") state = yield* s.taskUpdate(id, { state: "cancelled", note });
       else if (sub === "drop") state = yield* s.taskUpdate(id, { owner: null, note });
-      else if (sub === "assign") state = yield* s.taskUpdate(id, { owner: args[3] ?? (yield* die("usage: kiwi task assign T7 NAME")) });
       else if (sub === "note") state = yield* s.taskUpdate(id, { note: note ?? (yield* die('usage: kiwi task note T7 "…"')) });
       else return yield* die(`unknown task command "${sub}"`);
       const t = state.tasks.get(id)!;
-      out(`${taskId(id)} ${t.state}${t.owner ? ` @${t.owner}` : ""}: ${t.title}`);
+      out(`${taskId(id)} ${taskStateWord(t)}${t.owner ? ` @${t.owner}` : ""}: ${t.title}`);
     }),
 
   tasks: () =>
@@ -1490,27 +1475,10 @@ const commands: Record<string, Command> = {
       out(formatTasks(state, { all: opt.all, owner: opt.mine ? s.me : opt.owner }));
     }),
 
-  claim: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const paths = args.slice(1);
-      if (!paths.length) return yield* die('usage: kiwi claim PATH… [--ttl 30m] [--note "…"]');
-      const state = yield* s.claim(paths, parseDuration(opt.ttl ?? "30m"), opt.note, claimPlace());
-      out(formatClaims({ ...state, claims: state.claims.filter((c) => c.owner === s.me) }));
-    }),
-
-  release: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      yield* s.release(args.slice(1));
-      out(args.length > 1 ? `released ${args.slice(1).join(", ")}` : "released all your claims");
-    }),
-
-  claims: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      out(formatClaims((yield* s.state()).state));
-    }),
+  // Claims are gone. Agents running older instructions still call these: say so, and carry on.
+  claim: () => Effect.sync(() => out(CLAIMS_GONE)),
+  release: () => Effect.sync(() => out(CLAIMS_GONE)),
+  claims: () => Effect.sync(() => out(CLAIMS_GONE)),
 
   set: () =>
     Effect.gen(function* () {

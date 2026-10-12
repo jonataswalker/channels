@@ -1,11 +1,9 @@
-// T323: a claim records the checkout, file#Symbol shares a file, and facts can expire.
+// Facts are shared and can expire.
 
 import { describe, expect, test } from "bun:test";
-import { formatClaims, formatFact, parseDuration } from "../src/format.ts";
+import { formatFact, parseDuration } from "../src/format.ts";
 import { wellFormedEvent, type Event, type Kind, type Message } from "../src/protocol.ts";
-import { claimConflict, fold as foldWith, overlaps, type Roster } from "../src/state.ts";
-import { homedir } from "node:os";
-import { claimPlace, hideHome } from "../src/where.ts";
+import { fold as foldWith, type Roster } from "../src/state.ts";
 import { generateIdentity, sign, verify, type Identity } from "../src/identity.ts";
 
 const roster: Roster = [];
@@ -24,35 +22,6 @@ async function msg(id: Identity, from: string, ev: Event, at = T0 + seq * 1000):
   const p = await sign(id, base);
   return { ...p, seq, rts: at, sigOk: await verify(p) };
 }
-
-describe("claims name a checkout and can share a file by symbol", () => {
-  test("file#A and file#B do not overlap; a whole file or a directory still locks", () => {
-    const file = "web/src/components/message.tsx";
-    expect(overlaps(`${file}#EventRow`, `${file}#Bubble`)).toBe(false);
-    expect(overlaps(`${file}#EventRow`, `${file}#EventRow`)).toBe(true);
-    expect(overlaps(`${file}#EventRow`, file)).toBe(true);
-    expect(overlaps("web/src/components", `${file}#EventRow`)).toBe(true);
-    expect(overlaps("src", "src/a.rs")).toBe(true);
-    expect(overlaps("src/a", "src/ab")).toBe(false);
-    expect(overlaps("*", `${file}#EventRow`)).toBe(true);
-  });
-
-  test("a claim in another checkout conflicts, and the list names that checkout", async () => {
-    const a = await member("a");
-    const b = await member("b");
-    const held = await msg(a, "a", { op: "claim", paths: ["src/net"], ttl: 600, machine: "mbp", checkout: "/work/a" });
-    const symbol = await msg(b, "b", { op: "claim", paths: ["src/ui.tsx#Header", "src/ui.tsx#Footer"], ttl: 600, checkout: "/work/b" });
-    const again = await msg(b, "b", { op: "claim", paths: ["src/ui.tsx#Header"], ttl: 600, checkout: "/work/b" });
-    const whole = await msg(b, "b", { op: "claim", paths: ["src/net/tcp.rs"], ttl: 600, checkout: "/work/b" });
-    const s = fold([held, symbol, again, whole], held.rts! + 1000);
-    expect(s.rejected.get(whole.seq)).toBe("src/net is claimed by a in a's checkout (/work/a)");
-    expect(s.claims.map((c) => c.path).sort()).toEqual(["src/net", "src/ui.tsx#Footer", "src/ui.tsx#Header"]);
-    expect(s.claims.find((c) => c.path === "src/net")).toMatchObject({ machine: "mbp", checkout: "/work/a" });
-    expect(formatClaims(s, held.rts! + 1000)).toContain("in a's checkout (/work/a, on mbp)");
-    expect(claimConflict(s.claims.find((c) => c.path === "src/net")!)).toContain("in a's checkout");
-    expect(wellFormedEvent({ op: "claim", paths: ["src/a.ts#Row"], ttl: 60, machine: "mbp", checkout: "/work/a" })).toBe(true);
-  });
-});
 
 describe("facts are shared and can expire", () => {
   test("anyone can unset, a ttl fact disappears, and the list shows its age", async () => {
@@ -75,15 +44,4 @@ describe("facts are shared and can expire", () => {
     expect(parseDuration("7d")).toBe(7 * 86400);
     expect(wellFormedEvent({ op: "fact.set", key: "k", value: "v", ttl: 3600 })).toBe(true);
   });
-});
-
-test("a claim's checkout never carries the home directory", () => {
-  const home = homedir();
-  expect(hideHome(home + "/.t3/worktrees/modelchannel/t3-07c0ed11")).toBe("~/.t3/worktrees/modelchannel/t3-07c0ed11");
-  expect(hideHome(home)).toBe("~");
-  expect(hideHome("/opt/src")).toBe("/opt/src");
-  expect(hideHome(home + "2/proj")).toBe(home + "2/proj");
-  const place = claimPlace();
-  expect(place.checkout?.includes(home)).toBe(false);
-  expect(JSON.stringify(place).includes(home)).toBe(false);
 });

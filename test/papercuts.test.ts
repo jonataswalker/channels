@@ -1,12 +1,12 @@
-// T283: cancel is its own state, deps can be added later, review counts as ready,
-// a near-duplicate open title warns, and an empty kiwi sh glob says so.
+// A task is open, doing or done (an older client's cancel is done), a near-duplicate open title
+// warns, and an empty kiwi sh glob says so.
 
 import { describe, expect, test } from "bun:test";
-import { describeEvent, formatAdded, formatAfter, formatStatus, formatTask, formatTasks } from "../src/format.ts";
+import { describeEvent, formatStatus, formatTask, formatTasks } from "../src/format.ts";
 import { memberLoad } from "../src/load.ts";
 import { wellFormedEvent, type Event, type Kind, type Message } from "../src/protocol.ts";
 import { runSh } from "../src/sh.ts";
-import { fold as foldWith, similarOpenTasks, titlesLookAlike, waitingOn, type Roster, type Task } from "../src/state.ts";
+import { fold as foldWith, similarOpenTasks, titlesLookAlike, type Roster, type Task } from "../src/state.ts";
 import { generateIdentity, sign, verify, type Identity } from "../src/identity.ts";
 
 const roster: Roster = [];
@@ -27,14 +27,15 @@ async function msg(id: Identity, from: string, ev: Event): Promise<Message> {
   return { ...p, seq, rts: at, sigOk: await verify(p) };
 }
 
-describe("task cancel and after", () => {
-  test("cancel is a state of its own; drop still only unassigns", async () => {
+describe("open, doing, done", () => {
+  test("an older client's cancel is done, with a note saying so; drop only unassigns", async () => {
     const a = await member("a");
     const added = await msg(a, "a", { op: "task.add", title: "duplicate of the login fix", owner: "a" });
     const claimed = await msg(a, "a", { op: "task.claim", task: added.seq });
     const cancelled = await msg(a, "a", { op: "task.update", task: added.seq, state: "cancelled" });
     const s = fold([added, claimed, cancelled]);
-    expect(s.tasks.get(added.seq)).toMatchObject({ state: "cancelled", owner: "a" });
+    expect(s.tasks.get(added.seq)).toMatchObject({ state: "done", owner: "a", cancelled: true });
+    expect(s.tasks.get(added.seq)?.notes.map((n) => n.text)).toEqual(["cancelled"]);
     expect(s.rejected.has(cancelled.seq)).toBe(false);
     expect(describeEvent(cancelled, s)).toContain("cancelled");
 
@@ -45,82 +46,45 @@ describe("task cancel and after", () => {
     expect(dropped.tasks.get(other.seq)).toMatchObject({ state: "todo", owner: undefined });
   });
 
-  test("a cancelled task cannot be claimed, and cancelling it unblocks dependents", async () => {
+  test("a done task can't be claimed, and isn't anyone's load", async () => {
     const a = await member("a");
     const t1 = await msg(a, "a", { op: "task.add", title: "the duplicate", owner: "a" });
-    const t2 = await msg(a, "a", { op: "task.add", title: "the real one", after: [t1.seq], owner: "a" });
-    const cancel = await msg(a, "a", { op: "task.update", task: t1.seq, state: "cancelled" });
+    const t2 = await msg(a, "a", { op: "task.add", title: "the real one", owner: "a" });
+    const done = await msg(a, "a", { op: "task.update", task: t1.seq, state: "done" });
     const claim = await msg(a, "a", { op: "task.claim", task: t1.seq });
-    const s = fold([t1, t2, cancel, claim]);
-    expect(s.rejected.get(claim.seq)).toContain("cancelled");
-    expect(waitingOn(s, s.tasks.get(t2.seq)!)).toEqual([]);
+    const s = fold([t1, t2, done, claim]);
+    expect(s.rejected.get(claim.seq)).toContain("already done");
     const load = memberLoad(s, "a");
-    expect([...load.current, ...load.queued, ...load.waiting].map((t) => t.id)).not.toContain(t1.seq);
-    expect(load.queued.map((t) => t.id)).toEqual([t2.seq]);
+    expect([...load.current, ...load.queued, ...load.waiting].map((t) => t.id)).toEqual([t2.seq]);
   });
 
-  test("task after appends deps and refuses a missing id, a self-dep or a cycle", async () => {
-    const a = await member("a");
-    const t1 = await msg(a, "a", { op: "task.add", title: "first" });
-    const t2 = await msg(a, "a", { op: "task.add", title: "second", after: [t1.seq] });
-    const again = await msg(a, "a", { op: "task.update", task: t2.seq, after: [t1.seq] });
-    const extra = await msg(a, "a", { op: "task.add", title: "third" });
-    const add = await msg(a, "a", { op: "task.update", task: t2.seq, after: [extra.seq] });
-    const s = fold([t1, t2, again, extra, add]);
-    expect(s.tasks.get(t2.seq)?.after).toEqual([t1.seq, extra.seq]);
-    expect(describeEvent(add, s)).toContain(`T${extra.seq}`);
-
-    const missing = await msg(a, "a", { op: "task.update", task: t2.seq, after: [999] });
-    const self = await msg(a, "a", { op: "task.update", task: t1.seq, after: [t1.seq] });
-    const cycle = await msg(a, "a", { op: "task.update", task: t1.seq, after: [t2.seq] });
-    const bad = fold([t1, t2, extra, missing, self, cycle]);
-    expect(bad.rejected.get(missing.seq)).toContain("no task T999");
-    expect(bad.rejected.get(self.seq)).toContain("would cycle");
-    expect(bad.rejected.get(cycle.seq)).toContain("would cycle");
-    expect(bad.tasks.get(t1.seq)?.after).toEqual([]);
-    expect(wellFormedEvent({ op: "task.update", task: t1.seq, state: "cancelled", after: [t2.seq] })).toBe(true);
-    expect(wellFormedEvent({ op: "task.update", task: t1.seq, state: "nope" })).toBe(false);
+  test("states on the wire: today's and older clients' are well formed, anything else isn't", () => {
+    for (const state of ["todo", "doing", "review", "done", "blocked", "cancelled"]) expect(wellFormedEvent({ op: "task.update", task: 1, state })).toBe(true);
+    expect(wellFormedEvent({ op: "task.update", task: 1, state: "nope" })).toBe(false);
+    // What older clients also sent rides along, and is ignored.
+    expect(wellFormedEvent({ op: "task.update", task: 1, after: [2] })).toBe(true);
+    expect(wellFormedEvent({ op: "task.add", title: "t", needs: ["windows"], after: [1] })).toBe(true);
   });
 
-  test("review, done and cancelled satisfy a dependency; a todo one does not", async () => {
+  test("a cancelled task reads as cancelled on the board, in status and in full", async () => {
     const a = await member("a");
-    const blocker = await msg(a, "a", { op: "task.add", title: "blocker" });
-    const next = await msg(a, "a", { op: "task.add", title: "next", after: [blocker.seq] });
-    const open = fold([blocker, next]);
-    expect(waitingOn(open, open.tasks.get(next.seq)!)).toEqual([blocker.seq]);
-
-    for (const state of ["review", "done", "cancelled"] as const) {
-      const moved = await msg(a, "a", { op: "task.update", task: blocker.seq, state });
-      const s = fold([blocker, next, moved]);
-      expect(waitingOn(s, s.tasks.get(next.seq)!)).toEqual([]);
-    }
-  });
-});
-
-describe("how an add reads", () => {
-  test("review is 'in review'; done and cancelled are not still waiting", async () => {
-    const a = await member("a");
-    const review = await msg(a, "a", { op: "task.add", title: "in review already" });
-    const todo = await msg(a, "a", { op: "task.add", title: "not started" });
-    const done = await msg(a, "a", { op: "task.add", title: "finished" });
-    const finish = await msg(a, "a", { op: "task.update", task: done.seq, state: "done" });
-    const mark = await msg(a, "a", { op: "task.update", task: review.seq, state: "review" });
-    const s = fold([review, todo, done, finish, mark]);
-    expect(formatAdded(s, 12, [review.seq, todo.seq, done.seq])).toBe(`added T12; waits on T${review.seq} (in review), T${todo.seq} (todo)`);
-    expect(formatAfter(s, review.seq, [todo.seq])).toBe(`T${review.seq} waits on T${todo.seq} (todo)`);
-    const child = s.tasks.get(todo.seq)!;
-    expect(formatTask(s, { ...child, after: [review.seq] })).toContain(`T${review.seq} (review) — ready`);
-    expect(formatTask(s, { ...child, after: [done.seq] })).toContain("— all done");
-  });
-
-  test("cancelled tasks stay off the open board unless --all", async () => {
-    const a = await member("a");
-    const t = await msg(a, "a", { op: "task.add", title: "drop me" });
+    const t = await msg(a, "a", { op: "task.add", title: "not needed after all" });
     const cancel = await msg(a, "a", { op: "task.update", task: t.seq, state: "cancelled" });
     const s = fold([t, cancel]);
-    expect(formatTasks(s)).toBe("no tasks");
-    expect(formatTasks(s, { all: true })).toContain("cancelled");
-    expect(formatStatus({ alias: "c", me: "a", state: s, online: new Map(), unread: 0, now: T0 })).toContain("0 open, 1 cancelled");
+    expect(formatTasks(s, { all: true })).toBe(`T${t.seq}   cancelled not needed after all`);
+    expect(formatTask(s, s.tasks.get(t.seq)!)).toContain("state: done (cancelled)");
+    expect(formatStatus({ alias: "c", me: "a", state: s, online: new Map(), unread: 0, now: T0 })).toContain("0 open, 1 done (1 cancelled)");
+  });
+
+  test("done tasks stay off the open board unless --all; the board says open", async () => {
+    const a = await member("a");
+    const t = await msg(a, "a", { op: "task.add", title: "drop me" });
+    const open = await msg(a, "a", { op: "task.add", title: "still open" });
+    const finish = await msg(a, "a", { op: "task.update", task: t.seq, state: "done" });
+    const s = fold([t, open, finish]);
+    expect(formatTasks(s)).toBe(`T${open.seq}   open      still open`);
+    expect(formatTasks(s, { all: true })).toContain("done");
+    expect(formatStatus({ alias: "c", me: "a", state: s, online: new Map(), unread: 0, now: T0 })).toContain("1 open, 1 done");
   });
 });
 

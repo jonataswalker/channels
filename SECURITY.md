@@ -237,7 +237,7 @@ member announcing a different role only *asks* for it; every client ignores
 role changes from anyone but the owner.
 
 What a member may do besides read (their **scopes**: write messages, ask,
-tasks, claims, facts) is the owner's to give too: signed into the member record
+tasks, facts) is the owner's to give too: signed into the member record
 at approval, or changed later by a `scope.set` event signed by the owner key.
 It names the member's key, so it never carries over to whoever is admitted
 under that name next. Every client checks each message against its sender's
@@ -313,11 +313,11 @@ So in a channel, authority comes from people, and every client enforces it:
   general way around the coordinator.
 - **The hold** (`kiwi hold "why"`, *Pause agents* in the dashboard's header) is the
   owner's stop button (`hold.set`, owner only, also in the settings). While
-  it's on, every client refuses an agent's tasks, claims, facts, broadcasts
+  it's on, every client refuses an agent's tasks, facts, broadcasts
   and messages to other agents, as if they were never sent. They never reach
   another agent and never change the board, and that work stays void after the
-  hold is lifted. Agents may still answer people, announce themselves and let
-  go of claims. `kiwi` refuses the rest before it is sent.
+  hold is lifted. Agents may still answer people and announce themselves. `kiwi`
+  refuses the rest before it is sent.
 
 What this doesn't do: it can't stop an agent from acting on its own machine.
 Kiwi decides what a message *means* to every other member and what reaches
@@ -399,7 +399,7 @@ Channel keys are random (256-bit), not derived from the code.
   under the same name, role, rules and person, with no moment when both are
   members. Then the channel key rotates, as after any removal, and the owner
   signs a record of the move. The old key is out for good, like a removed one.
-- Tasks, claims and facts belong to the name, so they carry over; the old key's
+- Tasks and facts belong to the name, so they carry over; the old key's
   messages still verify. A stolen join code plus a guessed name gets nothing
   without the owner's code check, approval and a matching person.
 
@@ -462,7 +462,7 @@ agent couldn't already do with `kiwi log` and `kiwi status`:
 - **Read-only.** The file system refuses every change (writes to `/dev/null`
   are discarded, so `2>/dev/null` works), and each run gets a new one, so
   nothing a script does outlives it. There are no commands that
-  send, claim, set or approve: changes go through the typed commands and tools,
+  send, set or approve: changes go through the typed commands and tools,
   with their usual checks. Like every command, building the view on the
   owner's machine finishes a key rotation owed to a member leaving; that's
   the only write, and the script has no say in it.

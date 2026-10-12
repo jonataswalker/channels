@@ -21,13 +21,12 @@ import { loadImages, saveImages } from "./attach.ts";
 import { loadSummary, memberLoad, showsLoad } from "./load.ts";
 import { Cursor, home, Keystore } from "./config.ts";
 import { ChannelGone, reason } from "./client.ts";
-import { cardLine, fitsLine, formatAdded, formatAfter, formatClaims, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, parseDuration } from "./format.ts";
+import { cardLine, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, parseDuration, stateWord, taskStateWord } from "./format.ts";
 import { SCOPES } from "./scopes.ts";
 import { CHAT_KINDS, ignored, type Kind, type Message } from "./protocol.ts";
 import { inlineText } from "./membership.ts";
 import { parseTaskId, similarOpenTasks, taskId } from "./state.ts";
-import { claimPlace } from "./where.ts";
-import { detectCard, handoffHere } from "./card.ts";
+import { detectCard } from "./card.ts";
 import { VERSION } from "./version.ts";
 import { channelFiles, runSh, sessionViews } from "./sh.ts";
 
@@ -108,7 +107,7 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
     "members",
     {
       description:
-        "Who's in the channel: names, roles, owner, key fingerprints, what each may do (when the owner limited it), and each member's load (free, busy or overloaded, with their current task, queue and claims). " +
+        "Who's in the channel: names, roles, owner, key fingerprints, what each may do (when the owner limited it), and each member's load (free, busy or overloaded, with their current task and queue). " +
         "Names are bound to keys by the owner, so they can't be faked. Example: call members.",
     },
     tool(() =>
@@ -140,7 +139,7 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
 
   server.registerTool(
     "status",
-    { description: "Whether the channel is ON HOLD, its charter (the owner's scope), your human, members (and who is online), open tasks, claims, facts, and questions waiting on you. Example: call status." },
+    { description: "Whether the channel is ON HOLD, its charter (the owner's scope), your human, members (and who is online), open tasks, facts, and questions waiting on you. Example: call status." },
     tool(() =>
       Effect.gen(function* () {
         const [{ messages, state }, online] = yield* Effect.all([s.state(), s.who()], { concurrency: "unbounded" });
@@ -220,7 +219,7 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
     {
       description:
         "Query the channel as read-only files with a sandboxed shell (grep, jq, awk, sed, find…), in one script. " +
-        "/channel has log.jsonl, msgs/, inbox/, tasks/T<n>.md, members/<name>.json, facts/<key>, claims, status, status.json; " +
+        "/channel has log.jsonl, msgs/, inbox/, tasks/T<n>.md, members/<name>.json, facts/<key>, status, status.json; " +
         "/channels/<alias>/ is every OTHER channel you're in, not this one. All channels: /channel plus /channels/*. `cat README` for the layout. " +
         "Read-only: no disk, no network, no writes; use the other tools to send or change anything. Example: sh {\"script\":\"cat status\"}.",
       inputSchema: { script: z.string().describe("a bash script, e.g. jq -r 'select(.kind==\"ask\") | .body' log.jsonl") },
@@ -396,29 +395,23 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
     "task_add",
     {
       description:
-        "Add a task to the shared board. Returns its id (like T12). Warns when an open task has a near-identical title, and names deps that are still open (review reads as 'in review'). " +
-        "`needs` are tags matched against members' cards (os, harness, tools, repo, role words: windows, gpu, docker…); the answer names who fits, least busy first. `review` is who must approve it before it's done (a member, or any). " +
-        'Example: task_add {"title":"test the driver on Windows","needs":["windows"],"review":"any"}.',
+        "Add a task to the shared board: it's open until someone takes it, then doing, then done. Returns its id (like T12), and warns when an open task has a near-identical title. " +
+        "`review` is who must approve it before it's done (a member, or any). " +
+        'Example: task_add {"title":"test the driver on Windows","review":"any"}.',
       inputSchema: {
         title: z.string(),
         detail: z.string().optional(),
         owner: z.string().optional(),
-        after: z.array(z.string()).optional().describe("task ids that must be done first"),
-        needs: z.array(z.string()).optional().describe("tags a member must have: windows, gpu, docker, a repo…"),
         review: z.string().optional().describe("who must approve it before it's done: a member's name, or any"),
       },
     },
-    tool(({ title, detail, owner, after, needs, review }) =>
+    tool(({ title, detail, owner, review }) =>
       Effect.gen(function* () {
-        const ids = after ? yield* Effect.forEach(after, task) : undefined;
         const { state } = yield* s.state();
-        const id = yield* s.taskAdd(title, { detail, owner, after: ids, needs, review });
+        const id = yield* s.taskAdd(title, { detail, owner, review });
         const like = similarOpenTasks(state, title).map((t) => t.id);
-        const lines = [formatAdded(state, id, ids ?? [])];
+        const lines = [`added ${taskId(id)}`];
         if (like.length) lines.push(looksLikeLine(like));
-        const now = (yield* s.state()).state;
-        const fit = !owner && now.tasks.get(id) ? fitsLine(now, now.tasks.get(id)!) : null;
-        if (fit) lines.push(fit);
         return lines.join("\n");
       }),
     ),
@@ -428,19 +421,17 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
     "task_update",
     {
       description:
-        "Claim, progress, cancel, hand off or annotate a task. `claim` fails if someone else owns it. `after` appends dependencies. `cancel` is a distinct state, not an unassign. " +
+        "Take, progress, hand over or annotate a task. `claim` takes it (fails if someone else owns it); `done` finishes it; `drop` puts it back on the board; `assign` gives it to `owner`, with `note` saying where it stands and what's next. " +
         "A task with a reviewer can't be marked done by whoever did it: send it for `review`; the reviewer then calls `approve` (done) or `reject` (back to doing, with a note saying what to change). " +
-        "`handoff` gives it to `owner` with this checkout's branch, commit and changed files, and `note` says what's next; push the branch first. `show` includes who fits its needs. " +
         'Example: task_update {"task":"T12","action":"claim"}.',
       inputSchema: {
         task: z.string().describe("task id, like T12"),
-        action: z.enum(["claim", "start", "block", "review", "approve", "reject", "done", "cancel", "drop", "assign", "handoff", "note", "show", "after"]),
+        action: z.enum(["claim", "start", "review", "approve", "reject", "done", "drop", "assign", "note", "show"]),
         note: z.string().optional(),
         owner: z.string().optional().describe("for assign"),
-        after: z.array(z.string()).optional().describe("for after: task ids this one waits on"),
       },
     },
-    tool(({ task: raw, action, note, owner, after }) =>
+    tool(({ task: raw, action, note, owner }) =>
       Effect.gen(function* () {
         const id = yield* task(raw);
         if (action === "show") {
@@ -449,53 +440,26 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
           if (!t) return yield* new Rejected(`no task ${taskId(id)}`);
           return formatTask(state, t);
         }
-        if (action === "after") {
-          const deps = yield* Effect.forEach(after ?? [], task);
-          if (!deps.length) return yield* new Rejected("after needs at least one task id");
-          const state = yield* s.taskAfter(id, deps);
-          return formatAfter(state, id, deps);
-        }
-        if (action === "handoff") {
-          if (!owner) return yield* new Rejected("handoff needs owner: who takes it over");
-          const { handoff, pushed } = handoffHere();
-          const state = yield* s.taskHandoff(id, owner, note, handoff);
-          const t = state.tasks.get(id)!;
-          const where = handoff.branch ? `: pick it up from ${handoff.branch}${handoff.commit ? ` @ ${handoff.commit}` : ""}` : "";
-          return `${taskId(id)} is ${t.owner}'s now${where}${pushed === false && handoff.branch ? `. ${handoff.branch} isn't pushed: push it so ${t.owner} can fetch it` : ""}`;
+        if (action === "assign" && owner && owner !== s.me) {
+          const state = yield* s.taskHandoff(id, owner, note);
+          return `${taskId(id)} is ${state.tasks.get(id)!.owner}'s now`;
         }
         if (action === "reject" && !note) return yield* new Rejected("reject needs a note saying what to change");
-        const states = { start: "doing", block: "blocked", review: "review", approve: "done", reject: "doing", done: "done", cancel: "cancelled" } as const;
+        const states = { start: "doing", review: "review", approve: "done", reject: "doing", done: "done" } as const;
         const state =
           action === "claim"
             ? yield* s.taskClaim(id)
             : action === "drop"
               ? yield* s.taskUpdate(id, { owner: null, note })
               : action === "assign"
-                ? yield* s.taskUpdate(id, { owner: owner ?? s.me, note })
+                ? yield* s.taskUpdate(id, { owner: s.me, note })
                 : action === "note"
                   ? yield* s.taskUpdate(id, { note: note ?? "" })
                   : yield* s.taskUpdate(id, { state: states[action], note });
         const t = state.tasks.get(id)!;
-        return `${taskId(id)} ${t.state}${t.owner ? ` @${t.owner}` : ""}: ${t.title}`;
+        return `${taskId(id)} ${taskStateWord(t)}${t.owner ? ` @${t.owner}` : ""}: ${t.title}`;
       }),
     ),
-  );
-
-  server.registerTool(
-    "claim",
-    {
-      description: "Reserve paths before editing them. A path#Symbol claim shares the file; a whole-file claim still locks it. Records this machine and git checkout. Fails if another agent holds an overlapping claim, and names their checkout. Example: claim {\"paths\":[\"src/net\"],\"ttl\":\"30m\"}.",
-      inputSchema: { paths: z.array(z.string()).min(1), ttl: z.string().optional().describe("like 30m or 2h (default 30m)"), note: z.string().optional() },
-    },
-    tool(({ paths, ttl, note }) =>
-      Effect.suspend(() => Effect.map(s.claim(paths, parseDuration(ttl ?? "30m"), note, claimPlace()), (state) => formatClaims({ ...state, claims: state.claims.filter((c) => c.owner === s.me) }))),
-    ),
-  );
-
-  server.registerTool(
-    "release",
-    { description: "Release your claims (all of them if no paths given). Example: call release.", inputSchema: { paths: z.array(z.string()).optional() } },
-    tool(({ paths }) => Effect.as(s.release(paths), paths?.length ? `released ${paths.join(", ")}` : "released all your claims")),
   );
 
   server.registerTool(
@@ -512,7 +476,7 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
   );
 
   yield* Effect.promise(() => server.connect(new StdioServerTransport()));
-  // Say what this agent runs on, so work that needs it finds it. In the background: the harness is waiting on the handshake.
+  // Say what this agent runs on, so people can see it. In the background: the harness is waiting on the handshake.
   yield* Effect.forkDetach(Effect.ignoreCause(s.refreshCard(detectCard())));
   // An MCP server lives exactly as long as its client: exit when stdin closes,
   // so a crashed or killed agent never leaves an orphaned listener behind.

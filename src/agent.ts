@@ -1,6 +1,6 @@
 // An agent's view of one channel: the operations behind every CLI command
 // and MCP tool. Keeps a local cache of the decrypted log so folding shared
-// state (tasks, claims, facts, members) costs one incremental fetch.
+// state (tasks, facts, members) costs one incremental fetch.
 //
 // On Effect (docs/plans/effect.md, step 4). Every operation is an Effect over the
 // client's own (`ch.fx`) and over this computer's files as services (Keystore,
@@ -25,8 +25,8 @@ import { inlineText, type Member } from "./membership.ts";
 import type { Identity } from "./identity.ts";
 import { isLocalRefusal, OwnerOnly, Rejected } from "./refusals.ts";
 import { canPost, describeScopes, refusal, wireScopes, type Scope } from "./scopes.ts";
-import { GENERAL_ROOM, ignored, MAX_CHARTER, TASK_STATES, type Card, type Color, type Event, type Handoff, type ImageAttachment, type Kind, type Message, type Presence, type TaskState } from "./protocol.ts";
-import { allowedOnHold, claimConflict, findRoom, fold, humanOf, isPerson, keptFromPeople, newRoomId, normTags, ON_HOLD, overlaps, ownerOf, taskId, waitingOn, wouldCycle, type ChannelState, type GuardFloor, type Roster, type RoomsFloor } from "./state.ts";
+import { GENERAL_ROOM, ignored, MAX_CHARTER, TASK_STATES, type Card, type Color, type Event, type ImageAttachment, type Kind, type Message, type Presence, type TaskState } from "./protocol.ts";
+import { allowedOnHold, findRoom, fold, humanOf, isPerson, keptFromPeople, newRoomId, ON_HOLD, ownerOf, taskId, type ChannelState, type GuardFloor, type Roster, type RoomsFloor } from "./state.ts";
 import { inAgentHarness, mergeCard, sameCard } from "./card.ts";
 import { COMMANDS } from "./brief.ts";
 import { cardLine } from "./format.ts";
@@ -674,7 +674,7 @@ export class AgentSession {
 
   /**
    * Owner: stop every agent, or let them carry on. While on hold every client refuses an agent's work
-   * (tasks, claims, facts, messages to other agents); agents may still answer people.
+   * (tasks, facts, messages to other agents); agents may still answer people.
    */
   readonly setHold = Effect.fn("AgentSession.setHold")({ self: this }, function* (this: AgentSession, on: boolean, note?: string) {
     const owner = yield* this.adminCh("put the channel on hold or lift it");
@@ -734,21 +734,17 @@ export class AgentSession {
   readonly taskAdd = Effect.fn("AgentSession.taskAdd")({ self: this }, function* (
     this: AgentSession,
     title: string,
-    opts: { detail?: string; owner?: string; after?: number[]; needs?: string[]; review?: string } = {},
+    opts: { detail?: string; owner?: string; review?: string } = {},
   ) {
     const { state } = yield* this.state();
-    for (const d of opts.after ?? []) if (!state.tasks.has(d)) return yield* new Rejected(`no task ${taskId(d)}`);
     const owner = opts.owner && (yield* this.resolveTo([opts.owner], state))?.[0];
     const review = opts.review === undefined ? undefined : yield* this.reviewer(state, opts.review);
-    const needs = normTags(opts.needs);
     return yield* this.event(
       {
         op: "task.add",
         title,
         ...(opts.detail ? { detail: opts.detail } : {}),
         ...(owner ? { owner } : {}),
-        ...(opts.after?.length ? { after: opts.after } : {}),
-        ...(needs.length ? { needs } : {}),
         ...(review ? { review } : {}),
       },
       `task: ${title}`,
@@ -770,68 +766,54 @@ export class AgentSession {
     const t = state.tasks.get(id);
     if (!t) return yield* new Rejected(`no task ${taskId(id)}`);
     if (t.state === "done") return yield* new Rejected(`${taskId(id)} is already done`);
-    if (t.state === "cancelled") return yield* new Rejected(`${taskId(id)} is cancelled`);
     if (t.owner && t.owner !== this.me) return yield* new Rejected(`${taskId(id)} is owned by ${t.owner}`);
-    const waits = waitingOn(state, t);
     const seq = yield* this.event({ op: "task.claim", task: id }, `claimed ${taskId(id)}`);
-    const after = yield* this.confirm(seq);
-    if (waits.length) return yield* new Rejected(`claimed, but ${taskId(id)} is still waiting on ${waits.map(taskId).join(", ")}`);
-    return after;
+    return yield* this.confirm(seq);
   });
 
   readonly taskUpdate = Effect.fn("AgentSession.taskUpdate")({ self: this }, function* (
     this: AgentSession,
     id: number,
-    change: { state?: TaskState; owner?: string | null; title?: string; note?: string; after?: number[]; review?: string | null; handoff?: Handoff },
+    change: { state?: TaskState | "cancelled"; owner?: string | null; title?: string; note?: string; review?: string | null },
   ) {
     const { state } = yield* this.state();
     const t = state.tasks.get(id);
     if (!t) return yield* new Rejected(`no task ${taskId(id)}`);
-    if (change.state && !TASK_STATES.includes(change.state)) return yield* new Rejected(`state must be one of ${TASK_STATES.join(", ")}`);
-    if (change.after?.length) yield* this.checkAfter(state, id, change.after);
+    if (change.state && change.state !== "cancelled" && !TASK_STATES.includes(change.state)) return yield* new Rejected(`state must be one of ${TASK_STATES.join(", ")}`);
     const owner = change.owner ? (yield* this.resolveTo([change.owner], state))?.[0] : change.owner;
     const review = change.review ? yield* this.reviewer(state, change.review) : change.review;
     // Said here rather than left to every client's fold: the doer can't mark its own reviewed work done.
     const me = state.members.get(this.me);
     const gate = review === undefined ? t.review : review || undefined;
-    if (change.state === "done" && t.state !== "done" && gate && me && !isPerson(me) && (gate === "*" ? (owner ?? t.owner) === this.me || t.workedBy.includes(this.me) : gate !== this.me)) {
-      return yield* new Rejected(`${taskId(id)} needs review by ${gate === "*" ? "someone who hasn't worked on it" : gate} before it's done: send it for review (kiwi task review ${taskId(id)})`);
+    const finishing = change.state === "done" || change.state === "cancelled";
+    if (finishing && t.state !== "done" && gate && me && !isPerson(me) && (gate === "*" ? (owner ?? t.owner) === this.me || t.workedBy.includes(this.me) : gate !== this.me)) {
+      const what = change.state === "cancelled" ? "cancelled" : "done";
+      return yield* new Rejected(`${taskId(id)} needs review by ${gate === "*" ? "someone who hasn't worked on it" : gate} before it's ${what}: ${change.state === "cancelled" ? "ask a person or its reviewer to cancel it" : `send it for review (kiwi task review ${taskId(id)})`}`);
     }
     // Tell whoever this concerns: the new owner, the current owner if it isn't
-    // us, the creator when it's done or cancelled, and owners of tasks it unblocks.
+    // us, and the creator when it's done.
     const notify: string[] = [];
     if (owner) notify.push(owner);
     if (t.owner && t.owner !== this.me) notify.push(t.owner);
     // In review: whoever must approve it hears; a named reviewer, or the one just named.
     const reviewerName = (review ?? t.review) !== "*" ? (review ?? t.review) : undefined;
     if ((change.state === "review" || review) && reviewerName) notify.push(reviewerName);
-    if (change.state === "done" || change.state === "cancelled") {
-      notify.push(t.createdBy);
-      for (const other of state.tasks.values()) if (other.after.includes(id) && other.owner) notify.push(other.owner);
-    }
+    if (finishing) notify.push(t.createdBy);
     const seq = yield* this.event(
       { op: "task.update", task: id, ...change, ...(owner !== undefined ? { owner } : {}), ...(review !== undefined ? { review } : {}) },
-      `${taskId(id)} ${change.handoff ? "handed over" : (change.state ?? "updated")}`,
+      `${taskId(id)} ${change.state ?? "updated"}`,
       notify,
     );
     return yield* this.confirm(seq);
   });
 
-  /**
-   * Hand a task to someone else with where it stands: the branch and commit to pick it up from, the
-   * files in play, and what's next. This agent's claims on those files are let go, so the next owner
-   * can claim them.
-   */
-  readonly taskHandoff = Effect.fn("AgentSession.taskHandoff")({ self: this }, function* (this: AgentSession, id: number, to: string, next: string | undefined, handoff: Handoff) {
-    const { state: before } = yield* this.state();
-    const target = (yield* this.resolveTo([to], before))?.[0];
-    if (!target || !before.members.get(target)?.active) return yield* new Rejected(`no member named ${to}`);
+  /** Give a task to someone else, with a note on where it stands and what's next. */
+  readonly taskHandoff = Effect.fn("AgentSession.taskHandoff")({ self: this }, function* (this: AgentSession, id: number, to: string, next: string | undefined) {
+    const { state } = yield* this.state();
+    const target = (yield* this.resolveTo([to], state))?.[0];
+    if (!target || !state.members.get(target)?.active) return yield* new Rejected(`no member named ${to}`);
     if (target === this.me) return yield* new Rejected("hand it to someone else");
-    const state = yield* this.taskUpdate(id, { owner: target, ...(next ? { note: next } : {}), handoff, ...(before.tasks.get(id)?.state === "doing" ? { state: "todo" as const } : {}) });
-    const files = handoff.files ?? [];
-    const held = state.claims.filter((c) => c.owner === this.me && files.some((f) => overlaps(c.path, f))).map((c) => c.path);
-    if (held.length) yield* this.release(held);
-    return state;
+    return yield* this.taskUpdate(id, { owner: target, ...(next ? { note: next } : {}), ...(state.tasks.get(id)?.state === "doing" ? { state: "todo" as const } : {}) });
   });
 
   /**
@@ -849,47 +831,6 @@ export class AgentSession {
     if (!me || isPerson(me) || !canPost(me.scopes) || state.hold || sameCard(me.card, card)) return { sent: false, card };
     yield* this.event({ op: "card", ...card }, `card: ${cardLine(card)}`);
     return { sent: true, card };
-  });
-
-  /** Append dependencies. Missing ids, self-deps and cycles are refused. */
-  readonly taskAfter = Effect.fn("AgentSession.taskAfter")({ self: this }, function* (this: AgentSession, id: number, deps: number[]) {
-    if (!deps.length) return yield* new Rejected("name at least one task to wait on");
-    const { state } = yield* this.state();
-    yield* this.checkAfter(state, id, deps);
-    const seq = yield* this.event({ op: "task.update", task: id, after: deps }, `${taskId(id)} waits on ${deps.map(taskId).join(", ")}`);
-    return yield* this.confirm(seq);
-  });
-
-  private checkAfter(state: ChannelState, id: number, deps: number[]): Effect.Effect<void, Rejected> {
-    if (!state.tasks.has(id)) return Effect.fail(new Rejected(`no task ${taskId(id)}`));
-    for (const d of deps) {
-      if (!state.tasks.has(d)) return Effect.fail(new Rejected(`no task ${taskId(d)}`));
-      if (wouldCycle(state.tasks, id, d)) return Effect.fail(new Rejected(`${taskId(id)} waiting on ${taskId(d)} would cycle`));
-    }
-    return Effect.void;
-  }
-
-  readonly claim = Effect.fn("AgentSession.claim")({ self: this }, function* (
-    this: AgentSession,
-    paths: string[],
-    ttlSec: number,
-    note?: string,
-    place?: { machine?: string; checkout?: string },
-  ) {
-    const { state } = yield* this.state();
-    for (const p of paths) {
-      const c = state.claims.find((x) => x.owner !== this.me && overlaps(x.path, p));
-      if (c) return yield* new Rejected(claimConflict(c));
-    }
-    const seq = yield* this.event(
-      { op: "claim", paths, ttl: ttlSec, ...(note ? { note } : {}), ...(place?.machine ? { machine: place.machine } : {}), ...(place?.checkout ? { checkout: place.checkout } : {}) },
-      `claimed ${paths.join(", ")}`,
-    );
-    return yield* this.confirm(seq);
-  });
-
-  readonly release = Effect.fn("AgentSession.release")({ self: this }, function* (this: AgentSession, paths?: string[]) {
-    return yield* this.event({ op: "release", ...(paths?.length ? { paths } : {}) }, paths?.length ? `released ${paths.join(", ")}` : "released all claims");
   });
 
   readonly setFact = Effect.fn("AgentSession.setFact")({ self: this }, function* (this: AgentSession, key: string, value: string, ttlSec?: number) {

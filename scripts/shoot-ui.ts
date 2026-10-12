@@ -1,6 +1,6 @@
 // Screenshots of every screen of the dashboard, for design work: each surface in dark and light,
 // wide and narrow, as the owner, as someone invited, and signed out. Seeds a realistic channel
-// first (an agent on a linked computer, messages, a thread, tasks, claims, facts, a room, a
+// first (an agent on a linked computer, messages, a thread, tasks, notes, a room, a
 // pending join request), the same way scripts/smoke-ui.ts walks the flows.
 //
 //   bun run web:build && bun scripts/shoot-ui.ts [outdir]
@@ -137,7 +137,7 @@ try {
   await letIn.click({ timeout: 30000 })
   await joining
 
-  // The conversation: chat, a question, a thread, a long message with code, tasks, a claim, facts.
+  // The conversation: chat, a question, a thread, a long message with code, tasks, notes.
   const composer = () => owner.getByPlaceholder(/^Write (to the channel|in #)/)
   await composer().fill("Morning. The relay deploy is done; can someone check the Effect router numbers?")
   await owner.keyboard.press("Enter")
@@ -148,7 +148,6 @@ try {
   const firstTask = /T\d+/.exec(await bot("task", "add", "Write fewer rows per message", "--owner", "atlas"))?.[0] ?? "T0"
   await bot("task", "add", "Polish the conversation feed")
   await bot("send", `${firstTask}: rows per message are down from 6 to 4. https://github.com/ojowwalker77/channels/pull/41`)
-  await bot("claim", "src/relay/room.ts", "--note", "fewer writes")
   await bot("set", "relay.version", "667ce081")
   await bot("set", "canary", "off")
   await owner.reload()

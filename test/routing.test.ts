@@ -1,17 +1,13 @@
-// Work goes to whoever fits: members describe themselves (cards), tasks say what they need, and
-// the board names who has it, least busy first. A task with a reviewer is done only when someone
-// else says so, and handing work over carries where it stands.
+// Members describe themselves (cards), shown in status and People. A task with a reviewer is done
+// only when someone else says so, and handing work over is giving it to someone with a note. What
+// older clients sent for routing (needs, dependencies, a handoff's branch and files) is ignored.
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { detectHarness, handoffHere, mergeCard, repoName, sameCard } from "../src/card.ts";
-import { cardLine, describeEvent, fitsLine, formatStatus, formatTask, formatTasks } from "../src/format.ts";
+import { detectHarness, mergeCard, repoName, sameCard } from "../src/card.ts";
+import { cardLine, describeEvent, formatStatus, formatTask, formatTasks } from "../src/format.ts";
 import { generateIdentity, sign, verify, type Identity } from "../src/identity.ts";
 import { wellFormed, type Event, type Kind, type Message } from "../src/protocol.ts";
-import { fits, fold, memberTags, type Roster } from "../src/state.ts";
+import { fold, type Roster } from "../src/state.ts";
 
 const ids: Record<string, Identity> = {};
 let seq = 0;
@@ -44,7 +40,6 @@ describe("cards", () => {
   test("a member says what it is; tags are lowercase; the card shows in status", async () => {
     const s = fold(await cards(), roster);
     expect(s.members.get("mac")!.card).toMatchObject({ os: "macos", tools: ["git", "xcode", "docker"], repo: "ojow/channels" });
-    expect([...memberTags(s.members.get("mac")!)]).toEqual(expect.arrayContaining(["macos", "arm64", "claude-code", "xcode", "ojow/channels", "channels", "main", "frontend"]));
     expect(cardLine(s.members.get("linux")!.card)).toBe("linux x64 · tools: git, docker, gpu · the CI box");
     const status = formatStatus({ alias: "c", me: "mac", state: s, online: new Map(), unread: 0 });
     expect(status).toContain("windows x64 · codex · ojow/channels · tools: git, dotnet");
@@ -64,31 +59,6 @@ describe("cards", () => {
     expect(wellFormed({ ...p, ev: { op: "card", os: "macos", tools: Array(41).fill("t") } })).toBe(false);
     expect(wellFormed({ ...p, ev: { op: "card", os: "x".repeat(121) } })).toBe(false);
     expect(wellFormed({ ...p, ev: { op: "card", os: "macos", tools: Array(40).fill("t") } })).toBe(true);
-    expect(wellFormed({ ...p, ev: { op: "task.add", title: "t", needs: Array(41).fill("n") } })).toBe(false);
-    expect(wellFormed({ ...p, ev: { op: "task.update", task: 1, handoff: { files: Array(201).fill("f") } } })).toBe(false);
-  });
-});
-
-describe("needs and who fits", () => {
-  test("a task's needs name who has them, least busy first", async () => {
-    const busy = await ev("linux", { op: "task.add", title: "flaky test", owner: "linux" });
-    const needsDocker = await ev("jon", { op: "task.add", title: "container build", needs: ["Docker"] });
-    const needsWin = await ev("jon", { op: "task.add", title: "test the driver", needs: ["windows"] });
-    const needsGpu = await ev("jon", { op: "task.add", title: "train", needs: ["gpu", "windows"] });
-    const needsTpu = await ev("jon", { op: "task.add", title: "tpu", needs: ["tpu", "docker"] });
-    const s = fold([...(await cards()), busy, needsDocker, needsWin, needsGpu, needsTpu], roster);
-    expect(s.tasks.get(needsDocker.seq)!.needs).toEqual(["docker"]);
-    const level = (n: string) => (n === "linux" ? "busy" : "free") as "busy" | "free";
-    expect(fits(s, s.tasks.get(needsDocker.seq)!, level).map((f) => f.name)).toEqual(["mac", "linux"]);
-    expect(fitsLine(s, s.tasks.get(needsDocker.seq)!)).toBe("fits: mac (free), linux (busy)");
-    expect(fitsLine(s, s.tasks.get(needsWin.seq)!)).toBe("fits: win (free)");
-    expect(fitsLine(s, s.tasks.get(needsGpu.seq)!)).toBe("no one agent has all of it");
-    expect(fitsLine(s, s.tasks.get(needsTpu.seq)!)).toBe("nobody here has: tpu");
-    expect(fitsLine(s, s.tasks.get(busy.seq)!)).toBeNull();
-    // Roles count: mac's role is frontend.
-    expect(fits(s, { needs: ["frontend"] }, () => "free").map((f) => f.name)).toEqual(["mac"]);
-    expect(formatTasks(s)).toContain("[needs windows]");
-    expect(formatTask(s, s.tasks.get(needsWin.seq)!)).toContain("fits: win (free)");
   });
 });
 
@@ -165,15 +135,17 @@ describe("review", () => {
   });
 });
 
-describe("handoff", () => {
-  test("the note carries the branch, commit and files; status names it", async () => {
+describe("handing over", () => {
+  test("is giving it to someone with a note; an older client's handoff details are ignored", async () => {
     const add = await ev("jon", { op: "task.add", title: "port", owner: "mac" });
-    const hand = await ev("mac", { op: "task.update", task: add.seq, owner: "win", note: "build on Windows next", handoff: { branch: "mac/port", commit: "3f9a2c1", files: ["src/a.ts", "src/b.ts"] } });
+    // What an older client sent: the branch, commit and files ride along, and fold to nothing.
+    const old = { op: "task.update", task: add.seq, owner: "win", note: "build on Windows next", handoff: { branch: "mac/port", commit: "3f9a2c1", files: ["src/a.ts"] } } as unknown as Event;
+    const hand = await ev("mac", old);
     const s = fold([add, hand], roster);
     expect(s.tasks.get(add.seq)!.owner).toBe("win");
-    expect(s.tasks.get(add.seq)!.notes[0]).toMatchObject({ by: "mac", text: "build on Windows next", handoff: { branch: "mac/port", commit: "3f9a2c1" } });
-    expect(describeEvent(hand, s)).toBe(`handed T${add.seq} “port” to win (branch mac/port @ 3f9a2c1, 2 files): build on Windows next`);
-    expect(formatTask(s, s.tasks.get(add.seq)!)).toContain("files: src/a.ts, src/b.ts");
+    expect(s.tasks.get(add.seq)!.notes[0]).toEqual({ seq: hand.seq, by: "mac", ts: expect.any(Number), text: "build on Windows next" });
+    expect(describeEvent(hand, s)).toBe(`assigned T${add.seq} “port” to win: build on Windows next`);
+    expect(formatTask(s, s.tasks.get(add.seq)!)).not.toContain("files");
   });
 });
 
@@ -199,22 +171,5 @@ describe("reading the machine", () => {
     expect(mergeCard(now, was, { model: "sonnet", tools: ["Blender"] })).toMatchObject({ model: "sonnet", tools: ["git", "figma", "blender"] });
     expect(sameCard(merged, { ...merged, tools: ["figma", "git"] })).toBe(true);
     expect(sameCard(merged, { ...merged, note: "other" })).toBe(false);
-  });
-
-  test("handing over reads the checkout: branch, commit, changed files, and whether it's pushed", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kiwi-handoff-"));
-    const g = (...a: string[]) => execFileSync("git", a, { cwd: dir, stdio: "ignore" });
-    try {
-      g("init", "-q", "-b", "work");
-      g("-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "start");
-      writeFileSync(join(dir, "a.txt"), "x");
-      const { handoff, pushed } = handoffHere(dir);
-      expect(handoff.branch).toBe("work");
-      expect(handoff.commit).toMatch(/^[0-9a-f]{7,}$/);
-      expect(handoff.files).toEqual(["a.txt"]);
-      expect(pushed).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });

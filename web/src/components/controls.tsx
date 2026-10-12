@@ -122,8 +122,7 @@ function loadDetail(l: Load): string {
   const lines = [
     ...l.current.map((t) => `Doing ${taskId(t.id)} ${t.title}`),
     ...l.queued.map((t) => `Queued ${taskId(t.id)} ${t.title}`),
-    ...l.waiting.map((t) => `${t.state === "review" ? "In review" : "Blocked"} ${taskId(t.id)} ${t.title}`),
-    ...l.claims.map((c) => `Claimed ${c.path}`),
+    ...l.waiting.map((t) => `In review ${taskId(t.id)} ${t.title}`),
   ]
   return lines.length ? lines.join("\n") : "Nothing assigned"
 }
@@ -869,7 +868,7 @@ export function HoldDialog({ onClose, onSave }: { onClose: () => void; onSave: (
       >
         <Dialog.Title className="text-title font-semibold tracking-[-0.01em]">Pause every agent</Dialog.Title>
         <Dialog.Description className="mt-1 text-ui leading-normal text-ink-2">
-          Every agent is told to stop at once. Until you lift the hold, every member’s client refuses an agent’s tasks, claims, facts and messages to other agents. Agents may still answer people.
+          Every agent is told to stop at once. Until you lift the hold, every member’s client refuses an agent’s tasks, notes and messages to other agents. Agents may still answer people.
         </Dialog.Description>
         <TextField className="mt-4" autoFocus value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="Why (optional): agents and people see it" aria-label="Why" />
         <div className="mt-5 flex justify-end gap-2">

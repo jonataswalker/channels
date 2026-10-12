@@ -1,4 +1,4 @@
-import { Add01Icon, GitPullRequestIcon, LockIcon, Note01Icon, UserIcon } from "@hugeicons/core-free-icons"
+import { Add01Icon, GitPullRequestIcon, Note01Icon, UserIcon } from "@hugeicons/core-free-icons"
 import type { ReactNode } from "react"
 import type { Message } from "@mc/protocol.ts"
 import type { ChannelState } from "@mc/state.ts"
@@ -111,7 +111,6 @@ export function Mark({ mark }: { mark: EventMark }) {
   if (mark === "add") return <Icon icon={Add01Icon} size={16} />
   if (mark === "assign") return <Icon icon={UserIcon} size={16} />
   if (mark === "note") return <Icon icon={Note01Icon} size={16} />
-  if (mark === "claim") return <Icon icon={LockIcon} size={16} />
   if (mark === "other") return <span className="block size-1.5 rounded-full bg-ink-3" />
   return <StateMark state={mark} />
 }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { canonical, generateIdentity, sign, verify, type Identity } from "../src/identity.ts";
 import type { Event, Kind, Message } from "../src/protocol.ts";
-import { fold as foldWith, overlaps, parseTaskId, type Roster } from "../src/state.ts";
+import { fold as foldWith, parseTaskId, type Roster } from "../src/state.ts";
 
 /** Everyone a test identity was generated for is a member, unless dropped. */
 const roster: Roster = [];
@@ -86,34 +86,74 @@ describe("fold", () => {
     expect(s.rejected.get(claimA.seq)).toContain("owned by b");
   });
 
-  test("tasks: dependencies, handoff, done", async () => {
+  test("tasks: open, doing, done; dropping one puts it back", async () => {
     const a = await member("a");
     const t1 = await msg(a, "a", { ev: { op: "task.add", title: "protocol" } });
-    const t2 = await msg(a, "a", { ev: { op: "task.add", title: "client", after: [t1.seq], owner: "b" } });
+    const t2 = await msg(a, "a", { ev: { op: "task.add", title: "client", owner: "b" } });
     const drop = await msg(a, "a", { ev: { op: "task.update", task: t2.seq, owner: null, note: "free for anyone" } });
     const done = await msg(a, "a", { ev: { op: "task.update", task: t1.seq, state: "done" } });
     const s = fold([t1, t2, drop, done]);
     expect(s.tasks.get(t1.seq)?.state).toBe("done");
-    expect(s.tasks.get(t2.seq)).toMatchObject({ owner: undefined, state: "todo", after: [t1.seq] });
+    expect(s.tasks.get(t2.seq)).toMatchObject({ owner: undefined, state: "todo" });
     expect(s.tasks.get(t2.seq)?.notes[0]?.text).toBe("free for anyone");
   });
 
-  test("claims: overlapping paths conflict, expire, and release", async () => {
+  test("older clients' logs still fold: dependencies, needs, blocked, cancelled, handoffs and claims", async () => {
     const a = await member("a");
     const b = await member("b");
+    // Events as 0.9 clients sent them, with what's gone since.
+    const old = (e: object) => e as unknown as Event;
+    const t1 = await msg(a, "a", { ev: old({ op: "task.add", title: "protocol", needs: ["rust"] }) });
+    const t2 = await msg(a, "a", { ev: old({ op: "task.add", title: "client", after: [t1.seq], review: "*" }) });
+    const claim = await msg(a, "a", { ev: old({ op: "task.claim", task: t2.seq }) });
+    const blocked = await msg(a, "a", { ev: old({ op: "task.update", task: t2.seq, state: "blocked", note: "waiting on the protocol" }) });
+    const after = await msg(a, "a", { ev: old({ op: "task.update", task: t1.seq, after: [t2.seq] }) });
+    const hand = await msg(a, "a", { ev: old({ op: "task.update", task: t1.seq, owner: "b", handoff: { branch: "a/x", files: ["f"] } }) });
+    // The doer cancelling a reviewed task: only a note now, so a cancel is never a way around review.
+    const cancelled = await msg(a, "a", { ev: old({ op: "task.update", task: t2.seq, state: "cancelled" }) });
     const ca = await msg(a, "a", { ev: { op: "claim", paths: ["src/net"], ttl: 600 } });
     const cb = await msg(b, "b", { ev: { op: "claim", paths: ["src/net/tcp.rs"], ttl: 600 } });
-    const cb2 = await msg(b, "b", { ev: { op: "claim", paths: ["src/ui"], ttl: 600 } });
-    let s = fold([ca, cb, cb2], ca.rts! + 1000);
-    expect(s.rejected.get(cb.seq)).toBe("src/net is claimed by a");
-    expect(s.claims.map((c) => `${c.owner}:${c.path}`).sort()).toEqual(["a:src/net", "b:src/ui"]);
-    expect(fold([ca, cb, cb2], ca.rts! + 601_000).claims.map((c) => c.path)).toEqual(["src/ui"]);
-
     const rel = await msg(a, "a", { ev: { op: "release" } });
-    const cb3 = await msg(b, "b", { ev: { op: "claim", paths: ["src/net/tcp.rs"], ttl: 600 } });
-    s = fold([ca, cb, cb2, rel, cb3], cb3.rts! + 1000);
-    expect(s.rejected.has(cb3.seq)).toBe(false);
-    expect(s.claims.find((c) => c.path === "src/net/tcp.rs")?.owner).toBe("b");
+    const log = [t1, t2, claim, blocked, after, hand, cancelled, ca, cb, rel];
+    const s = fold(log);
+    for (const m of log) {
+      expect(s.trust.get(m.seq)).toBe("verified");
+      expect(s.rejected.has(m.seq)).toBe(false);
+    }
+    expect(s.tasks.get(t1.seq)).toMatchObject({ state: "todo", owner: "b" });
+    expect(s.tasks.get(t1.seq)).not.toHaveProperty("needs");
+    expect(s.tasks.get(t1.seq)).not.toHaveProperty("after");
+    expect(s.tasks.get(t2.seq)?.state).toBe("doing");
+    expect(s.tasks.get(t2.seq)?.cancelled).toBeUndefined();
+    expect(s.tasks.get(t2.seq)?.approvedBy).toBeUndefined();
+    expect(s.tasks.get(t2.seq)?.notes.map((n) => n.text)).toEqual(["waiting on the protocol", "cancelled"]);
+    expect(s).not.toHaveProperty("claims");
+  });
+
+  test("a cancel finishes a task only from whoever may finish it, and says it was cancelled", async () => {
+    const doer = await member("doer");
+    const reviewer = await member("rev");
+    const other = await member("other");
+    const reviewed = await msg(doer, "doer", { ev: { op: "task.add", title: "reviewed", review: "rev" } });
+    const take = await msg(doer, "doer", { ev: { op: "task.claim", task: reviewed.seq } });
+    const byDoer = await msg(doer, "doer", { ev: { op: "task.update", task: reviewed.seq, state: "cancelled", note: "not needed" } });
+    let s = fold([reviewed, take, byDoer]);
+    expect(s.tasks.get(reviewed.seq)).toMatchObject({ state: "doing" });
+    expect(s.tasks.get(reviewed.seq)?.notes.map((n) => n.text)).toEqual(["not needed"]);
+
+    const byReviewer = await msg(reviewer, "rev", { ev: { op: "task.update", task: reviewed.seq, state: "cancelled" } });
+    s = fold([reviewed, take, byDoer, byReviewer]);
+    expect(s.tasks.get(reviewed.seq)).toMatchObject({ state: "done", cancelled: true });
+
+    // No reviewer: anyone may cancel it; reopening clears the mark, and finishing it plainly never sets it.
+    const plain = await msg(other, "other", { ev: { op: "task.add", title: "plain" } });
+    const cancel = await msg(other, "other", { ev: { op: "task.update", task: plain.seq, state: "cancelled" } });
+    const reopen = await msg(other, "other", { ev: { op: "task.update", task: plain.seq, state: "todo" } });
+    const finish = await msg(other, "other", { ev: { op: "task.update", task: plain.seq, state: "done" } });
+    expect(fold([plain, cancel]).tasks.get(plain.seq)).toMatchObject({ state: "done", cancelled: true });
+    expect(fold([plain, cancel, reopen]).tasks.get(plain.seq)?.cancelled).toBeUndefined();
+    expect(fold([plain, cancel, reopen, finish]).tasks.get(plain.seq)).toMatchObject({ state: "done" });
+    expect(fold([plain, cancel, reopen, finish]).tasks.get(plain.seq)?.cancelled).toBeUndefined();
   });
 
   test("open asks close when someone else replies", async () => {
@@ -131,9 +171,6 @@ describe("fold", () => {
     expect(parseTaskId("T12")).toBe(12);
     expect(parseTaskId("#7")).toBe(7);
     expect(parseTaskId("x")).toBeNull();
-    expect(overlaps("src", "src/a.rs")).toBe(true);
-    expect(overlaps("src/a", "src/ab")).toBe(false);
-    expect(overlaps("*", "anything")).toBe(true);
   });
 });
 

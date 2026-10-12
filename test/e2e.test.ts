@@ -234,13 +234,17 @@ describe("agents coordinating through the CLI", () => {
     expect(await ok(mac, "read")).toBe("");
   });
 
-  test("task board: owners, races, dependencies and notifications", async () => {
+  test("task board: owners, races and notifications", async () => {
     await ok(lead, "read");
     const t1 = /added (T\d+)/.exec(await ok(lead, "task", "add", "Define protocol v2"))![1]!;
-    const t2 = /added (T\d+)/.exec(await ok(lead, "task", "add", "Windows client for v2", "--owner", "win", "--after", t1))![1]!;
+    // --after is gone: said so, and the task is still added (agents with older instructions keep working).
+    const added = await run(lead, "task", "add", "Windows client for v2", "--owner", "win", "--after", t1);
+    expect(added.code).toBe(0);
+    expect(added.err).toContain("--after is gone");
+    const t2 = /added (T\d+)/.exec(added.out)![1]!;
 
     // win is told it was given a task.
-    expect(await ok(win, "read")).toContain(`added task ${t2} “Windows client for v2” for win after ${t1}`);
+    expect(await ok(win, "read")).toContain(`added task ${t2} “Windows client for v2” for win`);
 
     // mac claims T1; win can't take it.
     expect(await ok(mac, "task", "claim", t1)).toBe(`${t1} doing @mac: Define protocol v2\n`);
@@ -248,24 +252,32 @@ describe("agents coordinating through the CLI", () => {
     expect(stolen.code).toBe(1);
     expect(stolen.err).toContain("is owned by mac");
 
-    // Finishing T1 notifies its creator and the owner of the task waiting on it.
+    // Finishing T1 notifies its creator.
     await ok(mac, "task", "done", t1, "spec in docs/v2.md");
     expect(await ok(lead, "read")).toContain(`finished ${t1} “Define protocol v2”: spec in docs/v2.md`);
-    expect(await ok(win, "read")).toContain(`finished ${t1}`);
 
     const board = await ok(win, "tasks", "--all");
-    expect(board).toMatch(new RegExp(`${t2}\\s+todo\\s+@win Windows client for v2`));
-    expect(await ok(win, "task", "show", t2)).toContain(`after: ${t1} (done) — all done`);
+    expect(board).toMatch(new RegExp(`${t2}\\s+open\\s+@win Windows client for v2`));
+    expect(board).toMatch(new RegExp(`${t1}\\s+done\\s+@mac Define protocol v2`));
+
+    // Handing it over is giving it to someone with where it stands.
+    expect(await ok(win, "task", "assign", t2, "mac", "the socket code is on branch win/v2")).toBe(`${t2} is mac's now\n`);
+    expect(await ok(win, "task", "show", t2)).toContain("the socket code is on branch win/v2");
+    expect((await run(win, "task", "match", t2)).err).toContain("is gone");
+
+    // Cancelling finishes it, marked cancelled, but never around a review: its doer can't, someone else may.
+    const t3 = /added (T\d+)/.exec(await ok(lead, "task", "add", "Spike the old transport", "--review", "any"))![1]!;
+    await ok(win, "task", "claim", t3);
+    const refused = await run(win, "task", "cancel", t3, "not needed");
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("before it's cancelled");
+    expect(await ok(lead, "task", "cancel", t3, "not needed")).toBe(`${t3} done (cancelled) @win: Spike the old transport\n`);
   });
 
-  test("claims block overlapping edits until released", async () => {
-    expect(await ok(win, "claim", "crates/net", "--ttl", "20m", "--note", "refactor")).toContain("crates/net  @win");
-    const clash = await run(mac, "claim", "crates/net/tcp.rs");
-    expect(clash.code).toBe(1);
-    expect(clash.err).toContain("crates/net is claimed by win");
-    await ok(win, "release");
-    expect(await ok(mac, "claim", "crates/net/tcp.rs")).toContain("crates/net/tcp.rs  @mac");
-    expect(await ok(lead, "claims")).toContain("@mac");
+  test("claims are gone, and the old commands say so without failing", async () => {
+    for (const cmd of [["claim", "crates/net", "--ttl", "20m"], ["release"], ["claims"]]) {
+      expect(await ok(win, ...cmd)).toBe("claims are gone: say what you're working on in the task, or post it\n");
+    }
   });
 
   test("facts are shared and last write wins", async () => {
@@ -281,7 +293,7 @@ describe("agents coordinating through the CLI", () => {
     const status = await ok(win, "status");
     expect(status).toContain("waiting on you (1)");
     expect(status).toContain("status of the v2 client?");
-    expect(status).toMatch(/tasks \(\d+ open, 1 done\)/);
+    expect(status).toMatch(/tasks \(\d+ open, 2 done \(1 cancelled\)\)/);
     expect(status).toContain("mac.ip = 192.168.1.21");
   });
 });
@@ -677,10 +689,9 @@ describe("MCP server", () => {
       p.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
       const tools = ((await rpc("tools/list")) as { tools: { name: string }[] }).tools.map((t) => t.name).sort();
       // No admin tools, even on the owner's machine: a person lets people in and sets what they may do.
-      expect(tools).toEqual(["ask", "claim", "escalate", "facts", "log", "members", "message", "read", "release", "reply", "rooms", "save", "send", "sh", "status", "task_add", "task_update", "tasks", "wait_for_messages", "who"]);
+      expect(tools).toEqual(["ask", "escalate", "facts", "log", "members", "message", "read", "reply", "rooms", "save", "send", "sh", "status", "task_add", "task_update", "tasks", "wait_for_messages", "who"]);
 
       expect(await call("task_add", { title: "write docs" })).toMatch(/^added T\d+$/);
-      expect(await call("claim", { paths: ["docs/"], ttl: "10m" })).toContain("docs/  @agent-a");
       expect(await call("status")).toContain("agent-a (you) — builder");
       expect(await call("facts", { set: "docs.url", value: "https://example.com" })).toContain("docs.url = https://example.com");
       expect(await ok(other, "tasks")).toContain("write docs");

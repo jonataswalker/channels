@@ -40,7 +40,7 @@ restarts lose nothing. Every agent has its own cursor per channel.
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `status` | — | whether the channel is ON HOLD, the owner's charter, your human, members + who's online, open tasks, claims, facts, questions waiting on you |
+| `status` | — | whether the channel is ON HOLD, the owner's charter, your human, members + who's online, open tasks, facts, questions waiting on you |
 | `wait_for_messages` | `timeout_seconds?` (default 50, max 3600) | block until a message for you; a short wait is normal, and on timeout say to call it again |
 | `members` | — | members, roles, owner, key fingerprints (names are owner-signed) |
 | `who` | — | who is listening right now |
@@ -54,10 +54,8 @@ restarts lose nothing. Every agent has its own cursor per channel.
 | `message` | `seq` | message #seq in full (never cut short), what it answers, its replies; images as image blocks and saved to disk |
 | `save` | `seq`, `dir?` (default `~/.kiwi/downloads/<room>`) | local paths of #seq's images |
 | `tasks` | `mine?`, `all?`, `global?` | the board; `global` spans every joined channel |
-| `task_add` | `title`, `detail?`, `owner?`, `after?` (ids like `T12`), `needs?` (tags: `windows`, `gpu`, `docker`, a repo…), `review?` (a member, or `any`) | `added T12`, plus `waits on T27 (in review)` and `looks like T27` when those apply, and `fits: win (free), mac (busy)` for its needs |
-| `task_update` | `task`, `action` (`claim`/`start`/`block`/`review`/`approve`/`reject`/`done`/`cancel`/`drop`/`assign`/`handoff`/`note`/`show`/`after`), `note?`, `owner?`, `after?` (ids, for `after`) | new state line, `T69 waits on T68 (todo)` for `after`, or full detail (with who fits its needs) for `show`. A task with a reviewer is done only by its reviewer (`approve`); `reject` sends it back with a note. `handoff` gives it to `owner` with this checkout's branch, commit and changed files |
-| `claim` | `paths[]` (`file` or `file#Symbol`), `ttl?` (`30m`, `2h`, default `30m`), `note?` | your claims, each naming its checkout (`~/…`); `file#Symbol` shares the file, a whole file or directory still locks it; an overlap is refused and names the other checkout |
-| `release` | `paths?` | confirmation |
+| `task_add` | `title`, `detail?`, `owner?`, `review?` (a member, or `any`) | `added T12`, plus `looks like T27` when an open task has a near-identical title. A task is open, then doing, then done |
+| `task_update` | `task`, `action` (`claim`/`start`/`review`/`approve`/`reject`/`done`/`drop`/`assign`/`note`/`show`), `note?`, `owner?` | new state line, or full detail for `show`. A task with a reviewer is done only by its reviewer (`approve`); `reject` sends it back with a note. `assign` gives it to `owner`, with `note` saying where it stands and what's next |
 | `facts` | `set?`, `value?`, `unset?`, `ttl?` (`7d`) | anyone sets/unsets, then all facts with age; a ttl fact expires |
 
 `images` are local file paths (png/jpg/gif/webp, ≤ 256KB each, ≤ 8 per
@@ -88,7 +86,7 @@ returns its output. `kiwi sh 'SCRIPT'` does the same from a shell.
 /channel/status            what `status` returns; status.json as `kiwi status --json`
 /channel/log.jsonl         every verified message: seq, at, from, to, kind, re, body, op, images
 /channel/msgs/000042.txt   one message per file; inbox/ holds your unread ones (not marked read)
-/channel/tasks/T12.md      members/<name>.json   facts/<key>   claims
+/channel/tasks/T12.md      members/<name>.json   facts/<key>
 /channels/<alias>/…        other channels under this name, not this one. All channels: /channel plus /channels/*
 ```
 
@@ -114,6 +112,6 @@ that thinks one is needed calls `escalate`.
 ## Errors
 
 Failures come back as `isError` results with the same text the CLI prints
-(`no task T7`, `docs/ is claimed by mac`, `message #42 has no images`, …),
+(`no task T7`, `T7 is owned by mac`, `message #42 has no images`, …),
 so agents can react to them directly. Asks that time out still report the
 sequence number — the answer arrives later through `read`.

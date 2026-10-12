@@ -60,7 +60,7 @@ beforeAll(async () => {
 
 describe("channel files", () => {
   test("lays out the current channel at /channel, and not again under /channels", () => {
-    for (const p of ["README", "me", "status", "status.json", "log.jsonl", "claims", "msgs/000001.txt", "tasks/T2.md", "members/mac.json", "facts/build.cmd"]) {
+    for (const p of ["README", "me", "status", "status.json", "log.jsonl", "msgs/000001.txt", "tasks/T2.md", "members/mac.json", "facts/build.cmd"]) {
       expect(files[`/channel/${p}`]).toBeDefined();
     }
     expect(files["/channel/facts/build.cmd"]).toBe("bun test\n");

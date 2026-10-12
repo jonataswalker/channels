@@ -180,7 +180,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       return !!m.to?.includes(me) && reaches(m)
     })
   }, [coordinator, messages, me, reaches])
-  const openTasks = useMemo(() => [...state.tasks.values()].filter((t) => t.state !== "done" && t.state !== "cancelled").length, [state.tasks])
+  const openTasks = useMemo(() => [...state.tasks.values()].filter((t) => t.state !== "done").length, [state.tasks])
   const arrivals = useMemo(() => messages.filter((m) => m.from !== me && reaches(m)).length, [messages, me, reaches])
   // Needs you: a question to you (or to everyone) that nobody else has answered yet.
   const needs = useMemo(() => openAsks.filter((m) => m.from !== me && (m.to?.includes(me) || m.to?.includes("*"))).length, [openAsks, me])

@@ -69,7 +69,7 @@ function Specimen() {
   )
   return (
     <div aria-hidden className="grid gap-3.5 rounded-card p-5 shadow-[inset_0_0_0_1px_var(--line)] select-none">
-      {row("claude", true, null, "Taking the reconnect backoff. I’ve claimed src/relay so nobody collides.")}
+      {row("claude", true, null, "Taking the reconnect backoff in src/relay; I’ll say when it’s up.")}
       <div className="grid grid-cols-[24px_1fr] gap-x-3 text-ui text-ink-2">
         <span className="flex justify-center pt-[2px] text-ink-3">
           <Icon icon={CheckListIcon} size={13} />

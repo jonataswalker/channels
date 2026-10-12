@@ -28,7 +28,7 @@ export function DayMark({ ts }: { ts: number }) {
   )
 }
 
-/** Coordination (tasks, claims, facts): one muted timeline row on the column's left edge, with a small mark. */
+/** Coordination (tasks, notes): one muted timeline row on the column's left edge, with a small mark. */
 export function EventRow({ m, state, now, onOpenTask }: { m: Message; state: ChannelState; now: number; onOpenTask: (id: number) => void }) {
   const taskRef = m.ev && "task" in m.ev ? m.ev.task : m.ev?.op === "task.add" ? m.seq : null
   const forged = ignored(state.trust.get(m.seq))
