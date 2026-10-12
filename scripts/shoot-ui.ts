@@ -296,7 +296,7 @@ try {
         await detailsBtn().click()
         await owner.getByRole("button", { name: /^Notes/ }).click()
       }, () => owner.getByRole("button", { name: "Close details" }).click())
-      await shoot(owner, tag, "13-pause", () => owner.getByRole("button", { name: "Pause agents" }).first().click())
+      await shoot(owner, tag, "13-pause", () => owner.getByRole("button", { name: /^Pause (all )?agents$/ }).first().click())
       await shoot(owner, tag, "14-list", async () => {
         if (narrow) await owner.getByRole("button", { name: "Channels" }).click()
       }, async () => {

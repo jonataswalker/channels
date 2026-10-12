@@ -200,68 +200,89 @@ export const Bubble = memo(function Bubble({ m, me, author, trust, online, first
   const stack = mine ? cx(!first && "rounded-tr-stack", !last && "rounded-br-stack") : cx(!first && "rounded-tl-stack", !last && "rounded-bl-stack")
 
   return (
-    <div
-      id={`${anchor}${m.seq}`}
-      className={cx("group/b relative flex items-end gap-2", mine ? "justify-end pl-10 md:pl-16" : "pr-10 md:pr-16", first ? "mt-3" : "mt-[2px]", fresh && (mine ? "animate-sent" : "animate-arrived"))}
-    >
-      {!mine && <div className="w-7 shrink-0 self-end">{last && (face ?? <Monogram name={who} agent={isAgent(author)} online={online} color={color} size={28} />)}</div>}
+    <div id={`${anchor}${m.seq}`} className={cx("group/b relative", first ? "mt-3" : "mt-[2px]", fresh && (mine ? "animate-sent" : "animate-arrived"))}>
+      {/* The bubble and the face beside it: the face sits by the bubble's last line, not by what hangs under it. */}
+      <div className={cx("relative flex items-end gap-2", mine ? "justify-end pl-10 md:pl-16" : "pr-10 md:pr-16")}>
+        {!mine && <div className="w-7 shrink-0 self-end">{last && (face ?? <Monogram name={who} agent={isAgent(author)} online={online} color={color} size={28} />)}</div>}
 
-      <div className={cx("flex min-w-0 max-w-[min(80%,600px)] flex-col", mine ? "items-end" : "items-start")}>
-        {first && (!mine || said) && (
-          <p className={cx("mb-1 flex max-w-full items-center gap-1.5 px-3 text-stamp text-ink-3", mine && "justify-end")}>
-            {!mine && group && (
-              <span className="truncate font-medium text-ink-2" title={sponsor}>
-                {who}
+        <div className={cx("flex min-w-0 max-w-[min(80%,600px)] flex-col", mine ? "items-end" : "items-start")}>
+          {first && (!mine || said) && (
+            <p className={cx("mb-1 flex max-w-full items-center gap-1.5 px-3 text-stamp text-ink-3", mine && "justify-end")}>
+              {!mine && group && (
+                <span className="truncate font-medium text-ink-2" title={sponsor}>
+                  {who}
+                </span>
+              )}
+              {said &&
+                (said.decide ? (
+                  <span className="shrink-0 rounded-full bg-decide-wash px-1.5 font-semibold text-decide">{said.text}</span>
+                ) : (
+                  <span className={cx("truncate", said.alert && "font-semibold text-alert")}>{said.text}</span>
+                ))}
+            </p>
+          )}
+
+          {quotes.map(({ seq, q }) => (
+            <button key={seq} type="button" onClick={() => onJump(seq)} className={cx("mb-0.5 flex max-w-full items-center gap-1 px-3 text-left text-stamp text-ink-3 transition-colors hover:text-ink-2", mine && "self-end")}>
+              <Icon icon={ArrowTurnBackwardIcon} size={12} className="shrink-0" />
+              <span className="truncate">
+                <span className="font-medium text-ink-2">{q ? nameOf(q.from) : "Earlier message"}</span> {q ? excerpt(q.body, 80) : ""}
               </span>
-            )}
-            {said &&
-              (said.decide ? (
-                <span className="shrink-0 rounded-full bg-decide-wash px-1.5 font-semibold text-decide">{said.text}</span>
-              ) : (
-                <span className={cx("truncate", said.alert && "font-semibold text-alert")}>{said.text}</span>
-              ))}
-          </p>
-        )}
+            </button>
+          ))}
 
-        {quotes.map(({ seq, q }) => (
-          <button key={seq} type="button" onClick={() => onJump(seq)} className={cx("mb-0.5 flex max-w-full items-center gap-1 px-3 text-left text-stamp text-ink-3 transition-colors hover:text-ink-2", mine && "self-end")}>
-            <Icon icon={ArrowTurnBackwardIcon} size={12} className="shrink-0" />
-            <span className="truncate">
-              <span className="font-medium text-ink-2">{q ? nameOf(q.from) : "Earlier message"}</span> {q ? excerpt(q.body, 80) : ""}
-            </span>
-          </button>
-        ))}
+          {!imageOnly && (
+            <div
+              className={cx(
+                // Code keeps its lines: it scrolls inside the bubble rather than wrapping mid-word like prose.
+                "bubble-text max-w-full min-w-0 rounded-bubble px-3 py-2 text-body [&_pre]:max-w-full [&_pre]:whitespace-pre [&_pre]:[overflow-wrap:normal]",
+                stack,
+                mine
+                  ? "bg-bubble-me text-bubble-me-ink [&_a]:text-bubble-me-ink [&_a]:decoration-white/50 [&_code]:bg-white/18 [&_pre]:border-white/15 [&_pre]:bg-black/15 [&_pre]:text-white [&_li]:marker:text-white/70"
+                  : "bg-bubble-them text-bubble-them-ink",
+                forged && "line-through opacity-60",
+                highlighted && "animate-flash outline-2 outline-offset-2 outline-[var(--ring)]"
+              )}
+            >
+              <Markdown>{m.body}</Markdown>
+            </div>
+          )}
 
-        {!imageOnly && (
-          <div
-            className={cx(
-              // Code keeps its lines: it scrolls inside the bubble rather than wrapping mid-word like prose.
-              "bubble-text max-w-full min-w-0 rounded-bubble px-3 py-2 text-body [&_pre]:max-w-full [&_pre]:whitespace-pre [&_pre]:[overflow-wrap:normal]",
-              stack,
-              mine
-                ? "bg-bubble-me text-bubble-me-ink [&_a]:text-bubble-me-ink [&_a]:decoration-white/50 [&_code]:bg-white/18 [&_pre]:border-white/15 [&_pre]:bg-black/15 [&_pre]:text-white [&_li]:marker:text-white/70"
-                : "bg-bubble-them text-bubble-them-ink",
-              forged && "line-through opacity-60",
-              highlighted && "animate-flash outline-2 outline-offset-2 outline-[var(--ring)]"
-            )}
+          {m.imgs?.length ? (
+            <div className={cx("mt-0.5 flex flex-wrap gap-1", mine && "justify-end")}>
+              {m.imgs.map((img, i) => {
+                const url = `data:${img.mime};base64,${img.data}`
+                return (
+                  <a key={i} href={url} target="_blank" rel="noreferrer" title={img.name}>
+                    <img src={url} alt={img.name} loading="lazy" className="max-h-72 max-w-full rounded-bubble object-cover shadow-[0_0_0_0.5px_var(--line)]" />
+                  </a>
+                )
+              })}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Reply and copy, beside the bubble on hover: on its inner side, so they never cover anything. */}
+        <div className={cx("absolute bottom-0 hidden items-center gap-0.5 group-focus-within/b:flex group-hover/b:flex", mine ? "left-0" : "right-0")}>
+          {onReply && (
+            <button type="button" aria-label="Reply" title="Reply" onClick={() => onReply(m)} className="flex size-7 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-wash-2 hover:text-ink">
+              <Icon icon={ArrowTurnBackwardIcon} size={15} />
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="Copy text"
+            title="Copy text"
+            onClick={() => navigator.clipboard.writeText(m.body).then(() => toast("Copied"))}
+            className="flex size-7 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-wash-2 hover:text-ink"
           >
-            <Markdown>{m.body}</Markdown>
-          </div>
-        )}
+            <Icon icon={Copy01Icon} size={14} />
+          </button>
+        </div>
+      </div>
 
-        {m.imgs?.length ? (
-          <div className={cx("mt-0.5 flex flex-wrap gap-1", mine && "justify-end")}>
-            {m.imgs.map((img, i) => {
-              const url = `data:${img.mime};base64,${img.data}`
-              return (
-                <a key={i} href={url} target="_blank" rel="noreferrer" title={img.name}>
-                  <img src={url} alt={img.name} loading="lazy" className="max-h-72 max-w-full rounded-bubble object-cover shadow-[0_0_0_0.5px_var(--line)]" />
-                </a>
-              )
-            })}
-          </div>
-        ) : null}
-
+      {/* What hangs off the bubble (its answer link, notes, replies), under it on the bubble's edge. */}
+      <div className={cx("flex flex-col", mine ? "items-end pl-10 md:pl-16" : "items-start pr-10 pl-9 md:pr-16")}>
         {decide && !mine && onReply && (
           <p className="mt-1 flex items-center gap-1 px-3 text-meta">
             <button type="button" onClick={() => onReply(m)} className="font-medium text-decide hover:underline">
@@ -278,29 +299,11 @@ export const Bubble = memo(function Bubble({ m, me, author, trust, online, first
         )}
 
         {thread && onOpenThread && (
-          <button type="button" onClick={() => onOpenThread(m.seq)} className="mt-1 px-3 text-left text-meta font-medium text-ink-2 hover:text-ink hover:underline">
+          <button type="button" onClick={() => onOpenThread(m.seq)} className="mt-2 mb-2 px-3 text-left text-meta font-medium text-ink-2 hover:text-ink hover:underline">
             {thread.count === 1 ? "1 Reply" : `${thread.count} Replies`}
             {thread.forYou && <span className="ml-1.5 font-normal text-ink-3">· for you</span>}
           </button>
         )}
-      </div>
-
-      {/* Reply and copy, beside the bubble on hover: on its inner side, so they never cover anything. */}
-      <div className={cx("absolute bottom-0 hidden items-center gap-0.5 group-focus-within/b:flex group-hover/b:flex", mine ? "left-0" : "right-0")}>
-        {onReply && (
-          <button type="button" aria-label="Reply" title="Reply" onClick={() => onReply(m)} className="flex size-7 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-wash-2 hover:text-ink">
-            <Icon icon={ArrowTurnBackwardIcon} size={15} />
-          </button>
-        )}
-        <button
-          type="button"
-          aria-label="Copy text"
-          title="Copy text"
-          onClick={() => navigator.clipboard.writeText(m.body).then(() => toast("Copied"))}
-          className="flex size-7 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-wash-2 hover:text-ink"
-        >
-          <Icon icon={Copy01Icon} size={14} />
-        </button>
       </div>
     </div>
   )

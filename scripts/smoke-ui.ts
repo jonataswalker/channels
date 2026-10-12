@@ -236,7 +236,7 @@ try {
   await page.getByRole("button", { name: "Close thread" }).click()
   console.log("ok  Thread panel")
   // Once there's something going on, the owner's stop button is in the header.
-  await opens("Pause agents", () => page.getByRole("button", { name: "Pause agents" }).first().click())
+  await opens("Pause agents", () => page.getByRole("button", { name: /^Pause (all )?agents$/ }).first().click())
 
   // The sent message is sealed in this browser. A reload paints it and the
   // socket asks only for seqs after that row. "smoke test" contains a space,
