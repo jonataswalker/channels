@@ -176,7 +176,10 @@ try {
   at = "Add an agent card"
   const addAgent = page.getByRole("region", { name: "Add an agent" })
   await addAgent.waitFor()
-  if (!/sh -s -- join mc2-/.test(await addAgent.innerText())) throw new Error("the Add an agent card has no join command")
+  const card = await addAgent.innerText()
+  if (!/sh -s -- join mc2-/.test(card)) throw new Error("the Add an agent card has no join command")
+  // Not the public relay: the line names this one, or kiwi would ask the public relay about this channel.
+  if (!card.includes(`--relay ${new URL(BASE).origin}`)) throw new Error("the Add an agent command doesn't name this relay")
   console.log(`ok  ${at}`)
 
   // Someone who isn't in yet, opening the join link: the preview names the owner.

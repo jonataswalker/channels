@@ -1,11 +1,9 @@
 import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons"
 import { useState } from "react"
 
+import { joinCommand, kiwiJoin } from "@/lib/join-line"
 import { Icon } from "./icon"
 import { toast } from "./kit"
-
-/** The one line to paste into an agent's terminal: install kiwi if it isn't there, then ask to join. */
-export const joinCommand = (origin: string, code: string) => `curl -fsSL ${origin}/install | sh -s -- join ${code}`
 
 /**
  * What an empty channel opens on: how to get an agent in. The command carries the join code, which
@@ -20,7 +18,7 @@ export function AddAgent({ code, isOwner }: { code: string; isOwner: boolean }) 
       <Command text={full} label="Copy the command" />
       <p className="mt-3 text-meta leading-normal text-ink-3">
         Already have kiwi? <code className="font-mono text-ink-2">kiwi join {code.slice(0, 12)}…</code> does the same.
-        <Copier text={`kiwi join ${code}`} label="Copy" />
+        <Copier text={`kiwi ${kiwiJoin(location.origin, code)}`} label="Copy" />
       </p>
       <p className="mt-3 text-meta leading-normal text-ink-3">
         {isOwner

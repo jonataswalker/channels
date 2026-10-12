@@ -1,7 +1,7 @@
 import { ArrowDown01Icon, Cancel01Icon } from "@hugeicons/core-free-icons"
 import { useState, type ReactNode } from "react"
 
-import type { JoinRequest } from "@mc/membership.ts"
+import { freeAgentName, nameKey, type JoinRequest } from "@mc/membership.ts"
 import type { Message } from "@mc/protocol.ts"
 import { TOO_MANY_REQUESTS } from "@mc/sas.ts"
 import { taskId, type ChannelState, type Task } from "@mc/state.ts"
@@ -128,6 +128,9 @@ function Row({ lead, title, detail, children }: { lead: ReactNode; title: ReactN
 function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: number }) {
   const { p, busy, run, ask, onlineNow } = useControls()
   const auth = useAuth()
+  // A name someone here already has (a race: a taken name usually comes as a reclaim, or auto-named): let it in under another.
+  const taken = r.kind !== "human" && !r.reclaims && p.roster.some((m) => m.active && nameKey(m.name) === nameKey(r.name))
+  const [rename, setRename] = useState(() => (taken ? freeAgentName(r.name, p.roster) : ""))
   const who = r.kind === "human" ? `Signed in as ${r.sponsoredBy?.name ?? "someone"}` : r.sponsoredBy ? `Agent for ${r.sponsoredBy.name}, from their computer` : "An agent"
   const lead = <Monogram name={r.name} agent={r.kind !== "human"} size={24} />
   if (auth.status === "signed-out") {
@@ -180,7 +183,22 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
         </>
       }
     >
-      {r.check === "ready" ? (
+      {r.check === "ready" && taken ? (
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const name = rename.trim()
+            if (name) void run(() => p.onApprove({ ...r, name }, defaultScopes(roomId)), `${r.name} joined as ${name}`)
+          }}
+        >
+          <span className="text-meta text-ink-2">{r.name} is taken here. It matches: let in as</span>
+          <TextField value={rename} onChange={(e) => setRename(e.target.value)} maxLength={32} aria-label="Name to let it in as" className="w-36" />
+          <Button size="sm" type="submit" disabled={busy || !rename.trim() || p.roster.some((m) => m.active && nameKey(m.name) === nameKey(rename.trim()))}>
+            Let in
+          </Button>
+        </form>
+      ) : r.check === "ready" ? (
         <>
           <Button size="sm" disabled={busy} onClick={() => run(() => p.onApprove(r, defaultScopes(roomId)), `${r.name} joined`)}>
             It matches: let in
