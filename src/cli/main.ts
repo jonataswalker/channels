@@ -319,7 +319,9 @@ const admitLocally = Effect.fn("kiwi.admitLocally")(function* (code: string, rel
   yield* Channel.fx.joinStatus(relay, code, id, requestId);
   r = yield* find;
   if (r?.check !== "ready") return false;
-  yield* owner.fx.approve(r, { ...(as.name ? { name: as.name } : {}), ...(as.role ? { role: as.role } : {}), ...(as.about ? { about: as.about } : {}) });
+  // A name someone holds is offered a free one like it (askedAs): let it in under that, not the typed one.
+  const name = r.askedAs ? undefined : as.name;
+  yield* owner.fx.approve(r, { ...(name ? { name } : {}), ...(as.role ? { role: as.role } : {}), ...(as.about ? { about: as.about } : {}) });
   return true;
 });
 

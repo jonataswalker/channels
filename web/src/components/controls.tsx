@@ -52,7 +52,6 @@ export interface ControlsProps {
   onFilter: (f: Filter) => void
   /** `scopes`: what they may do besides read; left out, everything. */
   onApprove: (r: JoinRequest, scopes?: Scope[]) => Promise<void>
-  /** Owner: move a member's seat to the key in a RECLAIM request. `force` is the second confirm when the old key is online. */
   onDeny: (r: JoinRequest) => Promise<void>
   /** Sign this browser's half of a request's code check, at the person's click. */
   onCheck: (r: JoinRequest) => Promise<void>
@@ -224,7 +223,9 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
       setConfirm({ kind: "role", member: m })
     },
     editScopes: (m) => {
-      setScopeDraft(p.state.members.get(m.name)?.scopes ?? [...SCOPES])
+      // Two levels: read-only stays read-only; a member, or an older limited grant, starts at everything.
+      const now = p.state.members.get(m.name)?.scopes
+      setScopeDraft(now && now.length === 0 ? [] : [...SCOPES])
       setConfirm({ kind: "scopes", member: m })
     },
     lastSeenOf,
@@ -467,7 +468,11 @@ export function People({ here, subtitle, live }: { here: Member[]; subtitle: str
                     ) : (
                       m.kind !== "human" && <MenuItem onClick={act(() => void setCoordinator(m, true))}>Make coordinator</MenuItem>
                     )}
-                    {p.onScopes && <MenuItem onClick={act(() => editScopes(m))}>{now && scopesLine(now.scopes) === "read only" ? "Let them write…" : "Make read-only…"}</MenuItem>}
+                    {p.onScopes && (
+                      <MenuItem onClick={act(() => editScopes(m))}>
+                        {now && scopesLine(now.scopes) === "read only" ? "Let them write…" : now && scopesLine(now.scopes) ? "Let them do everything…" : "Make read-only…"}
+                      </MenuItem>
+                    )}
                     <MenuSeparator />
                     <MenuItem tone="danger" onClick={act(() => ask({ kind: "remove", member: m }))}>
                       Remove from channel…

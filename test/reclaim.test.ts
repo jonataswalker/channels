@@ -1,17 +1,14 @@
-// Getting a seat back: the same key resumes; a new key takes the seat over only
-// with the owner's approval, from the same person, never while unseen-online, and
-// the old key is out for good.
+// Getting a seat back (T1426): the same key resumes; a new key never takes a seat over. A lost key
+// means the owner removes the old seat and the agent joins again; until then, a name someone holds
+// is offered the next free one.
 
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Channel, RelayError } from "../src/client.ts";
-import { generateIdentity, type Identity } from "../src/identity.ts";
-import type { JoinRequest } from "../src/membership.ts";
+import { generateIdentity } from "../src/identity.ts";
 import { startRelay } from "../src/relay/bun.ts";
-import { fold } from "../src/state.ts";
-import { describeEvent } from "../src/format.ts";
 import { memoryBudget } from "./check.ts";
 
 setDefaultTimeout(60_000);
@@ -28,78 +25,14 @@ afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-describe("seat reclaim", () => {
-  let owner: Identity;
-  let oldKey: Identity;
-  let code: string;
-  let ownerCh: Channel;
-  let oldCh: Channel;
-
-  beforeAll(async () => {
-    owner = await generateIdentity("human");
-    oldKey = await generateIdentity("win");
-    const made = await Channel.create(relay, owner, { name: "human" }, [{ ...oldKey, info: { name: "win", role: "windows", about: "the PC side" } }]);
-    code = made.code;
-    ownerCh = new Channel(made.access, relay, owner);
-    // The same key resumes without asking: nothing new is granted.
-    oldCh = new Channel(await Channel.resume(relay, code, oldKey), relay, oldKey);
-    const t = await oldCh.send("", { ev: { op: "task.add", title: "fix the PC edge", owner: "win" } });
-    await oldCh.send("", { ev: { op: "claim", paths: ["src/pc"], ttl: 3600 } });
-    await oldCh.send("", { ev: { op: "fact.set", key: "pc.ip", value: "10.0.0.9" } });
-    await oldCh.send("on it", { re: [t] });
+describe("the same key", () => {
+  test("resumes without asking; a key that isn't a member can't", async () => {
+    const owner = await generateIdentity("human");
+    const win = await generateIdentity("win");
+    const made = await Channel.create(relay, owner, { name: "human" }, [{ ...win, info: { name: "win" } }]);
+    expect((await Channel.resume(relay, made.code, win)).roomId).toBe(made.access.roomId);
+    await expect(Channel.resume(relay, made.code, await generateIdentity("win"))).rejects.toBeInstanceOf(RelayError);
   });
-
-  test("a key that isn't a member can't resume", async () => {
-    const stranger = await generateIdentity("win");
-    await expect(Channel.resume(relay, code, stranger)).rejects.toBeInstanceOf(RelayError);
-  });
-
-});
-
-describe("kiwi join, again", () => {
-  const homes: string[] = [];
-  const home = () => {
-    const d = mkdtempSync(join(tmpdir(), "kiwi-reclaim-"));
-    homes.push(d);
-    return d;
-  };
-  afterAll(() => {
-    for (const d of homes) rmSync(d, { recursive: true, force: true });
-  });
-  const spawn = (dir: string, ...args: string[]) =>
-    Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], {
-      cwd: dir,
-      env: { ...process.env, KIWI_HOME: dir, KIWI_RELAY: relay, CLAUDE_CONFIG_DIR: dir, CLAUDECODE: "" },
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-  const run = async (dir: string, ...args: string[]) => {
-    const p = spawn(dir, ...args);
-    const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
-    return { code: await p.exited, out, err };
-  };
-  /** Retry `check` until it holds (a request reaching the relay takes a moment): no fixed sleeps. */
-  const until = async (check: () => Promise<boolean>, ms = 20_000) => {
-    const end = Date.now() + ms;
-    while (!(await check())) {
-      if (Date.now() > end) throw new Error("timed out waiting");
-      await Bun.sleep(200);
-    }
-  };
-  /** Wait for a line matching `re` on a running process's stdout. */
-  const waitFor = async (p: ReturnType<typeof spawn>, re: RegExp, seen: string[]) => {
-    const reader = p.stdout.getReader();
-    let buf = "";
-    for (;;) {
-      const m = seen.join("\n").match(re) ?? buf.match(re);
-      if (m) return (reader.releaseLock(), m);
-      const { value, done } = await reader.read();
-      if (done) throw new Error(`process ended before ${re}: ${buf}`);
-      buf += new TextDecoder().decode(value);
-    }
-  };
-
 });
 
 describe("a lost key, without reclaim", () => {
@@ -126,5 +59,52 @@ describe("a lost key, without reclaim", () => {
     const members = await ownerCh.members();
     expect(members.filter((m) => m.name === "win" && m.active).map((m) => m.pk)).toEqual([again.pk]);
     expect(members.find((m) => m.pk === oldKey.pk)?.active).toBe(false);
+  });
+});
+
+describe("on the owner's own computer", () => {
+  test("joining under a name someone holds comes in under the next free one, instead of failing", async () => {
+    const homes: string[] = [];
+    const home = () => {
+      const d = mkdtempSync(join(tmpdir(), "kiwi-reclaim-"));
+      homes.push(d);
+      return d;
+    };
+    const run = async (dir: string, ...args: string[]) => {
+      const p = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], {
+        cwd: dir,
+        env: { ...process.env, KIWI_HOME: dir, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1", CLAUDECODE: "" },
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+      return { code: await p.exited, out, err };
+    };
+    try {
+      const owner = home();
+      const code = /join code: (\S+)/.exec((await run(owner, "create", "proj", "--as", "lead")).out)![1]!;
+      // "bob" is someone else's agent, already in.
+      const bob = await generateIdentity("bob");
+      const ownerSeat = JSON.parse(await Bun.file(join(owner, "config.json")).text()) as { channels: Record<string, { roomId: string }> };
+      const room = Object.values(ownerSeat.channels)[0]!.roomId;
+      const ask = await Channel.requestJoin(relay, code, bob, { name: "bob" });
+      const approved = await run(owner, "--as", "human", "requests");
+      expect(approved.code).toBe(0);
+      const listed = /(\d{3}-\d{3})\s+bob/.exec(approved.out);
+      if (listed) await run(owner, "--as", "human", "approve", listed[1]!, "--yes");
+      else {
+        await Channel.joinStatus(relay, code, bob, ask.requestId);
+        const again = /(\d{3}-\d{3})\s+bob/.exec((await run(owner, "--as", "human", "requests")).out)!;
+        await run(owner, "--as", "human", "approve", again[1]!, "--yes");
+      }
+      expect(room).toBeTruthy();
+      // On the owner's computer, an agent typing --as bob: let in on its own, as bob-2.
+      const joined = await run(owner, "join", code, "--as", "bob");
+      expect(joined.code).toBe(0);
+      expect(joined.out).toContain('"bob-2"');
+    } finally {
+      for (const d of homes) rmSync(d, { recursive: true, force: true });
+    }
   });
 });

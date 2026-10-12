@@ -118,11 +118,11 @@ function Row({ lead, title, detail, children }: { lead: ReactNode; title: ReactN
   )
 }
 
-/** Someone asking to join: compare the code, then one click. What they may do is the default; "Choose each…" for more. */
+/** Someone asking to join: compare the code, then one click. Whether it can only read is the default this browser keeps; "Choose…" to change it. */
 function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: number }) {
   const { p, busy, run, ask } = useControls()
   const auth = useAuth()
-  // A name someone here already has (a race: a taken name usually comes as a reclaim, or auto-named): let it in under another.
+  // A name someone here took since the request was listed (a race: a taken name usually comes offered as a free one): let it in under another.
   const taken = r.kind !== "human" && p.roster.some((m) => m.active && nameKey(m.name) === nameKey(r.name))
   const [rename, setRename] = useState(() => (taken ? freeAgentName(r.name, p.roster) : ""))
   const who = r.kind === "human" ? `Signed in as ${r.sponsoredBy?.name ?? "someone"}` : r.sponsoredBy ? `Agent for ${r.sponsoredBy.name}, from their computer` : "An agent"

@@ -44,6 +44,19 @@ function active(members: { name: string; pk: string; active: boolean }[], name: 
 }
 
 describe("no seat moves to a new key", () => {
+  test("an agent asking under a person's name is offered an agent's name, never theirs with a number", async () => {
+    const pat = await generateIdentity("pat");
+    const { code, ownerCh } = await seat([{ id: pat, info: { name: "pat", kind: "human" } }]);
+    for (const name of ["pat", "human"]) {
+      const id = await generateIdentity(name);
+      const { requestId } = await Channel.requestJoin(relay, code, id, { name });
+      const r = (await ownerCh.requests()).find((x) => x.id === requestId)!;
+      // "human" is reserved: refused at approval, not renamed. "pat" is a person's: an agent's name instead.
+      if (name === "pat") expect(r.name).toMatch(/^agent(-\d+)?$/);
+      else expect(r.askedAs).toBeUndefined();
+    }
+  });
+
   test("a new key asking under a taken name, even as a reclaim, is offered the next free name", async () => {
     const { oldKey, code, ownerCh } = await seat();
     const newbie = await generateIdentity("win");

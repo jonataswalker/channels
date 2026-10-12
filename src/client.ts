@@ -951,8 +951,11 @@ export class Channel {
         // A name that isn't allowed at all (invalid, reserved) isn't swapped for one like it: approving refuses it.
         const asked = inlineText(info.name, 40);
         const allowed = NAME_RE.test(asked) && !RESERVED_NAMES.has(nameKey(asked));
-        const takenNow = allowed && seats.some((m) => nameKey(m.name) === nameKey(asked));
-        const auto = r.kind !== "human" && (info.auto === true || takenNow) ? (info.auto === true ? (allowed ? asked.replace(/-\d+$/, "") || asked : "agent") : asked) : undefined;
+        const holder = allowed ? seats.find((m) => nameKey(m.name) === nameKey(asked)) : undefined;
+        // A person's or the owner's name isn't a base for an agent's: "alice-2" would read as alice's.
+        const personName = !!holder && (holder.kind === "human" || holder.owner);
+        const base = info.auto === true ? (allowed ? asked.replace(/-\d+$/, "") || asked : "agent") : asked;
+        const auto = r.kind !== "human" && (info.auto === true || !!holder) ? (personName ? "agent" : base) : undefined;
         if (auto) offered.push({ name: (info.name = freeAgentName(auto, offered)) });
         // A half that doesn't check out means the relay tampered with the request: leave it out.
         const check = yield* this.codeCheck(r, opts.budget).pipe(Effect.catchCause(() => Effect.succeed(null)));

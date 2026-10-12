@@ -70,9 +70,14 @@ export function describeEvent(m: Message, state?: ChannelState): string {
   };
   const note = (n?: string) => (n ? `: ${n}` : "");
   switch (ev.op) {
-    case "hello":
-      // After joining, a hello that changes the role is a request the owner decides on.
-      return `joined${ev.role ? ` as ${ev.role}` : ""}${ev.about ? ` (${ev.about})` : ""}${via(state?.members.get(m.from)?.viaName)}`;
+    case "hello": {
+      // Only the owner's word sets a role: anyone else's hello shows the role only when it's the one they
+      // hold (an older client's hello that asked for another, or a role approval left out, says nothing).
+      const who = state?.members.get(m.from);
+      const role = ev.role && (who?.owner || who?.role === ev.role) ? ev.role : undefined;
+      const about = ev.about && (who?.owner || who?.about === ev.about) ? ev.about : undefined;
+      return `joined${role ? ` as ${role}` : ""}${about ? ` (${about})` : ""}${via(who?.viaName)}`;
+    }
     case "role.set":
       return ev.role ? `made ${ev.member} ${ev.role}${ev.about ? ` (${ev.about})` : ""}` : `cleared ${ev.member}'s role`;
     case "role.refuse":
@@ -247,7 +252,7 @@ export function formatRooms(state: ChannelState): string {
   return [...state.rooms.values()].map((r) => `#${inlineText(r.name, 40)} (id ${r.id}) · ${count.get(r.id) ?? 0} messages`).join("\n");
 }
 
-/** "read only", or what the scopes cover: "write messages; claim paths (contributor)". */
+/** "read only", "do everything a member does", or for an older limited grant, what it covers. */
 export function mayDo(scopes: readonly Scope[]): string {
   if (!scopes.length) return "read only";
   if (presetOf(scopes) === "full") return "do everything a member does";

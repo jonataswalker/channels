@@ -203,6 +203,12 @@ describe("roles", () => {
     s = foldWith([ask, self, set, refuse], r);
     expect(s.members.get("pixel")).toMatchObject({ role: "reviewer", about: "reads every PR" });
     expect(s.rejected.has(refuse.seq)).toBe(false);
+    // A hello names a role only when it's the one held: never "joined as owner" from someone who isn't.
+    const { describeEvent } = await import("../src/format.ts");
+    const grab = await msg(pixel, "pixel", { ev: { op: "hello", role: "owner" } });
+    const st = foldWith([ask, self, set, refuse, grab], r);
+    expect(describeEvent(grab, st)).toBe("joined");
+    expect(describeEvent(ask, st)).toBe("joined as reviewer (reads every PR)");
   });
 
   test("the owner sets its own role with hello", async () => {
