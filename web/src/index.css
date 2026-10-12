@@ -181,6 +181,11 @@ time,
   font-variant-numeric: tabular-nums;
 }
 
+/* A code block wider than its bubble scrolls; while there's more to its right, its edge fades out. */
+.code-more {
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
+
 /* What's said in a bubble wraps like prose, not like a log line. */
 .bubble-text {
   text-wrap: pretty;

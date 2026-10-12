@@ -4,7 +4,7 @@ import type { Message } from "../../../src/protocol.ts"
 import type { ChannelState, Task } from "../../../src/state.ts"
 
 import { ERROR_MS } from "./coordinator-mood"
-import { AGENT_SPEAKING_MS, agentInputs, agentMood, currentTask, delegations, dialogueOf, drawerPlaceFor, flagsByAgent, hiddenFlags, newDelegations, presentAt, seatsPerSide, stageAgents, teamEvents, type AgentInput } from "./room"
+import { AGENT_SPEAKING_MS, agentInputs, agentMood, currentTask, delegations, dialogueOf, drawerPlaceFor, emptyLines, flagsByAgent, hiddenFlags, newDelegations, presentAt, seatsPerSide, stageAgents, teamEvents, type AgentInput } from "./room"
 
 const msg = (seq: number, from: string, extra: Partial<Message> = {}): Message => ({ v: 1, id: `m${seq}`, from, kind: "msg", body: `said ${seq}`, ts: seq * 1000, seq, sigOk: true, ...extra }) as Message
 const member = (name: string, kind: "human" | "agent", joined = 0) => [name, { name, kind, active: true, joined }] as const
@@ -150,5 +150,12 @@ describe("fixes after The Room shipped", () => {
     const s = state({ tasks: new Map([[3, task(3, { owner: "win", state: "doing" })]]) } as Partial<ChannelState>)
     expect(drawerPlaceFor(s, "win", "lead", "ana")).toEqual({ kind: "task", task: 3 })
     expect(drawerPlaceFor(s, "dev", "lead", "ana")).toEqual({ kind: "dm", with: ["dev", "lead"] })
+  })
+})
+
+describe("a replay's empty stage and dialogue", () => {
+  test("live, they offer the next step; replayed, they only say how things stood, with nothing to act on", () => {
+    expect(emptyLines("atlas", null)).toEqual({ stage: "atlas works alone for now. Add an agent and it joins the room.", dialogue: "Tell atlas what you want done.", actions: true })
+    expect(emptyLines("atlas", "8:02 PM")).toEqual({ stage: "No agents had joined by 8:02 PM.", dialogue: "Nothing said yet by then.", actions: false })
   })
 })
