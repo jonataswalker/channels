@@ -180,7 +180,7 @@ describe("kiwi sh, end to end", () => {
   const owner = mkdtempSync(join(tmpdir(), "kiwi-sh-owner-"));
   let server: ReturnType<typeof startRelay>;
   const kiwi = async (...args: string[]) => {
-    const p = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], {
+    const p = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli/main.ts"), ...args], {
       cwd: owner,
       env: { ...process.env, KIWI_HOME: owner, KIWI_RELAY: server.url.origin, CLAUDE_CONFIG_DIR: owner, CLAUDECODE: "" },
       stdin: "ignore",

@@ -8,7 +8,7 @@ import { startRelay } from "../src/relay/bun.ts";
 
 setDefaultTimeout(60_000);
 
-const MC = ["bun", join(import.meta.dir, "../src/cli/main.ts")];
+const MC = [process.execPath, join(import.meta.dir, "../src/cli/main.ts")];
 const dataDir = mkdtempSync(join(tmpdir(), "kiwi-verbs-relay-"));
 const made: string[] = [dataDir];
 let server: ReturnType<typeof startRelay> | undefined;
@@ -159,7 +159,7 @@ describe("ten verbs", () => {
     await until(() => got.includes("streamed"), "streamed message");
     stream.kill();
     await stream.exited;
-    // Bun never ends a killed child's stdout (test/proc.ts): stop reading instead of waiting for EOF.
+    // Done with it once it has exited (test/proc.ts).
     await reader.cancel().catch(() => {});
     await reading.catch(() => {});
   });

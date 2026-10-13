@@ -22,7 +22,7 @@ let cfg: ChannelConfig;
 
 /** The CLI on this machine: as an agent in Claude Code by default, or as a person at their own terminal. */
 async function kiwi(args: string[], as: "agent" | "person" = "agent") {
-  const p = Bun.spawn(["bun", MAIN, ...args], {
+  const p = Bun.spawn([process.execPath, MAIN, ...args], {
     cwd: dir,
     env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay.url.origin, CLAUDE_CONFIG_DIR: claudeDir, KIWI_NO_HOOKS: "1", CLAUDECODE: as === "agent" ? "1" : "" },
     stdin: "ignore",
@@ -112,7 +112,7 @@ describe("admin is people-only", () => {
   });
 
   test("MCP offers no admin tools, even on the owner's machine", async () => {
-    const p = Bun.spawn(["bun", MAIN, "mcp"], {
+    const p = Bun.spawn([process.execPath, MAIN, "mcp"], {
       cwd: dir,
       env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay.url.origin, CLAUDE_CONFIG_DIR: claudeDir, KIWI_NO_HOOKS: "1", KIWI_AS: "lead" },
       stdin: "pipe",

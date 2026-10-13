@@ -18,7 +18,7 @@ afterAll(() => {
 });
 
 async function ok(...args: string[]): Promise<string> {
-  const p = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], {
+  const p = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli/main.ts"), ...args], {
     cwd: home,
     env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: server.url.origin, CLAUDE_CONFIG_DIR: claudeDir, CLAUDECODE: args[0] === "--as" && args[1] === "human" ? "" : "1" },
     stdin: "ignore",

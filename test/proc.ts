@@ -1,5 +1,7 @@
-// Bun 1.4.2 never ends a killed child's stdout/stderr streams (no EOF after SIGTERM), so a test
-// that kills a CLI and then reads its output to the end waits forever. Read what's there, then let go.
+// Tests spawn the CLI with process.execPath, never "bun" from PATH: on some machines "bun" is a
+// shell shim (pnpm), and killing the shim leaves the real bun running. That orphan keeps the
+// pipes open (no EOF for the test) and keeps listening as the agent (eating its messages).
+// Once a killed CLI has exited, these read what it wrote without waiting on an EOF.
 
 /** Read `s` to its end, or until the process behind it is gone and nothing more comes. */
 export function drain(s: ReadableStream<Uint8Array>) {
@@ -19,7 +21,7 @@ export function drain(s: ReadableStream<Uint8Array>) {
     get text() {
       return text;
     },
-    /** Once the process has exited: what it wrote, without waiting on an EOF that never comes. */
+    /** Once the process has exited: what it wrote, without waiting forever on an EOF. */
     async close(): Promise<string> {
       await Promise.race([done, Bun.sleep(300)]);
       await reader.cancel().catch(() => {});

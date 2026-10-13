@@ -44,7 +44,7 @@ afterAll(async () => {
   for (const d of [dataDir, claudeDir, ...made]) rmSync(d, { recursive: true, force: true });
 });
 
-const MC = ["bun", join(import.meta.dir, "../src/cli/main.ts")];
+const MC = [process.execPath, join(import.meta.dir, "../src/cli/main.ts")];
 
 // Tests never touch the real Claude Code settings.
 const claudeDir = mkdtempSync(join(tmpdir(), "mc-claude-"));
@@ -100,7 +100,7 @@ function lines(p: ReturnType<typeof mc>) {
     stop: async () => {
       p.kill();
       await p.exited;
-      // Bun never ends a killed child's stdout (test/proc.ts): stop reading instead of waiting for EOF.
+      // Done with it once it has exited (test/proc.ts).
       await Promise.race([done, Bun.sleep(300)]);
       await reader.cancel().catch(() => {});
       await done.catch(() => {});

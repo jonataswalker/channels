@@ -187,7 +187,7 @@ describe("kiwi tui, end to end", () => {
   let relay: { url: URL; stop: (force?: boolean) => void };
   const env = () => ({ ...process.env, KIWI_HOME: kiwiHome, KIWI_RELAY: relay.url.origin });
   const cli = async (...args: string[]) => {
-    const p = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], { cwd: dir, env: env(), stdout: "pipe", stderr: "pipe" });
+    const p = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli/main.ts"), ...args], { cwd: dir, env: env(), stdout: "pipe", stderr: "pipe" });
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     if ((await p.exited) !== 0) throw new Error(`kiwi ${args.join(" ")}: ${err}`);
     return out;

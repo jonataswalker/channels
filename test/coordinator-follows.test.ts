@@ -8,7 +8,7 @@ import { startRelay } from "../src/relay/bun.ts";
 
 setDefaultTimeout(60_000);
 
-const MC = ["bun", join(import.meta.dir, "../src/cli/main.ts")];
+const MC = [process.execPath, join(import.meta.dir, "../src/cli/main.ts")];
 const dataDir = mkdtempSync(join(tmpdir(), "kiwi-cf-relay-"));
 const made: string[] = [dataDir];
 let server: ReturnType<typeof startRelay> | undefined;

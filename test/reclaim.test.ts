@@ -71,7 +71,7 @@ describe("on the owner's own computer", () => {
       return d;
     };
     const run = async (dir: string, ...args: string[]) => {
-      const p = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], {
+      const p = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli/main.ts"), ...args], {
         cwd: dir,
         env: { ...process.env, KIWI_HOME: dir, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1", CLAUDECODE: "" },
         stdin: "ignore",

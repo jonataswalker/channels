@@ -81,7 +81,7 @@ test("tail started while the relay is down keeps waiting instead of exiting", as
   let server = startRelay({ port: 0, hostname: "127.0.0.1", dataDir });
   const port = server.port;
   const env = { ...process.env, KIWI_HOME: dir, KIWI_RELAY: server.url.origin, CLAUDE_CONFIG_DIR: dir, CLAUDECODE: "" };
-  const cli = (...args: string[]) => Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], { cwd: dir, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const cli = (...args: string[]) => Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli/main.ts"), ...args], { cwd: dir, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
   try {
     expect(await cli("create", "r", "--as", "lead").exited).toBe(0);
     server.stop(true);
