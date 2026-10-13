@@ -3,7 +3,7 @@
 // hands it messages.
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
@@ -113,11 +113,20 @@ describe("agents mark as kiwi hands them messages", () => {
   };
   const owner = scratch("owner");
   const agent = scratch("agent");
-  function spawn(home: string, args: string[]) {
-    return Bun.spawn([...MC, ...args], { cwd: home, env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  function spawn(home: string, args: string[], env: Record<string, string> = {}, input?: string) {
+    return Bun.spawn([...MC, ...args], {
+      cwd: home,
+      env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1", ...env },
+      stdin: input === undefined ? "ignore" : new Blob([input]),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
   }
   async function ok(home: string, ...args: string[]): Promise<string> {
-    const p = spawn(home, args);
+    return okWith(home, args);
+  }
+  async function okWith(home: string, args: string[], env: Record<string, string> = {}, input?: string): Promise<string> {
+    const p = spawn(home, args, env, input);
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     if ((await p.exited) !== 0) throw new Error(`kiwi ${args.join(" ")}: ${err}`);
     return out;
@@ -143,6 +152,75 @@ describe("agents mark as kiwi hands them messages", () => {
     expect(readUpTo()).toBeLessThan(sent);
     expect(await ok(agent, "listen", "--now")).toContain("ping");
     expect(readUpTo()).toBeGreaterThanOrEqual(sent);
+  });
+
+  test("its own messages don't move its mark", async () => {
+    const before = readUpTo();
+    const mine = seqOf(await ok(agent, "send", "--to", "lead", "from dev itself"));
+    await ok(agent, "listen", "--now");
+    expect(readUpTo()).toBe(before);
+    expect(mine).toBeGreaterThan(before);
+  });
+
+  test("the listen stream says it on its socket, while it runs", async () => {
+    const stream = spawn(agent, ["listen"]);
+    try {
+      await Bun.sleep(800);
+      const sent = seqOf(await ok(owner, "send", "--to", "dev", "streamed"));
+      await until(() => readUpTo() >= sent, "the mark from the stream");
+    } finally {
+      stream.kill();
+    }
+  });
+
+  test("a Claude Code session's next hook commits what the listener handed it, and marks it read", async () => {
+    const S = { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "hooked", CLAUDE_PID: String(process.pid) };
+    await okWith(agent, ["use", "reads", "--as", "dev"], S);
+    const sent = seqOf(await ok(owner, "send", "--to", "dev", "handed by the listener"));
+    // What the background listener leaves behind when it hands a message to the session.
+    mkdirSync(join(agent, "listen-hooks"), { recursive: true });
+    writeFileSync(join(agent, "listen-hooks", "reads.dev.hooked.delivered"), String(sent));
+    expect(readUpTo()).toBeLessThan(sent);
+    const out = await okWith(agent, ["hook", "prompt"], S, JSON.stringify({ session_id: "hooked", cwd: realpathSync(agent) }));
+    // Committed, so not handed over again; and read.
+    expect(out).not.toContain("handed by the listener");
+    expect(readUpTo()).toBeGreaterThanOrEqual(sent);
+  });
+
+  test("an MCP wait marks what it returned", async () => {
+    const p = Bun.spawn([...MC, "mcp"], { cwd: agent, env: { ...process.env, KIWI_HOME: agent, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1", KIWI_CHANNEL: "reads", KIWI_AS: "dev" }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+    try {
+      const reader = p.stdout.getReader();
+      let buf = "";
+      let id = 0;
+      const rpc = async (method: string, params: object = {}) => {
+        const myId = ++id;
+        p.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: myId, method, params }) + "\n");
+        p.stdin.flush();
+        for (;;) {
+          const nl = buf.indexOf("\n");
+          if (nl >= 0) {
+            const msg = JSON.parse(buf.slice(0, nl));
+            buf = buf.slice(nl + 1);
+            if (msg.id === myId) return msg.result ?? msg.error;
+            continue;
+          }
+          const { value, done } = await reader.read();
+          if (done) throw new Error("mcp exited");
+          buf += new TextDecoder().decode(value);
+        }
+      };
+      await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
+      p.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+      const waiting = rpc("tools/call", { name: "wait_for_messages", arguments: { timeout_seconds: 20 } });
+      await Bun.sleep(1000);
+      const sent = seqOf(await ok(owner, "send", "--to", "dev", "for the mcp wait"));
+      const got = (await waiting) as { content: { text: string }[] };
+      expect(got.content[0]!.text).toContain("for the mcp wait");
+      await until(() => readUpTo() >= sent, "the mark after the wait");
+    } finally {
+      p.kill();
+    }
   });
 
   test("listen --once: marked before it exits", async () => {

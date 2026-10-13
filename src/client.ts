@@ -268,13 +268,22 @@ export type Live =
    * Connected, or connected again. `outage` is how long the relay was out of reach, when that
    * was long enough to have said so (a Down came before); otherwise null.
    */
-  | { readonly _tag: "Open"; readonly presence: (p: PresenceFields) => Effect.Effect<void>; readonly outage: number | null }
+  | {
+      readonly _tag: "Open";
+      readonly presence: (p: PresenceFields) => Effect.Effect<void>;
+      /** Say on this socket that this member has read up to `seq`; false once it has closed. */
+      readonly mark: (seq: number) => boolean;
+      readonly outage: number | null;
+    }
   /** Caught up: the relay's head when this connection's replay ended. */
   | { readonly _tag: "Ready"; readonly head: number }
   | { readonly _tag: "Message"; readonly message: Message }
   | { readonly _tag: "Presence"; readonly presence: Presence & { sigOk: boolean } }
-  /** How far members have read (by key): one mark as it moves, or all of them on connect. */
-  | { readonly _tag: "Read"; readonly reads: readonly ReadMark[] }
+  /**
+   * How far members have read (by key): one mark as it moves, or (`snapshot`) every member's latest on
+   * connect, whose time is when it got that far, not when it passed any one message.
+   */
+  | { readonly _tag: "Read"; readonly reads: readonly ReadMark[]; readonly snapshot: boolean }
   /** The channel's info changed, the member list changed, someone asked to join. */
   | { readonly _tag: "Info" | "Roster" | "Request" }
   /** The relay has been out of reach for the quiet window (`after` ms); still retrying. Said once per outage. */
@@ -300,7 +309,7 @@ const outlasted = ({ attempt, elapsed, elapsedSincePrevious }: Schedule.InputMet
   elapsed >= quietMs && (attempt === 1 || elapsed - elapsedSincePrevious < quietMs);
 
 /** A frame from the socket, or the socket opening (with a way to send presence on it). */
-type Incoming = ServerFrame | { t: "pong" } | { t: "open"; presence: (p: PresenceFields) => Effect.Effect<void> };
+type Incoming = ServerFrame | { t: "pong" } | { t: "open"; presence: (p: PresenceFields) => Effect.Effect<void>; mark: (seq: number) => boolean };
 
 /** A ping now and then keeps proxies from closing a quiet socket. */
 const keepAlive = (ws: WebSocket) =>
@@ -331,6 +340,15 @@ function clockFrom(now: () => number): Clock.Clock {
     monotonicTimeNanosUnsafe: nanos,
     monotonicTimeNanos: Effect.sync(nanos),
     sleep: (d) => Effect.suspend(() => until(now() + Duration.toMillis(d))),
+  };
+}
+
+/** Read marks on `ws`: a frame on the socket a listener already has, rather than a request of its own. */
+function markOn(ws: WebSocket): (seq: number) => boolean {
+  return (seq) => {
+    if (ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify({ t: "read", seq }));
+    return true;
   };
 }
 
@@ -1560,7 +1578,7 @@ export class Channel {
       ws.onclose = (ev) => resolve({ code: ev.code, reason: ev.reason });
     });
     ws.onerror = () => {};
-    ws.onopen = () => void Queue.offerUnsafe(q, { t: "open", presence: this.presenceOn(ws) });
+    ws.onopen = () => void Queue.offerUnsafe(q, { t: "open", presence: this.presenceOn(ws), mark: markOn(ws) });
     ws.onmessage = (ev) => {
       let f: ServerFrame | { t: "pong" };
       try {
@@ -1595,7 +1613,7 @@ export class Channel {
           // Back after an outage the listener was told about: say for how long. The schedule's metadata is that outage's.
           const { attempt, elapsed, start } = yield* Schedule.CurrentMetadata;
           const now = yield* Clock.currentTimeMillis;
-          return { _tag: "Open", presence: f.presence, outage: attempt > 0 && elapsed >= quietMs ? now - start : null } satisfies Live;
+          return { _tag: "Open", presence: f.presence, mark: f.mark, outage: attempt > 0 && elapsed >= quietMs ? now - start : null } satisfies Live;
         }
         case "msg": {
           if (f.seq <= at.seq) return null;
@@ -1618,11 +1636,11 @@ export class Channel {
           return { _tag: "Ready", head: f.head } satisfies Live;
         case "read": {
           const mark = wellFormedRead(f);
-          return mark && ({ _tag: "Read", reads: [mark] } satisfies Live);
+          return mark && ({ _tag: "Read", reads: [mark], snapshot: false } satisfies Live);
         }
         case "reads": {
           const reads = Array.isArray(f.reads) ? f.reads.map(wellFormedRead).filter((r): r is ReadMark => r !== null) : [];
-          return { _tag: "Read", reads } satisfies Live;
+          return { _tag: "Read", reads, snapshot: true } satisfies Live;
         }
         default:
           return null;

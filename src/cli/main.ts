@@ -1372,11 +1372,14 @@ const commands: Record<string, Command> = {
             trust: state.trust.get(m.seq) ?? null,
             ts: m.ts,
           });
+          // Whether it got there: a message the webhook didn't take isn't marked read.
           try {
             const res = await fetch(url, { method: "POST", headers, body });
             if (!res.ok) process.stderr.write(`kiwi: webhook ${res.status} for #${m.seq}\n`);
+            return res.ok;
           } catch (err) {
             process.stderr.write(`kiwi: webhook failed for #${m.seq}: ${err instanceof Error ? err.message : err}\n`);
+            return false;
           }
         });
       yield* s.listen(post, {

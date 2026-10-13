@@ -833,7 +833,7 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
           case "Request":
             return void refreshRequests()
           case "Read":
-            setMarks((prev) => addMarks(prev, ev.reads))
+            setMarks((prev) => addMarks(prev, ev.reads, ev.snapshot))
             return
           case "Info":
             setInfoAt(Date.now())

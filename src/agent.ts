@@ -308,7 +308,7 @@ export class AgentSession {
     const seen = yield* cursor.seen(this.alias, this.me);
     const unread = messages.filter((m) => m.seq > since && !seen.has(m.seq) && this.wants(m, state, d));
     yield* cursor.write(this.alias, this.me, Math.max(since, state.head));
-    if (unread.length) yield* this.markRead(state.head);
+    if (unread.length) yield* this.markRead(unread.at(-1)!.seq);
     return { messages: unread, state };
   });
 
@@ -330,9 +330,10 @@ export class AgentSession {
    * this left off. A message whose handling fails is dropped with a line on onStatus, never the rest.
    *
    * An Effect that runs a handler rather than a Stream of messages: the cursor may move only once
-   * the handler is done with one, which a pulled Stream can't promise.
+   * the handler is done with one, which a pulled Stream can't promise. A handler that returns false
+   * didn't get it to anyone (a webhook that failed): it isn't marked read.
    */
-  listen<R = never>(onMessage: (m: Message, state: ChannelState) => Effect.Effect<void, unknown, R>, opts: Delivery & Hearing<R>): Effect.Effect<void, Refused | ChannelGone, Agent | R> {
+  listen<R = never>(onMessage: (m: Message, state: ChannelState) => Effect.Effect<void | boolean, unknown, R>, opts: Delivery & Hearing<R>): Effect.Effect<void, Refused | ChannelGone, Agent | R> {
     return Effect.gen({ self: this }, function* () {
       // Lets the Claude Code Stop hook know this agent can hear the channel, for as long as this process lives.
       const { registerListener } = yield* Effect.promise(() => import("./hooks.ts"));
@@ -350,8 +351,11 @@ export class AgentSession {
       /** In the background, for as long as this listens; its failure is nobody's business. */
       const aside = <E, R2>(e: Effect.Effect<unknown, E, R2>) => Effect.forkScoped(Effect.ignoreCause(e));
 
-      /** How far this has handed messages on (read marks follow it). */
+      /** How far this has handed messages for this agent on (read marks follow it), and how far it has said so. */
       let readTo = 0;
+      let saidTo = 0;
+      /** Says a read mark on the open socket (the relay's cheapest way in); null between connections. */
+      let mark: ((seq: number) => boolean) | null = null;
       const hear = (m: Message) =>
         Effect.gen({ self: this }, function* () {
           if (m.seq > (messages.at(-1)?.seq ?? 0)) {
@@ -362,19 +366,24 @@ export class AgentSession {
             // check again before calling it forged and moving past it for good.
             if (state.trust.get(m.seq) === "forged") state = yield* this.foldState(messages, yield* this.members(true));
           }
-          if (!seen.has(m.seq) && this.wants(m, state, opts)) yield* onMessage(m, state);
+          // Only what's for this agent, and only once it was handed on, moves the read mark: not its own words, nor chatter.
+          if (!seen.has(m.seq) && this.wants(m, state, opts) && (yield* onMessage(m, state)) !== false) readTo = m.seq;
           yield* cursor.write(this.alias, this.me, m.seq);
-          readTo = m.seq;
         });
 
-      // What's been handed on is read: say so a second apart at most, and once more when this ends.
+      // What's been handed on is read: said on the socket a second apart at most (nothing while it's down: the next
+      // connection says it), and once more over HTTP when this ends, if the socket didn't get to.
+      const sayRead = Effect.sync(() => {
+        if (readTo > saidTo && mark?.(readTo)) saidTo = readTo;
+      });
       if (opts.marks !== false) {
-        yield* Effect.forkScoped(Effect.forever(Effect.andThen(Effect.sleep(MARK_EVERY_MS), Effect.suspend(() => this.ch.fx.markRead(readTo)))));
-        yield* Effect.addFinalizer(() => Effect.suspend(() => this.markRead(readTo)));
+        yield* Effect.forkScoped(Effect.forever(Effect.andThen(Effect.sleep(MARK_EVERY_MS), sayRead)));
+        yield* Effect.addFinalizer(() => Effect.suspend(() => (readTo > saidTo ? this.markRead(readTo) : Effect.void)));
       }
 
-      const opened = (presence: Extract<Live, { _tag: "Open" }>["presence"]) =>
+      const opened = ({ presence, mark: on }: Extract<Live, { _tag: "Open" }>) =>
         Effect.gen({ self: this }, function* () {
+          mark = on;
           // Members may have joined or left while we were disconnected.
           yield* aside(this.members(true));
           announce = Effect.ignoreCause(presence({ client: opts.client, ...(role ? { role } : {}) }));
@@ -401,7 +410,7 @@ export class AgentSession {
       const handle = (ev: Live): Effect.Effect<void, unknown, Agent | R | Scoped.Scope> => {
         switch (ev._tag) {
           case "Open":
-            return opened(ev.presence);
+            return opened(ev);
           case "Message":
             return hear(ev.message);
           case "Presence":

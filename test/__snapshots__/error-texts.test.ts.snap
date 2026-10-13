@@ -122,6 +122,7 @@ exports[`the relay's error texts are exactly these 1`] = `
   "503 the channel is busy or restarting; try again in a moment",
   "body bad ephemeral frame",
   "body bad json",
+  "body bad read mark",
   "body dev sign-in only takes requests made on this machine, not through a proxy",
   "body internal error",
   "body no such channel",

@@ -341,7 +341,7 @@ try {
   await page.getByRole("textbox", { name: "Message" }).fill("smoke, read me")
   await page.keyboard.press("Enter")
   await page.getByText("smoke, read me", { exact: true }).first().waitFor()
-  await page.getByText("Delivered", { exact: true }).waitFor({ timeout: 10000 })
+  // Nothing yet: an agent counts only once it has ever said how far it read (an older kiwi never does).
   for (const as of ["bot", "helper"]) await kiwi(["-c", "smoke", "--as", as, "listen", "--now"])
   await page.getByText(/^Read( by|\s\d)/).waitFor({ timeout: 15000 })
   if (process.env.SMOKE_SHOTS) await page.screenshot({ path: join(process.env.SMOKE_SHOTS, "read.png") })

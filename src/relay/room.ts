@@ -1139,6 +1139,14 @@ export const onClientFrame = Effect.fn("Room.onClientFrame")(function* (raw: str
     }
     return { others: frame({ t: "eph", iv: f.iv, ct: f.ct }) } satisfies Effects;
   }
+  if (f.t === "read") {
+    // How far this member has read: kept and passed on only when it moves forward. Too many is just dropped.
+    if (!allow(`read:${db.roomId}:${sender}`, READS_PER_MINUTE)) return {} satisfies Effects;
+    return yield* markRead(sender, f.seq).pipe(
+      Effect.map((mark): Effects => (mark ? { broadcast: [frame({ t: "read", ...mark })] } : {})),
+      Effect.catchCause(() => Effect.succeed<Effects>({ reply: frame({ t: "err", error: "bad read mark" }) })),
+    );
+  }
   if (f.t !== "send") return { reply: frame({ t: "err", error: "unknown frame" }) } satisfies Effects;
   if (!allow(`${db.roomId}:${sender}`, MESSAGES_PER_MINUTE)) return { reply: frame({ t: "err", error: "too many messages; wait a minute", id: f.id }) } satisfies Effects;
   const send = f;

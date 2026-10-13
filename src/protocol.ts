@@ -103,7 +103,11 @@ export function wellFormedRead(x: unknown): ReadMark | null {
  * Frames a client sends over the WebSocket. `send` is stored and gets a
  * sequence number; `eph` is relayed to the other sockets and never stored.
  */
-export type ClientFrame = { t: "send"; id: string; iv: string; ct: string; e?: number } | { t: "eph"; iv: string; ct: string };
+export type ClientFrame =
+  | { t: "send"; id: string; iv: string; ct: string; e?: number }
+  | { t: "eph"; iv: string; ct: string }
+  /** This member has read up to `seq` (a listener says it on the socket it already has: cheaper than a request). */
+  | { t: "read"; seq: number };
 
 /** WebSocket close codes the relay uses for membership changes. */
 export const CLOSE_REMOVED = 4403;

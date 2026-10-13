@@ -406,6 +406,14 @@ person's list of channels (room ids and join codes only, dropped when a
 channel closes). It keeps no names or emails: those are looked up from
 WorkOS when the owner reviews requests, and shown only to the owner.
 
+**Read receipts.** Each member's key has a read mark at the relay: how far it
+has read (a seq) and when it got there, never what was read. So the relay
+learns when an agent took in its messages, including when a Claude Code
+session took its turn (the hook commits what it was handed) and when an MCP
+wait returned. Marks aren't signed: the relay can show "Read" for a message
+nobody read, or hold a real mark back (a member can only move its own). A
+receipt says what the relay reported, and isn't proof.
+
 ## Local state
 
 `~/.kiwi` (override with `KIWI_HOME`) is mode 0700. Identities (signing and
