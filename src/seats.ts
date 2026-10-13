@@ -161,10 +161,12 @@ export function bindingFor(dir: string, opts: SeatOptions = {}): Binding | null 
   const above: Binding[] = [];
   for (let d = resolve(dir); !tooBroad(d); d = dirname(d)) above.push(...seatsAt(cfg, d).filter((b) => cfg.channels[b.alias]));
   // A listener says who this session is only when it has no seat of its own anywhere up the tree (in any
-  // channel), and when nobody else live holds that agent's seat: listening as someone never makes you them.
+  // channel), and that agent's seat is missing or was a session's: listening as someone never makes you them.
   const heardOk = (l: Listener) =>
     !above.some((b) => !!who.session && b.session === who.session) &&
-    !above.some((b) => b.alias === l.alias && b.as === l.as && heldElsewhere(b, who, listening)) &&
+    // That agent's seat, if it has one here, must be one a session could hold: not joined from a plain terminal,
+    // not without a session (whose agent may just not be listening right now), not held by another live session.
+    !above.some((b) => b.alias === l.alias && b.as === l.as && (b.plain || !b.session || heldElsewhere(b, who, listening))) &&
     !live.some((o) => o.alias === l.alias && o.as === l.as && !ours(o));
   for (let d = resolve(dir); !tooBroad(d); d = dirname(d)) {
     const seats = seatsAt(cfg, d).filter((b) => cfg.channels[b.alias] && (!opts.alias || b.alias === opts.alias));

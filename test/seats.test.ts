@@ -215,3 +215,19 @@ describe("listening as someone never makes you them (review of T1571)", () => {
     expect(bindingFor(dir, { who: { harness: "gemini" }, listeners })?.as).toBe("muse");
   });
 });
+
+test("listening as a plain-terminal or Gemini agent that isn't listening right now doesn't make a session it", () => {
+  const A = { harness: "claude" as const, session: "A", pid: process.pid };
+  bindDirectory(dir, { alias: "ch", as: "muse", plain: true });
+  bindDirectory(dir, { alias: "ch", as: "gem", harness: "gemini" });
+  for (const as of ["muse", "gem"]) {
+    const listeners = () => [{ alias: "ch", as, harness: "claude" as const, session: "A", pid: process.pid, cwd: dir }];
+    expect(bindingFor(dir, { who: A, listeners })?.as).not.toBe(as);
+  }
+  // Neither seat was rewritten to the session.
+  expect(seatsAt(loadConfig(), dir).map((b) => [b.as, b.session ?? null]).sort()).toEqual([
+    ["gem", null],
+    ["muse", null],
+  ]);
+  expect(seatsAt(loadConfig(), dir).find((b) => b.as === "muse")?.plain).toBe(true);
+});
