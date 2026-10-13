@@ -34,7 +34,7 @@ import { ChannelGone } from "./client.ts";
 import { briefText, COMMANDS } from "./brief.ts";
 import { charterLines, formatMessage, holdLine, modeLine } from "./format.ts";
 import { humanOf } from "./state.ts";
-import { bindingFor as seatFor, here, seatsNear, type Binding, type Here, type SeatOptions } from "./seats.ts";
+import { bindDirectory as bindSeat, bindingFor as seatFor, here, seatsNear, type Binding, type Here, type Listener, type SeatOptions } from "./seats.ts";
 
 /** Marks our entries so install/uninstall can find them. Current clients only. */
 const MARK = "# kiwi";
@@ -48,11 +48,16 @@ const LISTEN_SECONDS = 24 * 3600;
 // Seats (seats.ts) say which agent works in a directory; a live listener is how a seat without a
 // recorded process shows it's still held.
 
-export { bindDirectory, type Binding } from "./seats.ts";
+export type { Binding } from "./seats.ts";
 
 /** The seat this process (or hook, for `who`) acts for in `dir`. */
-export function bindingFor(dir: string, opts: Omit<SeatOptions, "listening"> = {}): Binding | null {
-  return seatFor(dir, { ...opts, listening: isListening });
+export function bindingFor(dir: string, opts: Omit<SeatOptions, "listeners"> = {}): Binding | null {
+  return seatFor(dir, { ...opts, listeners: liveListeners });
+}
+
+/** Give an agent its seat in `dir`, never pushing out another agent that's listening from here. */
+export function bindDirectory(dir: string, b: Binding): boolean {
+  return bindSeat(dir, b, isListening);
 }
 
 // ---------- live listeners ----------
@@ -61,12 +66,16 @@ function listenerDir(): string {
   return join(home(), "listeners");
 }
 
-/** Record that this process listens for `as` on `alias`; removed on exit. */
+/**
+ * Record that this process listens for `as` on `alias`, and for which session (when its harness says),
+ * so that session's hooks know who it is; removed on exit.
+ */
 export function registerListener(alias: string, as: string): void {
   const dir = listenerDir();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = join(dir, `${encodeURIComponent(alias)}.${encodeURIComponent(as)}.${process.pid}`);
-  writeFileSync(file, String(Date.now()));
+  const who = here();
+  writeFileSync(file, JSON.stringify({ at: Date.now(), alias, as, cwd: process.cwd(), ...who }));
   const drop = () => rmSync(file, { force: true });
   process.on("exit", drop);
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
@@ -77,23 +86,55 @@ export function registerListener(alias: string, as: string): void {
   }
 }
 
-/** Whether some live process is listening for `as` on `alias` (stale records are cleaned up). */
-export function isListening(alias: string, as: string): boolean {
+/** The live listener records (stale ones are cleaned up): each file's name, and what it says. */
+function liveRecords(): { name: string; rec: Record<string, unknown> }[] {
   const dir = listenerDir();
-  if (!existsSync(dir)) return false;
-  const prefix = `${encodeURIComponent(alias)}.${encodeURIComponent(as)}.`;
-  let alive = false;
+  if (!existsSync(dir)) return [];
+  const out: { name: string; rec: Record<string, unknown> }[] = [];
   for (const f of readdirSync(dir)) {
-    if (!f.startsWith(prefix)) continue;
-    const pid = Number(f.slice(prefix.length));
+    const pid = Number(f.slice(f.lastIndexOf(".") + 1));
     try {
       process.kill(pid, 0);
-      alive = true;
     } catch {
       rmSync(join(dir, f), { force: true });
+      continue;
     }
+    let rec: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(readFileSync(join(dir, f), "utf8")) as unknown;
+      if (parsed && typeof parsed === "object") rec = parsed as Record<string, unknown>;
+    } catch {
+      // A record from before 0.10.3: a timestamp, nothing about who started it.
+    }
+    out.push({ name: f, rec });
   }
-  return alive;
+  return out;
+}
+
+/** Every live listener on this machine. One from before 0.10.3 says only who it listens as (when its file name can tell). */
+export function liveListeners(): Listener[] {
+  const out: Listener[] = [];
+  for (const { name, rec } of liveRecords()) {
+    const parts = name.split(".");
+    const alias = typeof rec.alias === "string" ? rec.alias : parts.length === 3 ? decodeURIComponent(parts[0]!) : null;
+    const as = typeof rec.as === "string" ? rec.as : parts.length === 3 ? decodeURIComponent(parts[1]!) : null;
+    if (alias === null || as === null) continue;
+    out.push({
+      alias,
+      as,
+      ...(typeof rec.cwd === "string" ? { cwd: rec.cwd } : {}),
+      ...(typeof rec.harness === "string" ? { harness: rec.harness as Listener["harness"] } : {}),
+      ...(typeof rec.session === "string" ? { session: rec.session } : {}),
+      ...(Number.isInteger(rec.pid) ? { pid: rec.pid as number } : {}),
+    });
+  }
+  return out;
+}
+
+/** Whether some live process is listening for `as` on `alias`. */
+export function isListening(alias: string, as: string): boolean {
+  const prefix = `${encodeURIComponent(alias)}.${encodeURIComponent(as)}.`;
+  return liveRecords().some(({ name }) => name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length)));
 }
 
 function deliveredFile(alias: string, as: string, session: string): string {

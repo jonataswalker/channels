@@ -2,7 +2,7 @@
 // checkout; a session finds its own seat, a restart takes its old one back, and a second live agent
 // never acts as the first.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, updateConfig, wipeChannel } from "../src/config.ts";
@@ -126,4 +126,53 @@ test("a suffixed name still fits in 32 characters", () => {
   const name = freeAgentName(base, taken);
   expect(name.length).toBeLessThanOrEqual(32);
   expect(name.endsWith("-101")).toBe(true);
+});
+
+test("a session's hooks name its own seat, never the seat a plain terminal joined into the same checkout (T1571)", () => {
+  // The coordinator's seat from before seats (no harness, no session), then another agent joins from a
+  // plain terminal and the last-join-wins rule replaced it: only that other agent's seat is left.
+  bindDirectory(dir, { alias: "ch", as: "claude" });
+  bindDirectory(dir, { alias: "ch", as: "muse", plain: true });
+  expect(seatsAt(loadConfig(), dir).map((b) => b.as)).toEqual(["muse"]);
+  const coord = { harness: "claude" as const, session: "coord", pid: process.pid };
+  // Never someone else's seat: a seat joined from a plain terminal isn't taken over by a session.
+  expect(bindingFor(dir, { who: coord })).toBeNull();
+  // The session listens as claude from here: that's who it is, and it gets its seat back beside muse's.
+  const listeners = () => [{ alias: "ch", as: "claude", harness: "claude" as const, session: "coord", pid: process.pid, cwd: dir }];
+  expect(bindingFor(join(dir, "src"), { who: coord, listeners })?.as).toBe("claude");
+  expect(seatsAt(loadConfig(), dir).map((b) => b.as).sort()).toEqual(["claude", "muse"]);
+  expect(bindingFor(dir, { who: coord })?.as).toBe("claude");
+  // The plain terminal is still muse.
+  expect(bindingFor(dir, { who: {} })?.as).toBe("muse");
+});
+
+test("a seat with no session that someone else is listening as is never taken", () => {
+  bindDirectory(dir, { alias: "ch", as: "pic" });
+  const other = () => [{ alias: "ch", as: "pic", cwd: dir }];
+  expect(bindingFor(dir, { who: { harness: "claude", session: "s1", pid: process.pid }, listeners: other })).toBeNull();
+  // Nobody listening as it: a restarted agent takes its old seat back, as before.
+  expect(bindingFor(dir, { who: { harness: "claude", session: "s1", pid: process.pid } })?.as).toBe("pic");
+});
+
+test("joining from a plain terminal doesn't push out an agent that's listening here", () => {
+  bindDirectory(dir, { alias: "ch", as: "claude" });
+  bindDirectory(dir, { alias: "ch", as: "muse", plain: true }, (_a, as) => as === "claude");
+  expect(seatsAt(loadConfig(), dir).map((b) => b.as).sort()).toEqual(["claude", "muse"]);
+});
+
+test("live listeners say who started them; an older record only who it listens as", async () => {
+  const { liveListeners, isListening } = await import("../src/hooks.ts");
+  const dirL = join(home, "listeners");
+  mkdirSync(dirL, { recursive: true });
+  writeFileSync(join(dirL, `ch.a.b.${process.pid}`), JSON.stringify({ at: 1, alias: "ch", as: "a.b", cwd: dir, harness: "claude", session: "s1", pid: 42 }));
+  writeFileSync(join(dirL, `ch.old.${process.pid}`), "1791507020412");
+  writeFileSync(join(dirL, `ch.dead.${DEAD}`), "{}");
+  expect(liveListeners().sort((x, y) => x.as.localeCompare(y.as))).toEqual([
+    { alias: "ch", as: "a.b", cwd: dir, harness: "claude", session: "s1", pid: 42 },
+    { alias: "ch", as: "old" },
+  ]);
+  expect(isListening("ch", "a.b")).toBe(true);
+  expect(isListening("ch", "a")).toBe(false);
+  // The dead one's record is gone.
+  expect(isListening("ch", "dead")).toBe(false);
 });

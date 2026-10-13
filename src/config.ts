@@ -49,6 +49,8 @@ export interface SeatRecord {
   at?: number;
   /** When its session last used it (kept for seats with no process to check). */
   seen?: number;
+  /** Joined from a process that named no harness (a plain terminal, an unknown tool): no session ever takes it over. */
+  plain?: true;
 }
 
 /** Drop the seats `drop` matches from every directory. */
