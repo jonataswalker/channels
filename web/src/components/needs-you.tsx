@@ -7,7 +7,6 @@ import { TOO_MANY_REQUESTS } from "@mc/sas.ts"
 import { taskId, type Task } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
 import { excerpt, formatAgo } from "@/lib/format"
-import { escapeLayer } from "@/lib/escape"
 import { cx } from "@/lib/utils"
 import { useControls } from "./controls"
 import { Icon } from "./icon"
@@ -34,9 +33,6 @@ export function NeedsYou({
   onSendBack,
   onOpenTask,
   onJump,
-  variant = "banner",
-  openSignal = 0,
-  requestFilter,
 }: {
   now: number
   roomId: string
@@ -52,36 +48,23 @@ export function NeedsYou({
   onSendBack: (t: Task, why: string) => Promise<void>
   onOpenTask: (id: number) => void
   onJump: (seq: number) => void
-  /**
-   * banner: a slim line at the top of the conversation that opens a popover. stack: the first two as
-   * cards, the rest one tap away (the coordinator's focus view, under its words).
-   */
-  variant?: "banner" | "stack" | "list"
-  /** A new value opens it (the focus view's "needs you" link). */
-  openSignal?: number
-  /** Only some join requests (the Room shows each on its own face); all of them when left out. */
-  requestFilter?: (r: JoinRequest) => boolean
 }) {
   const { p } = useControls()
   const [open, setOpen] = useState(false)
-  const [signal, setSignal] = useState(openSignal)
-  if (openSignal !== signal) {
-    setSignal(openSignal)
-    if (openSignal) setOpen(true)
-  }
   const box = useRef<HTMLElement>(null)
-  const requests = (p.isOwner ? p.requests : []).filter((r) => !requestFilter || requestFilter(r))
+  const requests = p.isOwner ? p.requests : []
   // Closes on a click elsewhere, or Escape, like any popover.
   useEffect(() => {
-    if (!open || variant === "stack") return
+    if (!open) return
     const away = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false)
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false)
     document.addEventListener("pointerdown", away)
-    const stop = escapeLayer(() => box.current, () => setOpen(false))
+    document.addEventListener("keydown", esc)
     return () => {
       document.removeEventListener("pointerdown", away)
-      stop()
+      document.removeEventListener("keydown", esc)
     }
-  }, [open, variant])
+  }, [open])
   const items: { key: string; summary: string; node: ReactNode }[] = [
     ...requests.map((r) => ({ key: `r${r.id}`, summary: `${r.name} wants to join`, node: <RequestItem r={r} roomId={roomId} now={now} /> })),
     ...escalations.map((m) => ({ key: `e${m.seq}`, summary: `${nameOf(m.from)} needs a decision`, node: <EscalationItem m={m} now={now} nameOf={nameOf} onReply={onReply} onJump={(seq) => (setOpen(false), onJump(seq))} /> })),
@@ -104,39 +87,6 @@ export function NeedsYou({
   ]
   if (!items.length) return null
   const n = items.length
-  // list: every item as rows, for a popover someone else draws (a face's flag in the Room).
-  if (variant === "list") {
-    return (
-      <section aria-label="Needs you">
-        {requests.some((r) => r.check === "unchecked") && <p className="mx-4 mt-3 text-meta leading-normal text-ink-3">{TOO_MANY_REQUESTS}</p>}
-        <ul className="max-h-[60vh] divide-y divide-line overflow-y-auto">
-          {items.map((i) => (
-            <li key={i.key} className="px-4 py-3">
-              {i.node}
-            </li>
-          ))}
-        </ul>
-      </section>
-    )
-  }
-  if (variant === "stack") {
-    const shown = open ? items : items.slice(0, 2)
-    return (
-      <section ref={box} aria-label="Needs you" className="flex flex-col gap-2">
-        {requests.some((r) => r.check === "unchecked") && <p className="text-meta leading-normal text-ink-3">{TOO_MANY_REQUESTS}</p>}
-        {shown.map((i) => (
-          <div key={i.key} className="animate-rise rounded-card bg-field px-4 py-3">
-            {i.node}
-          </div>
-        ))}
-        {n > shown.length && (
-          <button type="button" onClick={() => setOpen(true)} className="self-start rounded-full px-2 py-1 text-meta font-medium text-ink-2 transition-colors hover:bg-wash hover:text-ink">
-            and {n - shown.length} more
-          </button>
-        )}
-      </section>
-    )
-  }
   return (
     <section ref={box} aria-label="Needs you" className="sticky top-0 z-20 bg-canvas pt-3 pb-2">
       <button
@@ -301,7 +251,7 @@ function EscalationItem({ m, now, nameOf, onReply, onJump }: { m: Message; now: 
             void send()
           }}
         >
-          <TextField autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), setDraft(null))} placeholder={`Answer ${nameOf(m.from)}`} aria-label="Answer" className="flex-1" />
+          <TextField autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setDraft(null)} placeholder={`Answer ${nameOf(m.from)}`} aria-label="Answer" className="flex-1" />
           <Button size="sm" variant="secondary" type="submit" disabled={busy || !draft.trim()}>
             Send
           </Button>
@@ -357,7 +307,7 @@ function ReviewItem({ t, nameOf, onApprove, onSendBack, onOpen }: { t: Task; nam
             if (why.trim()) void act(() => onSendBack(t, why.trim()), `Sent ${taskId(t.id)} back`)
           }}
         >
-          <TextField autoFocus value={why} onChange={(e) => setWhy(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), setWhy(null))} placeholder="What to change" aria-label="What to change" className="flex-1" />
+          <TextField autoFocus value={why} onChange={(e) => setWhy(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setWhy(null)} placeholder="What to change" aria-label="What to change" className="flex-1" />
           <Button size="sm" variant="secondary" type="submit" disabled={busy || !why.trim()}>
             Send back
           </Button>

@@ -94,7 +94,7 @@ export function TextField({ className, ...props }: InputHTMLAttributes<HTMLInput
 
 /** An agent with no colour of its own still gets one, the same every time: a channel of agents isn't a wall of grey. */
 const HUES = Object.keys(PALETTE).filter((c) => c !== "yellow") as Color[]
-export function hueOf(name: string): Color {
+function hueOf(name: string): Color {
   let h = 0
   for (const ch of name) h = (h * 31 + ch.codePointAt(0)!) >>> 0
   return HUES[h % HUES.length]!

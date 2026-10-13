@@ -44,10 +44,6 @@ interface Props {
   extra?: Pick<SendOptions, "to" | "task" | "dm">
   /** Placeholder for this conversation ("Message T12", "Message win"). */
   placeholder?: string
-  /** Text to put in the field (a suggested first message); a new `n` puts it in again. */
-  seed?: { text: string; n: number }
-  /** Esc in the field, when nothing else wants it (no reply, no @ list): switches between the coordinator up close and the whole conversation. */
-  onEscape?: () => void
 }
 
 /** Who a message is for: the people @mentioned at its start. */
@@ -56,7 +52,7 @@ function recipients(body: string, names: Set<string>): string[] {
   return [...lead.matchAll(/@([\p{L}\p{N}_.-]+)/gu)].map((m) => m[1]!).filter((n) => names.has(n))
 }
 
-export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route, extra, placeholder, seed, onEscape }: Props) {
+export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route, extra, placeholder }: Props) {
   const [body, setBody] = useState("")
   const [files, setFiles] = useState<{ name: string; mime: string; data: string }[]>([])
   const [dropping, setDropping] = useState(false)
@@ -67,20 +63,6 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
   } | null>(null)
   const area = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
-  // A suggestion lands in the field as you'd typed it (set while rendering, as React keeps state in step with a prop).
-  const [placed, setPlaced] = useState(seed)
-  if (seed !== placed) {
-    setPlaced(seed)
-    if (seed) setBody(seed.text)
-  }
-  useEffect(() => {
-    if (!seed) return
-    requestAnimationFrame(() => {
-      const el = area.current
-      el?.focus()
-      el?.setSelectionRange(seed.text.length, seed.text.length)
-    })
-  }, [seed])
 
   const others = useMemo(() => people.filter((p) => p.name !== me), [people, me])
   const names = useMemo(() => new Set(others.map((p) => p.name)), [others])
@@ -347,9 +329,6 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
                 if (e.key === "Escape" && replyTo && !thread) {
                   e.stopPropagation()
                   onClearReply()
-                } else if (e.key === "Escape" && onEscape && !thread) {
-                  e.preventDefault()
-                  onEscape()
                 }
               }}
               className="bubble-text block max-h-[220px] min-h-[36px] min-w-0 flex-1 resize-none bg-transparent py-2 pr-1 pl-3.5 text-body outline-none placeholder:truncate placeholder:text-ink-3 focus-visible:outline-none"

@@ -387,11 +387,6 @@ try {
       })
     )
 
-  // With a coordinator, Main opens on the Room; the whole conversation is one control away.
-  const room = page.getByRole("region", { name: /^The room/ })
-  const showConversation = page.getByRole("button", { name: "Show conversation" })
-  if (await showConversation.isVisible().catch(() => false)) await showConversation.click()
-
   // A new channel starts in coordinator mode; one click makes bot the coordinator, another takes it back.
   at = "Make coordinator"
   // An event line says it in a few words; its tooltip has the whole of it.
@@ -401,112 +396,6 @@ try {
     await page.getByRole("menuitem", { name: "Make coordinator" }).click()
   })
   await panel.getByText(/People talk with .*, the coordinator/).waitFor({ timeout: 15000 })
-  console.log(`ok  ${at}`)
-
-  // The Room: the coordinator big, a face for every agent behind it; what you say docks below, then its answer.
-  at = "the room"
-  await panel.getByRole("button", { name: "Close details" }).click()
-  await page.getByRole("button", { name: "Room", exact: true }).click()
-  await room.waitFor({ timeout: 10000 })
-  // The faces sit beside the coordinator and under it: the whole stage is the team.
-  const team = room
-  const helperFace = team.getByRole("button", { name: /^helper, / })
-  await helperFace.waitFor({ timeout: 15000 })
-  console.log(`ok  ${at}`)
-
-  at = "the room's dialogue"
-  const dock = page.getByText(/^You and bot$/)
-  await dock.waitFor({ timeout: 10000 })
-  await page.getByRole("textbox", { name: "Message" }).fill("smoke, in the room")
-  await page.keyboard.press("Enter")
-  await page.getByText("smoke, in the room").first().waitFor({ timeout: 10000 })
-  await page.getByText(/is on it/).first().waitFor({ timeout: 10000 })
-  await kiwi(["-c", "smoke", "--as", "bot", "send", "On it: the smoke run is green, and nothing needs you right now."])
-  await page.getByText(/nothing needs you right now/).first().waitFor({ timeout: 15000 })
-  console.log(`ok  ${at}`)
-
-  // The coordinator hands helper a task: helper's face says what it's on.
-  at = "a face shows its task"
-  await kiwi(["-c", "smoke", "--as", "bot", "task", "add", "Smoke handoff", "--owner", "helper"])
-  await team.getByText(/Smoke handoff/).first().waitFor({ timeout: 15000 })
-  console.log(`ok  ${at}`)
-
-  // A face opens that agent's conversation in a drawer, its task's here; Esc closes it.
-  at = "a face opens its conversation"
-  await helperFace.click()
-  const drawer = page.getByRole("dialog", { name: "Smoke handoff" })
-  await drawer.waitFor({ timeout: 10000 })
-  await drawer.getByRole("textbox", { name: "Message" }).fill("smoke, to helper")
-  await page.keyboard.press("Enter")
-  await drawer.getByText("smoke, to helper", { exact: true }).waitFor({ timeout: 10000 })
-  await page.keyboard.press("Escape")
-  await drawer.waitFor({ state: "hidden" })
-  console.log(`ok  ${at}`)
-
-  // What an agent needs from you hangs off its face.
-  at = "a face's flag"
-  await kiwi(["-c", "smoke", "--as", "helper", "send", "--escalate", "Smoke asks: may I delete the test rooms?"])
-  const flag = team.getByRole("button", { name: /^helper needs you/ })
-  await flag.click({ timeout: 15000 })
-  await page.getByText("Smoke asks: may I delete the test rooms?").first().waitFor({ timeout: 10000 })
-  // Esc closes the top layer only: from the field, the flag's popover goes and the Room stays.
-  await page.getByRole("textbox", { name: "Message" }).last().focus()
-  await page.keyboard.press("Escape")
-  await team.getByRole("button", { name: /^helper needs you/, expanded: false }).waitFor({ timeout: 10000 })
-  await room.waitFor()
-  await flag.click()
-  await team.getByRole("button", { name: /^helper needs you/, expanded: true }).waitFor({ timeout: 10000 })
-  // Answered from the face: the flag comes down.
-  await page.getByRole("button", { name: "Answer", exact: true }).click()
-  await page.getByRole("textbox", { name: "Answer" }).fill("Not yet: keep them until Friday.")
-  await page.keyboard.press("Enter")
-  await flag.waitFor({ state: "hidden", timeout: 15000 })
-  console.log(`ok  ${at}`)
-
-  // Wide, the Room is two columns: the dialogue runs the full height beside the stage, and an agent's
-  // conversation takes the dialogue's place, with a way back.
-  at = "the wide room"
-  // (The smoke runs with more beside the conversation than a laptop does, so it needs a wider window for the same pane.)
-  await page.setViewportSize({ width: 1900, height: 900 })
-  await page.getByText(/^You and bot$/).waitFor({ timeout: 10000 })
-  await helperFace.click()
-  await page.getByRole("button", { name: "Back to bot" }).click({ timeout: 10000 })
-  await page.getByText(/^You and bot$/).waitFor({ timeout: 10000 })
-  await page.setViewportSize({ width: 1280, height: 800 })
-  // Narrower again, the dialogue docks under the stage (with its handle) before anything there is measured.
-  await page.getByRole("separator", { name: "Resize the dialogue" }).waitFor({ timeout: 10000 })
-  console.log(`ok  ${at}`)
-
-  // The timeline: click back in time, and the stage replays; Back to live returns.
-  at = "the timeline"
-  const timeline = page.getByRole("slider", { name: /Scrub back/ })
-  const bar = (await timeline.boundingBox())!
-  await page.mouse.click(bar.x + bar.width * 0.02, bar.y + bar.height / 2)
-  await page.getByRole("button", { name: /^Replaying/ }).click({ timeout: 10000 })
-  await page.getByText("Live", { exact: true }).waitFor({ timeout: 10000 })
-  // Scrubbed back, the field says a message goes out now, and sending one brings the stage back to live.
-  await page.mouse.click(bar.x + bar.width * 0.02, bar.y + bar.height / 2)
-  await page.getByRole("button", { name: /^Replaying/ }).waitFor({ timeout: 10000 })
-  const field = page.getByPlaceholder("Sending returns to live")
-  await field.fill("smoke, sent from a replay")
-  await field.press("Enter")
-  await page.getByText("Live", { exact: true }).waitFor({ timeout: 10000 })
-  await page.getByText("smoke, sent from a replay").first().waitFor({ timeout: 10000 })
-  console.log(`ok  ${at}`)
-
-  // Back to the whole conversation, and the Room again, from where each says so; Esc in the field too.
-  at = "room and conversation"
-  await page.getByRole("button", { name: "Show conversation" }).click()
-  await room.waitFor({ state: "hidden" })
-  await page.getByText("smoke, in the room", { exact: true }).first().waitFor()
-  await page.getByRole("button", { name: "Room", exact: true }).click()
-  await room.waitFor()
-  await page.getByRole("textbox", { name: "Message" }).press("Escape")
-  await room.waitFor({ state: "hidden" })
-  console.log(`ok  ${at}`)
-
-  at = "No longer coordinator"
-  await inDetails(async () => {})
   await panel.getByRole("button", { name: "More for bot" }).click()
   await page.getByRole("menuitem", { name: "No longer coordinator" }).click()
   // The mode goes off first (so nobody re-appoints in between), then the role: the role is the newest line.

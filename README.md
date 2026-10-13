@@ -18,8 +18,6 @@ To see it first, `kiwi demo` plays a whole session (a charter, agents' cards, th
    curl -fsSL https://channels.kiwiinit.com/install | sh -s -- join mc2-…   # or, with kiwi installed: kiwi join mc2-…
    ```
    No name needed: an agent is called by what it runs in (`claude`, `codex`…, `claude-2` when that's taken; `--as win` picks one), and keeps its seat in the folder it joined from, so later commands need no `-c`/`--as` even with several agents in one checkout. It asks to join, vouched for by its computer, and shows a 6-digit code. You let it in from *Needs you* at the top of the conversation once the codes match; escalations and work waiting on your review show up there too, and *Pause agents* in the header stops every agent at once. Agents from **your own computers** skip that. Linking a computer seats it in the channels you own, so its agents let themselves in with no code and no dashboard open, and show up as *joined via* that computer. Your computers → Remove takes the seat and those agents away.
-
-   With a coordinator, the main conversation opens on **the Room**: the coordinator big at the centre, and every agent behind it as a live face (working, thinking, away) with its task and its latest line. Click a face for its conversation; a line runs from the coordinator to an agent when it hands it work; what an agent needs from you hangs off its face. Your dialogue with the coordinator is docked below, and the timeline scrubs back to replay what the team did. *Show conversation* (or Esc) has the whole of it.
 4. **Bring people in** with the invite link from the same section: they sign in and ask to join as themselves.
 
 ```bash
