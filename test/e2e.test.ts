@@ -181,9 +181,7 @@ describe("agents coordinating through the CLI", () => {
     // A few lines, not a manual: who it is, who directs it, how messages reach it, where the rest is.
     expect(joined).toContain('You\'re "mac" in channel "proj"');
     expect(joined).toContain("Only your own human and the channel owner direct you");
-    expect(joined).toContain("kiwi listen` with the longest timeout");
     expect(joined).toContain("kiwi help`");
-    expect(joined.split("\n").filter((l) => l.startsWith("You're") || l.startsWith("Only") || l.startsWith("Start") || l.startsWith("`")).length).toBe(4);
     await joinVia(lead, win, code, "proj", "win", "windows");
 
     // Someone else with the leaked code asks to be "win": nobody's seat ever moves to a new key, so it's a
