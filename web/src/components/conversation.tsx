@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth"
 import { channelTitle, forgetChannel, LEFT_CHANNEL, loadMember, loadRecent, saveMember, saveRecent, useChannel, useClock, useKnownChannels, type StoredMember } from "@/lib/channel"
 import { markSeen, setOpenNews } from "@/lib/news"
 import { useIcons, useLiveIcon } from "@/lib/icons"
-import { excerpt, formatTime, memberName } from "@/lib/format"
+import { excerpt, formatTime, memberName, shortTitle } from "@/lib/format"
 import { usePlaceSlot } from "@/lib/place-slot"
 import { coordinatorMood, ERROR_MS, moodInputs, SPEAKING_MS, type Mood } from "@/lib/coordinator-mood"
 import { receipt } from "@/lib/receipts"
@@ -34,8 +34,7 @@ import { TaskPage } from "./task-page"
 import { Notes, StateMark, TaskCard, Tasks } from "./tasks"
 import { ThreadPanel } from "./thread"
 
-/** A task's state in a word, beside its row in the list. */
-/** Where a task stands, in words: the sidebar's dot says it at a glance; these say it on hover and to screen readers. */
+/** Where a task stands, in words: on hover over its row in the list. */
 const STATE_WORD = { todo: "Open", doing: "In progress", review: "In review", done: "Done" } as const
 
 /** Messages this close together from one sender read as one run. */
@@ -202,9 +201,10 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   // A brand-new channel: nothing said and nobody to say it. The stop button waits for agents.
   const quiet = noAgents && !messages.some((m) => m.kind !== "event")
 
-  // Remember the latest message and who's here, for the channel list.
+  // Remember the latest message and who's here, for the channel list. Not events (joins, cards, task changes),
+  // and not a note an agent sent only to itself (a listener test): the preview is the latest thing said to someone.
   useEffect(() => {
-    const last = [...messages].reverse().find((m) => m.kind !== "event" && !ignored(state.trust.get(m.seq)))
+    const last = [...messages].reverse().find((m) => m.kind !== "event" && !ignored(state.trust.get(m.seq)) && !(m.to?.length && m.to.every((n) => n === m.from)))
     const prior = loadRecent(member.code)
     if (!last && !others.length) return
     saveRecent(member.code, {
@@ -898,10 +898,17 @@ function PlaceSlot({ children }: { children: ReactNode }) {
   return slot ? createPortal(children, slot) : null
 }
 
+/** The sidebar's task groups, in the order they ask for attention: each says its state in words. */
+const GROUPS = [
+  ["review", "Needs review"],
+  ["doing", "In progress"],
+  ["todo", "Up next"],
+] as const
+
 /**
  * The channel's conversations: main (people and the coordinator), one per open task (the agents
- * working it), then direct ones; finished tasks fold under Earlier. One row each, a status dot for a
- * task, a small face for a direct one.
+ * working it) grouped by where it stands, then direct ones. Finished tasks are on the board, one link
+ * away. A task's row is its short title with its owner's face on the right; a direct one has a small face.
  */
 function PlaceList({
   places,
@@ -911,7 +918,7 @@ function PlaceList({
   unreadIn,
   onPick,
   onBoard,
-  // Rows' text sits on the channel name's edge; the dot or face hangs in the gutter to its left.
+  // Rows' text sits on the channel name's edge; a direct conversation's face hangs in the gutter to its left.
   className = "mt-0.5 mb-2 ml-[38px] mr-1",
   me,
 }: {
@@ -925,16 +932,18 @@ function PlaceList({
   onPick: (p: Place) => void
   onBoard: () => void
 }) {
-  const [earlier, setEarlier] = useState(false)
   const all = [...places.entries()]
   const tasks = all.filter(([, i]) => i.place.kind === "task" && !i.done).sort((a, b) => b[1].last - a[1].last)
-  const done = all.filter(([, i]) => i.place.kind === "task" && i.done).sort((a, b) => b[1].last - a[1].last)
   const dms = all.filter(([, i]) => i.place.kind === "dm").sort((a, b) => b[1].last - a[1].last)
+  const done = [...state.tasks.values()].filter((t) => t.state === "done").length
+  const taskOf = (i: PlaceSummary) => (i.place.kind === "task" ? state.tasks.get(i.place.task) : undefined)
   const rowClass = (on: boolean, strong: boolean) =>
     cx("flex h-7 w-full items-center gap-2 rounded-ctl pr-2 pl-0 text-left text-ui transition-colors", on ? "bg-pick font-semibold text-ink" : strong ? "font-semibold text-ink hover:bg-wash" : "text-ink-2 hover:bg-wash hover:text-ink")
+  const face = (name: string, size: number) =>
+    name === state.coordinator ? <CoordinatorAvatar size={size} /> : <Monogram name={nameOf(name)} agent={isAgent(state.members.get(name))} color={colorOf(state, name)} size={size} />
   const row = (key: string, info: PlaceSummary) => {
     const p = info.place
-    const t = p.kind === "task" ? state.tasks.get(p.task) : undefined
+    const t = taskOf(info)
     const { n: unread, forMe } = key === current ? { n: 0, forMe: false } : unreadIn(key)
     const other = p.kind === "dm" ? (p.with.includes(me) ? (p.with.find((n) => n !== me) ?? me) : null) : null
     return (
@@ -942,30 +951,22 @@ function PlaceList({
         key={key}
         type="button"
         aria-current={key === current ? "page" : undefined}
-        // The dot says where a task stands; the word is here, so the title gets the room.
-        title={t ? `${taskId(t.id)} ${t.title} · ${STATE_WORD[t.state]}` : undefined}
+        // The row has the short title; the whole one, its number and state are here.
+        title={t ? `${taskId(t.id)} ${t.title} · ${STATE_WORD[t.state]}${t.owner ? ` · ${nameOf(t.owner)}` : ""}` : undefined}
         onClick={() => onPick(p)}
         className={rowClass(key === current, unread > 0 && forMe)}
       >
-        {/* The row is named by its words; the dot or face beside them is decoration. */}
+        {/* The row is named by its words; the faces beside them are decoration. */}
         <span aria-hidden className="flex w-4 shrink-0 justify-center">
-          {t ? (
-            <StateMark state={t.state} />
-          ) : p.kind === "dm" ? (
-            (other ?? p.with[0]!) === state.coordinator ? (
-              <CoordinatorAvatar size={16} />
-            ) : (
-              <Monogram name={nameOf(other ?? p.with[0]!)} agent={isAgent(state.members.get(other ?? p.with[0]!))} color={colorOf(state, other ?? p.with[0]!)} size={16} />
-            )
-          ) : null}
+          {p.kind === "dm" ? face(other ?? p.with[0]!, 16) : null}
         </span>
         <span className="min-w-0 flex-1 truncate">
           {p.kind === "main" ? (
             "Main"
           ) : t ? (
             <>
-              <span className="text-ink-3 tabular-nums">{taskId(t.id)}</span> {t.title}
-              <span className="sr-only">, {STATE_WORD[t.state]}</span>
+              {shortTitle(t.title)}
+              {t.owner ? <span className="sr-only">, {nameOf(t.owner)}</span> : null}
             </>
           ) : p.kind === "dm" ? (
             other ? nameOf(other) : p.with.map(nameOf).join(" ↔ ")
@@ -981,30 +982,35 @@ function PlaceList({
             <span aria-label="New messages" className="size-1.5 shrink-0 rounded-full bg-ink-3" />
           )
         ) : null}
+        {t?.owner ? <span aria-hidden className="flex shrink-0">{face(t.owner, 18)}</span> : null}
       </button>
     )
   }
-  const head = (text: string) => <p className="pt-2.5 pr-2 pb-1 pl-6 text-stamp font-semibold tracking-[0.04em] text-ink-3 uppercase">{text}</p>
+  const head = (text: string, n?: number) => (
+    <p className="flex items-baseline pt-2.5 pr-2 pb-1 pl-6 text-stamp font-semibold tracking-[0.04em] text-ink-3 uppercase">
+      <span className="flex-1">{text}</span>
+      {n != null ? <span className="tabular-nums">{n}</span> : null}
+    </p>
+  )
   return (
     <nav aria-label="Conversations" className={cx("space-y-px", className)}>
       {row("main", places.get("main") ?? { place: MAIN, last: 0, count: 0 })}
-      {(tasks.length > 0 || state.tasks.size > 0) && head("Tasks")}
-      {tasks.map(([k, i]) => row(k, i))}
-      {done.length > 0 && (
-        <>
-          <button type="button" aria-expanded={earlier} onClick={() => setEarlier(!earlier)} className="flex h-7 w-full items-center gap-2 rounded-ctl pr-2 pl-0 text-left text-ui text-ink-3 hover:bg-wash hover:text-ink-2">
-            <span className="flex w-4 shrink-0 justify-center">
-              <Icon icon={ArrowDown01Icon} size={12} className={cx("transition-transform", !earlier && "-rotate-90")} />
-            </span>
-            Earlier <span className="tabular-nums">{done.length}</span>
-          </button>
-          {earlier && done.map(([k, i]) => row(k, i))}
-        </>
-      )}
+      {GROUPS.map(([s, word]) => {
+        const these = tasks.filter(([, i]) => taskOf(i)?.state === s)
+        return these.length > 0 ? (
+          <div key={s} role="group" aria-label={word}>
+            {head(word, these.length)}
+            {these.map(([k, i]) => row(k, i))}
+          </div>
+        ) : null
+      })}
       {state.tasks.size > 0 && (
-        <button type="button" aria-current={current === "board" ? "page" : undefined} onClick={onBoard} className={cx(rowClass(current === "board", false), current !== "board" && "text-ink-3")}>
+        <button type="button" aria-current={current === "board" ? "page" : undefined} onClick={onBoard} className={cx(rowClass(current === "board", false), "mt-1", current !== "board" && "text-ink-3")}>
           <span className="w-4 shrink-0" />
-          All tasks
+          <span className="min-w-0 flex-1 truncate">
+            All tasks{done > 0 ? <span className="tabular-nums"> · {done} done</span> : null}
+          </span>
+          <span aria-hidden>→</span>
         </button>
       )}
       {dms.length > 0 && head("Direct")}
