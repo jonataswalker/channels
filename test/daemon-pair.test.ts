@@ -27,7 +27,8 @@ beforeAll(() => {
 });
 afterAll(() => {
   server?.stop(true);
-  process.env.KIWI_HOME = prevHome;
+  if (prevHome === undefined) delete process.env.KIWI_HOME;
+  else process.env.KIWI_HOME = prevHome;
   rmSync(home, { recursive: true, force: true });
   rmSync(dataDir, { recursive: true, force: true });
 });
