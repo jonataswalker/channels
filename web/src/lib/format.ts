@@ -76,6 +76,26 @@ export function formatAgo(ts: number, now: number): string {
   return `${Math.round(h / 24)}d ago`
 }
 
+/** Past this, a short title gives up its tail after a colon for the head before it. */
+const SHORT_TITLE = 48
+
+/**
+ * A task's title as a list row says it: its first clause. Titles are often whole specs ("Seat on first
+ * approval (owner's pick on #1340): a linked computer gets…"), so this stops at the first aside,
+ * sentence end, semicolon or dash, and a long one keeps a several-word head before its colon.
+ */
+export function shortTitle(title: string): string {
+  let s = title.split("\n")[0]!.trim()
+  for (const cut of [/ \(/, /[.!?](?=\s)/, /;/, / [—–-] /]) {
+    const i = s.search(cut)
+    if (i > 0) s = s.slice(0, i)
+  }
+  s = s.replace(/[.!?:,\s]+$/, "")
+  const colon = s.indexOf(": ")
+  if (s.length > SHORT_TITLE && colon > 0 && s.slice(0, colon).split(" ").length >= 2) s = s.slice(0, colon)
+  return s || title.trim()
+}
+
 /** One-line plain-text preview of a markdown body. */
 export function excerpt(body: string, max = 90): string {
   const flat = body
