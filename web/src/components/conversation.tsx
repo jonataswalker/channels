@@ -34,8 +34,8 @@ import { TaskPage } from "./task-page"
 import { Notes, StateMark, TaskCard, Tasks } from "./tasks"
 import { ThreadPanel } from "./thread"
 
-/** Where a task stands, in words: on hover over its row in the list. */
-const STATE_WORD = { todo: "Open", doing: "In progress", review: "In review", done: "Done" } as const
+/** Where a task stands, in words: on hover over its row in the list, as its group in the list says it. */
+const STATE_WORD = { todo: "Up next", doing: "In progress", review: "Needs review", done: "Done" } as const
 
 /** Messages this close together from one sender read as one run. */
 const RUN_GAP = 5 * 60_000
