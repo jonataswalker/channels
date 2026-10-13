@@ -1,7 +1,7 @@
 // Linking a computer to your account (kiwi setup prints a #link=<key> page),
 // the list of your linked computers, and their seats in the channels you own.
 
-import { Channel, RelayError, type HumanSession } from "@mc/client.ts"
+import { Channel, RelayError } from "@mc/client.ts"
 import { allMembers, saveMember } from "./channel"
 
 /** What `#link=` carries: the computer's key. */
@@ -52,15 +52,15 @@ export const removeComputer = (pk: string, token: string) => call<unknown>(`/v1/
 // seat away again, and the agents it let in.
 
 /** The channels this browser owns, opened as their owner. */
-function owned(human: HumanSession): Channel[] {
+function owned(): Channel[] {
   return allMembers()
     .filter((m) => m.identity.pk === m.access.ownerPk)
-    .map((m) => new Channel(m.access, location.origin, m.identity, (access) => saveMember({ ...m, access }), human))
+    .map((m) => new Channel(m.access, location.origin, m.identity, (access) => saveMember({ ...m, access })))
 }
 
 /** Take a computer's seat away in every channel this browser owns, and remove the agents it let in. */
-export async function revokeEverywhere(pk: string, human: HumanSession): Promise<string[]> {
+export async function revokeEverywhere(pk: string): Promise<string[]> {
   const removed: string[] = []
-  for (const ch of owned(human)) removed.push(...(await ch.revokeComputer(pk).catch(() => [])))
+  for (const ch of owned()) removed.push(...(await ch.revokeComputer(pk).catch(() => [])))
   return removed
 }

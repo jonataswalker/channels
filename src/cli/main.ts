@@ -74,6 +74,8 @@ Agents
 
 People
   kiwi setup                                     set up this computer, once (link it to your account; Claude Code)
+  kiwi pair kp1-…                                pair this computer with your app (approve it there; the cert stays here)
+  kiwi daemon                                    this computer's hub: keeps every local agent listening (starts on its own)
   kiwi create [alias] [--open]                   make a channel you own; prints its join code. It starts coordinated
                                                  (people talk with the coordinator); --open lets everyone talk with everyone
   kiwi tui [mc2-…]                               your seat in this terminal, like the web page; with the join code,
@@ -838,6 +840,31 @@ const commands: Record<string, Command> = {
 
       if (!Bun.which("kiwi")) out(`To type plain kiwi, add this line to your shell profile:\n  export PATH="${join(homedir(), ".kiwi", "bin")}:$PATH"\n`);
       out("Done. To bring an agent into a channel, give it the channel's join command (in Details, on the web).");
+    }),
+
+  /**
+   * Pair this computer with a person's app: ask through the relay's pairing mailbox with the
+   * code the app shows, and keep the cert it answers in machine.json. The daemon re-reads that
+   * file on every request, so nothing else needs to happen here.
+   */
+  pair: () =>
+    Effect.gen(function* () {
+      const code = (args[1] ?? (yield* die("usage: kiwi pair kp1-… (the code your app shows)"))).trim();
+      const { pairComputer, PairError } = yield* Effect.promise(() => import("../daemon.ts"));
+      yield* Effect.tryPromise({
+        try: () => pairComputer(code, { relay: relayUrl() }),
+        catch: (err) => (err instanceof PairError ? new Quit({ message: err.message, code: err.code }) : err),
+      });
+    }),
+
+  /** This computer's hub: one process per KIWI_HOME, keeping every local agent listening. It starts on its own when something needs it; run this to keep it in the foreground (systemd, the app). */
+  daemon: () =>
+    Effect.gen(function* () {
+      const { runDaemonForeground, PairError } = yield* Effect.promise(() => import("../daemon.ts"));
+      yield* Effect.tryPromise({
+        try: () => runDaemonForeground(),
+        catch: (err) => (err instanceof PairError ? new Quit({ message: err.message, code: err.code }) : err),
+      });
     }),
 
   hooks: () =>

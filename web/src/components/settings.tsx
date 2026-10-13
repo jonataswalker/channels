@@ -1,6 +1,7 @@
 import { Dialog } from "@base-ui/react/dialog"
 
 import { setAppearance, setTextSize, useAppearance, useTextSize, type Appearance, type TextSize } from "@/lib/theme"
+import { setAccessibilityOption, useAccessibilityOption } from "@/lib/accessibility"
 import { cx } from "@/lib/utils"
 import { Button, Modal, SEGMENTED, SEGMENT_OFF, SEGMENT_ON } from "./kit"
 
@@ -32,6 +33,7 @@ function Choice<T extends string>({ label, value, options, onChange }: { label: 
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const appearance = useAppearance()
   const size = useTextSize()
+  const reduceMotion = useAccessibilityOption("reduce-motion")
   return (
     <Modal open={open} onClose={onClose}>
       <div className="p-5">
@@ -57,6 +59,15 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               { value: "default", label: "Default" },
               { value: "large", label: "Large" },
               { value: "larger", label: "Larger" },
+            ]}
+          />
+          <Choice<"on" | "off">
+            label="Motion"
+            value={reduceMotion ? "on" : "off"}
+            onChange={(v) => setAccessibilityOption("reduce-motion", v === "on")}
+            options={[
+              { value: "off", label: "Full" },
+              { value: "on", label: "Reduced" },
             ]}
           />
         </div>

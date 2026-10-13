@@ -1,0 +1,49 @@
+{
+  "name": "kiwi-desktop",
+  "version": "0.11.0",
+  "private": true,
+  "description": "Kiwi desktop app: an Electron shell hosting web/ for people (auto-approval, pairing, admin).",
+  "main": "dist/main.js",
+  "scripts": {
+    "build:main": "bun build src/main.ts --outfile dist/main.js --target node --format cjs --external electron",
+    "build:preload": "bun build src/preload.ts --outfile dist/preload.js --target node --format cjs --external electron",
+    "build": "bun run build:main && bun run build:preload",
+    "start": "bun run build && electron dist/main.js",
+    "dist": "bun run build && electron-builder",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0",
+    "electron-builder": "^26.0.0",
+    "typescript": "^7.0.2"
+  },
+  "build": {
+    "appId": "com.kiwiinit.kiwi",
+    "productName": "Kiwi",
+    "files": [
+      "dist/**",
+      "../web/dist/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/kiwi${/*}",
+        "to": "kiwi${/*}"
+      }
+    ],
+    "protocols": {
+      "name": "Kiwi",
+      "schemes": ["kiwi"]
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "linux": {
+      "category": "Utility",
+      "target": ["AppImage", "deb"]
+    }
+  }
+}

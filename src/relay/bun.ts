@@ -12,9 +12,9 @@ import { CLOSE_CLOSED, CLOSE_REMOVED, PING, PONG } from "../protocol.ts";
 import { ChannelGone, NotFound, UpdateRequired } from "./failures.ts";
 import { clockLayer } from "./http.ts";
 import { devHostOk, devHumanAuth, devRequestOk, Human, HUMAN_HEADER, workosFromSettings, type HumanAuth } from "./human.ts";
-import { Handovers, onDeviceHttp, type DeviceStore, type DeviceTransfer } from "./devices.ts";
-import { onVaultHttp, Vaults, vaultSwap, type VaultRecord, type VaultStore } from "./vault.ts";
-import { Machines, onMachineHttp, parseTrustProxy, registrationAddress, registrationAllowed, sweepPending, trustProxyFromArgs, type MachineRecord, type MachineStore, type TrustProxy } from "./machines.ts";
+import { MAILBOX_TTL_MS } from "../mailbox.ts";
+import { corsPreflight, onMailboxHttp, withCors, type MailboxStore } from "./mailbox.ts";
+import { Machines, parseTrustProxy, registrationAddress, registrationAllowed, sweepPending, trustProxyFromArgs, type MachineRecord, type MachineStore, type TrustProxy } from "./machines.ts";
 import { Policy, policyFrom, type RelayPolicy } from "./policy.ts";
 import {
   Directory,
@@ -24,19 +24,16 @@ import {
   errorResponse,
   expire,
   idleExpired,
-  readHead,
   missingFingerprint,
   onClientFrame,
   parseRoomPath,
   touch,
-  usage as roomUsage,
   welcomeFrames,
   wsHeaders,
   type DirectoryEntry,
   type Sql,
   type Effects,
 } from "./room.ts";
-import { makePeople, myChannels, myUsage } from "./me.ts";
 import { makeRelay, onHttp, runRoom, runRoomSync } from "./route.ts";
 
 interface SocketData {
@@ -65,38 +62,23 @@ export function startRelay(
   const dbs = new Map<string, Database>();
   const sockets = new Map<string, Set<ServerWebSocket<SocketData>>>();
   const file = (roomId: string) => join(dataDir, `${roomId}.sqlite`);
-  // Signed-in people's channel lists (room ids and join codes only).
+  // Signed-in people's owned channels (room ids and join codes only): the quota on POST /create.
   const people = new Database(join(dataDir, "people.sqlite"), { create: true });
-  people.run("CREATE TABLE IF NOT EXISTS entries (user TEXT NOT NULL, room TEXT NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (user, room))");
+  people.run("CREATE TABLE IF NOT EXISTS owned (user TEXT NOT NULL, room TEXT NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (user, room))");
   people.run("CREATE TABLE IF NOT EXISTS machines (pk TEXT PRIMARY KEY, rec TEXT NOT NULL, user TEXT)");
-  people.run("CREATE TABLE IF NOT EXISTS devices (user TEXT NOT NULL, id TEXT NOT NULL, rec TEXT NOT NULL, PRIMARY KEY (user, id))");
-  const devices: DeviceStore = {
-    list: async (user) => (people.query("SELECT rec FROM devices WHERE user = ?").all(user) as { rec: string }[]).map((r) => JSON.parse(r.rec) as DeviceTransfer),
-    put: async (user, r) => void people.query("INSERT OR REPLACE INTO devices (user, id, rec) VALUES (?, ?, ?)").run(user, r.id, JSON.stringify(r)),
-    remove: async (user, id) => void people.query("DELETE FROM devices WHERE user = ? AND id = ?").run(user, id),
+  // One-time pairing mailboxes (src/relay/mailbox.ts): id-hashed, sealed
+  // boxes the relay can't read. Expired rows are deleted on read and below.
+  people.run("CREATE TABLE IF NOT EXISTS mailboxes (id TEXT PRIMARY KEY, rec TEXT NOT NULL)");
+  const mailboxes: MailboxStore = {
+    load: async (id) => {
+      const row = people.query("SELECT rec FROM mailboxes WHERE id = ?").get(id) as { rec: string } | null;
+      return row ? (JSON.parse(row.rec) as { a: string | null; b: string | null; firstAt: number }) : null;
+    },
+    save: async (id, rec) => void people.query("INSERT OR REPLACE INTO mailboxes (id, rec) VALUES (?, ?)").run(id, JSON.stringify(rec)),
+    drop: async (id) => void people.query("DELETE FROM mailboxes WHERE id = ?").run(id),
   };
-  // Each person's vault: ciphertext only (src/relay/vault.ts).
+  // Each person's vault: ciphertext only (kept for the later pass that removes vaults).
   people.run("CREATE TABLE IF NOT EXISTS vaults (user TEXT PRIMARY KEY, rec TEXT NOT NULL)");
-  const vaultOf = (user: string) => {
-    const row = people.query("SELECT rec FROM vaults WHERE user = ?").get(user) as { rec: string } | null;
-    return row ? (JSON.parse(row.rec) as VaultRecord) : null;
-  };
-  // bun:sqlite is synchronous and this process is the only writer, so read-check-write can't interleave.
-  const vaults: VaultStore = {
-    get: async (user) => vaultOf(user),
-    put: async (user, expected, rec) => {
-      const current = vaultOf(user);
-      if (!vaultSwap(current, expected)) return { ok: false, current };
-      people.query("INSERT OR REPLACE INTO vaults (user, rec) VALUES (?, ?)").run(user, JSON.stringify(rec));
-      return { ok: true };
-    },
-    remove: async (user, expected) => {
-      const current = vaultOf(user);
-      if (!current || !vaultSwap(current, expected)) return false;
-      people.query("DELETE FROM vaults WHERE user = ?").run(user);
-      return true;
-    },
-  };
   const machines: MachineStore = {
     get: async (pk) => {
       const row = people.query("SELECT rec FROM machines WHERE pk = ?").get(pk) as { rec: string } | null;
@@ -109,11 +91,21 @@ export function startRelay(
         .map((r) => JSON.parse(r.rec) as MachineRecord)
         .map((m) => ({ pk: m.pk, label: m.label, linked: m.linked ?? m.created })),
   };
-  const sweepMachines = () =>
-    sweepPending(
+  const sweepMachines = async () => {
+    // Expired pairing mailboxes go with the same hourly pass (reads expire them lazily too).
+    const now = Date.now();
+    for (const r of people.query("SELECT id, rec FROM mailboxes").all() as { id: string; rec: string }[]) {
+      try {
+        if (now - (JSON.parse(r.rec) as { firstAt: number }).firstAt > MAILBOX_TTL_MS) people.query("DELETE FROM mailboxes WHERE id = ?").run(r.id);
+      } catch {
+        people.query("DELETE FROM mailboxes WHERE id = ?").run(r.id);
+      }
+    }
+    return sweepPending(
       async () => (people.query("SELECT rec FROM machines WHERE user IS NULL").all() as { rec: string }[]).map((r) => JSON.parse(r.rec) as MachineRecord),
       async (rec) => void people.query("DELETE FROM machines WHERE pk = ?").run(rec.pk),
     );
+  };
   void sweepMachines();
   const machineSweep = setInterval(sweepMachines, 3_600_000);
   machineSweep.unref?.();
@@ -136,7 +128,7 @@ export function startRelay(
     };
   };
   const storeFor = (roomId: string, creating: boolean): RoomDb => new RoomDb(sqlFor(roomId, creating), roomId);
-  const listOf = (user: string) => (people.query("SELECT entry FROM entries WHERE user = ?").all(user) as { entry: string }[]).map((r) => JSON.parse(r.entry) as DirectoryEntry);
+  const listOf = (user: string) => (people.query("SELECT entry FROM owned WHERE user = ?").all(user) as { entry: string }[]).map((r) => JSON.parse(r.entry) as DirectoryEntry);
 
   // What every room runs with. `now` (tests) is the clock the room reads.
   const services = Layer.mergeAll(
@@ -147,8 +139,6 @@ export function startRelay(
     clockLayer(opts.now),
   );
   const relay = makeRelay(services);
-  // And what a person's own routes run with: the same, plus their vaults and handovers.
-  const personal = makePeople(Layer.mergeAll(services, Layer.succeed(Vaults, vaults), Layer.succeed(Handovers, devices)));
 
   const apply = (roomId: string, fx: Effects, sender?: ServerWebSocket<SocketData>) => {
     const room = sockets.get(roomId) ?? new Set();
@@ -156,8 +146,8 @@ export function startRelay(
     if (fx.others) for (const ws of room) if (ws !== sender) ws.send(fx.others);
     if (fx.disconnect) for (const ws of room) if (ws.data.pk === fx.disconnect) ws.close(CLOSE_REMOVED, "removed from channel");
     for (const u of fx.directory ?? []) {
-      if (u.entry) people.query("INSERT OR REPLACE INTO entries (user, room, entry) VALUES (?, ?, ?)").run(u.user, u.room, JSON.stringify(u.entry));
-      else people.query("DELETE FROM entries WHERE user = ? AND room = ?").run(u.user, u.room);
+      if (u.entry) people.query("INSERT OR REPLACE INTO owned (user, room, entry) VALUES (?, ?, ?)").run(u.user, u.room, JSON.stringify(u.entry));
+      else people.query("DELETE FROM owned WHERE user = ? AND room = ?").run(u.user, u.room);
     }
     if (fx.wipe) {
       dbs.get(roomId)?.close();
@@ -201,35 +191,27 @@ export function startRelay(
         }
         if (web && !url.pathname.startsWith("/v1/") && (req.method === "GET" || req.method === "HEAD")) return web(url.pathname);
         if (url.pathname === "/") return new Response("Kiwi Channels relay (bun)\n");
-        if (url.pathname === "/v1/config") return relayConfig(human);
-        const device = await onDeviceHttp(req, personal);
-        if (device) return device;
-        const vault = await onVaultHttp(req, personal);
-        if (vault) return vault;
+        // The desktop app's renderer isn't served by the relay: /v1/* answers any origin.
+        if (req.method === "OPTIONS" && url.pathname.startsWith("/v1/")) return corsPreflight();
+        if (url.pathname === "/v1/config") return withCors(await relayConfig(human));
         const ip = registrationAddress(server.requestIP(req)?.address ?? null, req.headers.get("x-forwarded-for"), trustProxy);
-        const machine = await onMachineHttp(req, personal, ip ? { ip, allow: registrationAllowed } : null);
-        if (machine) return machine;
-        if (url.pathname === "/v1/me/usage" && req.method === "GET") {
-          return await myUsage(req, personal, async (room) => (existsSync(file(room)) ? runRoomSync(relay, storeFor(room, false), roomUsage) : null));
-        }
-        if (url.pathname === "/v1/me/channels" && req.method === "GET") {
-          return await myChannels(req, personal, { read: async (room) => (existsSync(file(room)) ? readHead(sqlFor(room, false)) : null) });
-        }
+        const mailbox = await onMailboxHttp(req, mailboxes, ip ? { ip, allow: registrationAllowed } : {});
+        if (mailbox) return mailbox;
         const route = parseRoomPath(url.pathname);
-        if (!route) return errorResponse(new NotFound({ message: "not found" }));
+        if (!route) return withCors(errorResponse(new NotFound({ message: "not found" })));
         // No fingerprint: 426 before the room file is opened.
         const early = missingFingerprint(req.method, route.rest, url);
-        if (early) return errorResponse(early);
+        if (early) return withCors(errorResponse(early));
         const db = storeFor(route.roomId, route.rest === "/create");
         if (route.rest === "/ws") {
           if (db.isLegacy()) {
             apply(route.roomId, { wipe: true });
-            return errorResponse(new ChannelGone({ message: "no such channel" }));
+            return withCors(errorResponse(new ChannelGone({ message: "no such channel" })));
           }
           const pk = await runRoom(relay, db, authenticateSocket(req));
           const since = Number(url.searchParams.get("since") ?? 0) || 0;
           if (server.upgrade(req, { data: { roomId: route.roomId, pk, since }, headers: wsHeaders(req) })) return undefined;
-          return errorResponse(new UpdateRequired({ message: "expected websocket" }));
+          return withCors(errorResponse(new UpdateRequired({ message: "expected websocket" })));
         }
         let result: Awaited<ReturnType<typeof onHttp>>;
         try {
@@ -244,9 +226,9 @@ export function startRelay(
           throw err;
         }
         if (result.fx) apply(route.roomId, result.fx);
-        return result.res;
+        return withCors(result.res);
       } catch (err) {
-        return errorResponse(err);
+        return withCors(errorResponse(err));
       }
     },
     websocket: {

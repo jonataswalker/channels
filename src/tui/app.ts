@@ -821,7 +821,7 @@ class App {
       const key = `${r.id}:${r.check}`;
       if (this.noticed.has(key) || r.check === "waiting") continue;
       this.noticed.add(key);
-      const who = r.kind === "human" ? `a person, signed in as ${inlineText(r.sponsoredBy?.name ?? "?", 60)}` : r.sponsoredBy ? `an agent of ${inlineText(r.sponsoredBy.name, 60)}` : "an agent";
+      const who = r.kind === "human" ? "a person" : r.computer ? `an agent from ${inlineText(r.computer.personName, 60)}'s computer (${inlineText(r.computer.label, 40)})` : "an agent";
       const name = inlineText(r.name, 40);
       if (r.check === "ready" && r.code) {
         const digits = r.code.replace(/\D/g, "");
@@ -830,7 +830,7 @@ class App {
           lines: (c) =>
             noticeLines(
               `Join request: ${name}${r.role ? ` (${inlineText(r.role, 30)})` : ""}, ${who}${r.computer ? ` on ${r.computer.label}` : ""}`,
-              `Verification code ${r.code}. Once ${r.kind === "human" ? "they show" : "its terminal shows"} the same code: /approve ${digits}${r.computer ? ` (or /approve ${digits} seat: agents from ${r.computer.label} come in on their own from now on)` : ""}   or /deny ${digits}`,
+              `Verification code ${r.code}. Once ${r.kind === "human" ? "they show" : "its terminal shows"} the same code: /approve ${digits}   or /deny ${digits}`,
               c,
             ),
         });
@@ -1005,7 +1005,7 @@ class App {
           if (!reqs.length) return this.out("no pending join requests");
           this.out(
             reqs
-              .map((r) => `${(r.code ?? r.check).padEnd(8)} ${r.name}${r.askedAs && r.askedAs !== r.name ? ` (asked as ${r.askedAs}, taken)` : ""}${r.role ? ` (${r.role})` : ""} · ${r.kind === "human" ? "person" : r.sponsoredBy ? `agent of ${r.sponsoredBy.name}` : "agent"} · key ${fingerprint(r.pk)}`)
+              .map((r) => `${(r.code ?? r.check).padEnd(8)} ${r.name}${r.askedAs && r.askedAs !== r.name ? ` (asked as ${r.askedAs}, taken)` : ""}${r.role ? ` (${r.role})` : ""} · ${r.kind === "human" ? "person" : r.computer ? `agent from ${r.computer.label}` : "agent"} · key ${fingerprint(r.pk)}`)
               .join("\n"),
           );
         },
@@ -1013,7 +1013,7 @@ class App {
       {
         name: "approve",
         owner: true,
-        args: "CODE [as NAME] [seat] [role ROLE]",
+        args: "CODE [as NAME] [role ROLE]",
         about: "let a requester in, once the codes match",
         run: (arg) => this.approve(arg),
         complete: (q) => (/\s/.test(q) ? [] : requestCodes(q)),
@@ -1157,18 +1157,15 @@ class App {
     const r = this.findRequest(arg);
     const as = /\bas\s+(\S+)/.exec(arg)?.[1];
     const roleArg = /\brole\s+(.+)$/.exec(arg)?.[1]?.trim();
-    // "seat": let agents from its computer into this channel on their own from now on.
-    const words = arg.split(/\s+role\s+/)[0]!.split(/\s+/);
-    const seat = words.some((w, i) => i > 0 && w === "seat" && words[i - 1] !== "as") && !!r.computer;
     const name = as ?? r.name;
     if (!NAME_RE.test(name) || name === "human") return this.out(`"${name}" isn't an allowed name: /approve ${arg.split(/\s/)[0]} as NAME`, bad);
     if ((await this.s.members(true)).some((m) => m.name === name && m.active)) return this.out(`"${name}" is already a member: approve under another name with /approve ${arg.split(/\s/)[0]} as NAME`, bad);
     // Asking to be the coordinator doesn't make you one: the owner says so themselves.
     const askedCoordinator = r.role?.trim().toLowerCase() === COORDINATOR && roleArg?.toLowerCase() !== COORDINATOR;
     const role = roleArg ?? (askedCoordinator ? undefined : r.role);
-    const admitted = await this.busyWith("Approving", () => this.s.ownerCh!.approve(r, { name, role, about: r.about }, { seat }));
+    const admitted = await this.busyWith("Approving", () => this.s.ownerCh!.approve(r, { name, role, about: r.about }));
     if (!admitted) return;
-    this.out(`approved ${admitted.name} (${r.code})${seat ? `; agents from ${r.computer!.label} now come in on their own` : ""}${askedCoordinator ? `; it asked to be the coordinator: /coordinator ${admitted.name}` : ""}`, good);
+    this.out(`approved ${admitted.name} (${r.code})${askedCoordinator ? `; it asked to be the coordinator: /coordinator ${admitted.name}` : ""}`, good);
     this.noticed.add(`${r.id}:done`);
     void this.refreshRequests();
   }

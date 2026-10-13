@@ -549,7 +549,7 @@ export async function createChannel(name: string, token: string | null, me: Pers
   saveMember(m)
   // A new channel starts in coordinator mode: people talk with the coordinator, agents in their tasks'
   // conversations. Best effort: the channel is made either way, and the owner can turn it on later.
-  await new Channel(access, location.origin, owner, (a) => saveMember({ ...m, access: a }), async () => token)
+  await new Channel(access, location.origin, owner, (a) => saveMember({ ...m, access: a }))
     .startCoordinated()
     .catch(() => {})
   return m
@@ -696,11 +696,7 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
         member.access,
         location.origin,
         member.identity,
-        (access) => saveMember({ ...(loadMember(member.code) ?? member), access }),
-        async () => {
-          const session = humanSessions.get(member.code)
-          return session ? await session() : null
-        }
+        (access) => saveMember({ ...(loadMember(member.code) ?? member), access })
       ),
     [member]
   )
@@ -766,8 +762,7 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
     () =>
       orGone(
         Effect.gen(function* () {
-          // A linked computer's seat only lets its agents in: it isn't someone in this channel's lists.
-          const people = (all: Member[]) => all.filter((m) => m.kind !== "computer")
+          const people = (all: Member[]) => all
           setRoster(people(yield* ch.fx.members()))
           if (ch.isOwner && (yield* ch.fx.rotateIfDue())) setRoster(people(yield* ch.fx.members()))
         })

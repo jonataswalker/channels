@@ -275,3 +275,12 @@ button {
     transition: none !important;
   }
 }
+
+/* The persisted reduce-motion toggle (lib/accessibility.ts): same as the OS setting. */
+html.reduce-motion *,
+html.reduce-motion ::before,
+html.reduce-motion ::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}

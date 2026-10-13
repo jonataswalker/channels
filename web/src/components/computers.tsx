@@ -145,7 +145,7 @@ export function ComputersModal({ open, onClose }: { open: boolean; onClose: () =
       if (!t) throw new Error("Sign in first.")
       // Unlinked first: from then on the relay refuses its seats, before any channel is told.
       await removeComputer(c.pk, t)
-      const gone = await revokeEverywhere(c.pk, auth.token)
+      const gone = await revokeEverywhere(c.pk)
       setList((l) => l?.filter((x) => x.pk !== c.pk) ?? null)
       toast(`Removed ${c.label}${gone.length > 1 ? ", and the agents it let in" : ""}`)
     } catch (err) {

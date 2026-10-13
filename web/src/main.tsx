@@ -8,8 +8,10 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { AuthProvider } from "@/lib/auth"
 import { noteSignInGone } from "@/lib/session"
 import { applyStoredAppearance } from "@/lib/theme"
+import { initAccessibility } from "@/lib/accessibility"
 
 applyStoredAppearance()
+initAccessibility()
 
 // A call nobody caught that failed because the sign-in ended: ask to sign in again, quietly.
 window.addEventListener("unhandledrejection", (e) => {
