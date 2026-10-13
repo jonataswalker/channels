@@ -23,7 +23,8 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await daemon?.stop().catch(() => {});
-  process.env.KIWI_HOME = prevHome;
+  if (prevHome === undefined) delete process.env.KIWI_HOME;
+  else process.env.KIWI_HOME = prevHome;
   rmSync(home, { recursive: true, force: true });
 });
 
