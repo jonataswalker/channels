@@ -54,7 +54,6 @@ function kiwi(args: string[], watch?: (out: string) => void): Promise<string> {
 let pendingOut = ""
 const bot = (...args: string[]) => kiwi(["-c", "kiwi", "--as", "atlas", ...args])
 const win = (...args: string[]) => kiwi(["-c", "kiwi-w", "--as", "win", ...args])
-const dev = (...args: string[]) => kiwi(["-c", "kiwi-d", "--as", "dev", ...args])
 
 const relay = spawn("bun", ["src/relay/bun.ts", "--hostname", "127.0.0.1", "--port", String(PORT), "--data", join(data, "relay"), "--dev-sign-in"], { cwd: ROOT, stdio: ["ignore", "pipe", "inherit"] })
 await new Promise<void>((ok, fail) => {
@@ -156,8 +155,6 @@ try {
     await joining
   }
   await admit(["kiwi", "--as", "atlas", "--role", "backend"])
-  // atlas listens, as a coordinator does: online, so its face is awake.
-  void bot("tail").catch(() => {})
   // atlas coordinates: people talk with it, and the channel is in coordinator mode from the start.
   const details = () => owner.getByRole("button", { name: /^Details:/ })
   await details().click()
@@ -168,16 +165,7 @@ try {
     await owner.getByText(/People talk with/).first().waitFor({ timeout: 15000 })
   })
   await owner.getByRole("button", { name: "Close details" }).click()
-  // With a coordinator, Main opens on the Room; seed in the whole conversation (the Room is shot below).
-  const showConversation = owner.getByRole("button", { name: "Show conversation" })
-  const roomOn = owner.getByRole("button", { name: "Room", exact: true })
-  await showConversation.click({ timeout: 10000 })
-  // The team behind atlas: win (it works a task), dev (it waits on an answer), ci (away).
   await admit(["kiwi-w", "--as", "win", "--role", "frontend"])
-  await admit(["kiwi-d", "--as", "dev", "--role", "backend"])
-  await admit(["kiwi-c", "--as", "ci", "--role", "ci"])
-  void win("tail").catch(() => {})
-  void dev("tail").catch(() => {})
   // The passkey offer waits for an agent's first card; save the channels to it, so the list stays quiet.
   const offer = owner.getByRole("button", { name: "Save channels to a passkey" })
   if (await offer.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -216,9 +204,6 @@ try {
   await owner.keyboard.press("Enter")
   await owner.waitForTimeout(400)
   await owner.getByRole("button", { name: "Close thread" }).click()
-  await bot("send", "Shipping 0.8.12 now. win is running the cold runs on the canary first; I'll post the release notes here when it's out, and flag anything that needs your call.")
-  // dev waits on atlas: an open question, so its face thinks.
-  await dev("send", "--ask", "--to", "atlas", "Which branch should the cache work start from: main or the canary?")
   // Work waiting on a person's review, and a decision an agent hands to its person: both under Needs you.
   const reviewed = /T\d+/.exec(await win("task", "add", "Cache sealed history in the browser", "--owner", "win", "--review", "any"))?.[0] ?? "T0"
   await win("task", "review", reviewed, "reload fetches only what is new")
@@ -317,37 +302,6 @@ try {
       }, async () => {
         if (narrow) await owner.goto(channel)
       })
-      // The Room: atlas big, its team's faces, a flag on win, scout asking in, the dialogue docked.
-      const room = () => owner.getByRole("region", { name: /^The room/ })
-      const toRoom = async () => {
-        await toPlace(/^Main/).catch(() => {})
-        await roomOn.click()
-        await room().waitFor()
-        // Who's listening arrives a moment after a reload: wait for the faces to wake.
-        await owner.getByText(/\d+ online/).first().waitFor({ timeout: 20000 }).catch(() => console.log("the team is still away"))
-        await owner.waitForTimeout(1800)
-      }
-      await shoot(owner, tag, "17-room", toRoom, async () => {})
-      await shoot(owner, tag, "18-room-drawer", async () => {
-        await room().getByRole("button", { name: /^win, / }).click()
-        // Wide, it takes the dialogue's column (a region); narrow, it slides over the room (a dialog).
-        await owner.getByLabel(/Write fewer rows/).first().waitFor()
-      })
-      await shoot(owner, tag, "24-room-flag", async () => {
-        await room().getByRole("button", { name: /^win needs you/ }).click()
-      })
-      await shoot(owner, tag, "19-room-replay", async () => {
-        const bar = (await owner.getByRole("slider", { name: /Scrub back/ }).boundingBox())!
-        await owner.mouse.click(bar.x + bar.width * 0.35, bar.y + bar.height / 2)
-        await owner.getByRole("button", { name: /^Replaying/ }).waitFor()
-        await owner.waitForTimeout(600)
-      }, () => owner.getByRole("button", { name: /^Replaying/ }).click())
-      // atlas hands dev a task: the line of delegation, mid-flight.
-      await shoot(owner, tag, "25-room-delegation", async () => {
-        await bot("task", "add", `Cut the cold-start time (${tag})`, "--owner", "dev")
-        await owner.waitForTimeout(500)
-      }, async () => {})
-      await showConversation.click().catch(() => {})
       await owner.goto(fresh)
       await owner.getByRole("region", { name: "Add an agent" }).waitFor({ timeout: 10000 }).catch(() => {})
       await shoot(owner, tag, "16-add-agent")

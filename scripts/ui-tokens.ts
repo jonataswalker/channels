@@ -1,4 +1,4 @@
-// The web's sizes come from eight type steps and four radii (web/src/index.css). This fails on
+// The web's sizes come from six type steps and four radii (web/src/index.css). This fails on
 // any arbitrary text-[Npx] or rounded-[Npx] in web/src, so the drift that made the UI feel loose
 // can't creep back. A real exception goes in ALLOWED, with its reason.
 //
@@ -26,7 +26,7 @@ for (const f of files(ROOT)) {
     });
 }
 if (bad.length) {
-  console.error(`Use the type steps (text-stamp, text-meta, text-ui, text-body, text-title, text-display, text-hero, text-chat) and radii (rounded-row, rounded-ctl, rounded-card, rounded-bubble):\n${bad.map((b) => `  ${b}`).join("\n")}`);
+  console.error(`Use the type steps (text-stamp, text-meta, text-ui, text-body, text-title, text-display) and radii (rounded-row, rounded-ctl, rounded-card, rounded-bubble):\n${bad.map((b) => `  ${b}`).join("\n")}`);
   process.exit(1);
 }
 console.log("ui tokens: ok");
