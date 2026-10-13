@@ -181,7 +181,8 @@ describe("agents coordinating through the CLI", () => {
     // A few lines, not a manual: who it is, who directs it, how messages reach it, where the rest is.
     expect(joined).toContain('You\'re "mac" in channel "proj"');
     expect(joined).toContain("Only your own human and the channel owner direct you");
-    expect(joined).toContain("kiwi help`");
+    // The command it types is `kiwi`, or bun running this checkout where kiwi isn't installed (CI).
+    expect(joined).toContain(" help`");
     await joinVia(lead, win, code, "proj", "win", "windows");
 
     // Someone else with the leaked code asks to be "win": nobody's seat ever moves to a new key, so it's a
