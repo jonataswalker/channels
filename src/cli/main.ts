@@ -349,11 +349,18 @@ const admitHere = Effect.fn("kiwi.admitHere")(function* (code: string, relay: st
   );
 });
 
+/**
+ * This process's seat as `name` on `alias`: its harness, session and process when the harness says. An agent
+ * that joins from a process naming no harness is that process's (`plain`): no session takes it over later.
+ */
+function seatHere(alias: string, name: string, plain: boolean) {
+  const who = here();
+  return { alias, as: name, ...(who.harness ? { harness: who.harness } : plain ? { plain: true as const } : {}), ...(who.session ? { session: who.session } : {}), ...(who.pid ? { pid: who.pid } : {}) };
+}
+
 /** Give the agent its seat in this directory (beside any other agents here), and make sure its harness keeps it listening. */
 function settleIn(alias: string, name: string): void {
-  const who = here();
-  const seat = { alias, as: name, ...(who.harness ? { harness: who.harness } : {}), ...(who.session ? { session: who.session } : {}), ...(who.pid ? { pid: who.pid } : {}) };
-  if (!bindDirectory(process.cwd(), seat)) {
+  if (!bindDirectory(process.cwd(), seatHere(alias, name, true))) {
     process.stderr.write(`kiwi: not binding ${process.cwd()} (too broad); run kiwi from your project folder, or pass -c ${alias} --as ${name}\n`);
   }
   const installed = autoInstallHooks();
@@ -1063,7 +1070,8 @@ const commands: Record<string, Command> = {
       const c = cfg.channels[alias] ?? (yield* die(`unknown channel "${alias}"`));
       const name = yield* agentName(c);
       if (!(yield* keys.identitiesIn(c.roomId)).includes(name)) return yield* die(`${name} has no key in "${alias}" on this machine`);
-      if (!bindDirectory(process.cwd(), { alias, as: name })) return yield* die("won't bind your home folder or the filesystem root; cd into a project first");
+      // Chosen for this folder by a person: whichever agent starts here next may take it.
+      if (!bindDirectory(process.cwd(), seatHere(alias, name, false))) return yield* die("won't bind your home folder or the filesystem root; cd into a project first");
       out(`kiwi in ${process.cwd()} now acts as ${name} in "${alias}"`);
     }),
 
