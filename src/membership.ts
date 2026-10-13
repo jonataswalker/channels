@@ -64,6 +64,23 @@ export interface MemberInfo {
    * one means "give me a free one like it", never a RECLAIM of that seat.
    */
   auto?: boolean;
+  /**
+   * In a join request only: the computer the agent runs on, offered for a seat in this channel (the
+   * owner's "let agents from it in from now on"). Its key signs this agent's key in this channel and its
+   * own exchange key, so neither the relay nor another agent can offer someone else's computer.
+   */
+  seatOffer?: ComputerOffer;
+}
+
+/** A computer as a join request offers it for a seat: its keys, its name, and its two signatures. */
+export interface ComputerOffer {
+  pk: string;
+  xpk: string;
+  label: string;
+  /** Over xpkStatement(pk, xpk). */
+  xpkSig: string;
+  /** Over vouchStatement(room, the agent's key). */
+  sig: string;
 }
 
 /** "jonatas" from "Jonatas Walker" or "jonatas@x.com": a channel handle for a signed-in person. */
@@ -340,6 +357,13 @@ export interface JoinRequest extends MemberInfo {
    * this agent's key, sealed to the owner) checks out. The relay can't forge it.
    */
   vouchedBy?: string;
+  /**
+   * The computer this agent runs on, when the request offers it and its signatures check out, and it
+   * has no seat here yet: approving with `seat` seats it, so its later agents come in on their own.
+   * `own`: the sign-in relay says it's linked to the owner. Its name is the requester's to choose, so
+   * only then is "let agents from it in" ticked to begin with.
+   */
+  computer?: { pk: string; xpk: string; label: string; own?: boolean };
 }
 
 /** How a member reads in lists: "win · key QRskRn4Z · agent of @jonatas" / "Jonatas Walker (@jonatas)". */

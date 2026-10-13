@@ -36,6 +36,7 @@ import {
   type ChannelAccess,
 } from "./crypto.ts";
 import { sign, signText, verify, verifyText, type Identity } from "./identity.ts";
+import { vouchStatement, xpkStatement } from "./vouch.ts";
 import { commitTo, joinCheckCode, joinNonce, ownerNonceStatement, spendAuto, type SigningBudget } from "./sas.ts";
 import { codeFor, pairCode, pairCommit, pairInfo, type PairRow } from "./pair.ts";
 import { canPost, scopesOf, wireScopes, type Scope } from "./scopes.ts";
@@ -400,6 +401,21 @@ export const SEAT_DAYS = 90;
 export const RENEW_DAYS = 60;
 const requestInfo = (room: string) => `mc/request\n${room}`;
 
+/**
+ * The computer a join request offers for a seat, when both its signatures check out (it vouches for
+ * this agent's key in this channel, and for its own exchange key) and it isn't here already: one that
+ * is seated needs nothing, and one that left (removed, or revoked) isn't seated again from a request.
+ */
+async function offeredComputer(room: string, agentPk: string, c: unknown, members: readonly Pick<Member, "pk">[]): Promise<{ pk: string; xpk: string; label: string } | null> {
+  if (!c || typeof c !== "object") return null;
+  const { pk, xpk, label, xpkSig, sig } = c as Record<string, unknown>;
+  if (![pk, xpk, xpkSig, sig].every((v) => typeof v === "string" && v)) return null;
+  const o = { pk, xpk, xpkSig, sig } as Record<string, string>;
+  if (o.pk === agentPk || members.some((m) => m.pk === o.pk)) return null;
+  const ok = (await verifyText(o.pk!, o.sig!, vouchStatement(room, agentPk)).catch(() => false)) && (await verifyText(o.pk!, o.xpkSig!, xpkStatement(o.pk!, o.xpk!)).catch(() => false));
+  return ok ? { pk: o.pk!, xpk: o.xpk!, label: inlineText(typeof label === "string" ? label : "", 60) || "computer" } : null;
+}
+
 export interface Info {
   ownerPk: string;
   ownerXpk: string;
@@ -546,6 +562,8 @@ type RequestRow = {
   sponsorUser?: string | null;
   sponsorName?: string | null;
   sponsorEmail?: string | null;
+  /** On a sign-in relay: whether an agent's computer is linked to the owner (only such a computer can be seated there). */
+  ownersOwn?: boolean;
 };
 
 /**
@@ -572,7 +590,7 @@ export interface ChannelFx {
   leave(): Effect.Effect<void, MemberRefusal, Relay>;
   requests(opts?: { budget?: SigningBudget }): Effect.Effect<JoinRequest[], Refused, Relay>;
   checkRequest(req: Pick<JoinRequest, "id" | "pk" | "commit">): Effect.Effect<void, Refused, Relay>;
-  approve(req: JoinRequest, as?: Partial<MemberInfo>): Effect.Effect<Member, Refused, Relay>;
+  approve(req: JoinRequest, as?: Partial<MemberInfo>, opts?: { seat?: boolean }): Effect.Effect<Member, Refused, Relay>;
   deny(requestId: string): Effect.Effect<void, Refused, Relay>;
   setCanPost(pk: string, post: boolean): Effect.Effect<void, Refused, Relay>;
   updateScopes(m: Member, scopes: readonly Scope[], since: number): Effect.Effect<void, Refused, Relay>;
@@ -587,8 +605,11 @@ export interface ChannelFx {
   resignAdmitted(m: Member): Effect.Effect<void, Refused, Relay>;
   /** Owner: take a computer's seat away and remove every agent it let in, then rotate the key once. Returns who was removed. */
   revokeComputer(pk: string): Effect.Effect<string[], Refused, Relay>;
-  /** Owner: what keeping their computers' seats needs now (renewals, re-signing what they let in, seats for `computers` not seated yet). */
-  tendSeats(computers?: readonly { pk: string; xpk: string; label: string }[]): Effect.Effect<{ seated: string[]; renewed: string[]; resigned: string[] }, Refused, Relay>;
+  /**
+   * Owner: what keeping their computers' seats needs now (renewals, re-signing what they let in). It
+   * never seats a computer: that takes the owner approving its first agent here (approve, `seat`).
+   */
+  tendSeats(): Effect.Effect<{ renewed: string[]; resigned: string[] }, Refused, Relay>;
   /**
    * A computer with a seat here (this Channel's identity is its machine key) lets one of its own agents in:
    * under `name`, or name-2… if that's taken. Refused when it has no live seat, or the channel is on hold.
@@ -1010,6 +1031,8 @@ export class Channel {
         // A half that doesn't check out means the relay tampered with the request: leave it out.
         const check = yield* this.codeCheck(r, opts.budget).pipe(Effect.catchCause(() => Effect.succeed(null)));
         if (!check) continue;
+        // On a sign-in relay only the owner's own computers can be seated, so another person's isn't offered.
+        const computer = r.ownersOwn === false ? null : yield* Effect.promise(() => offeredComputer(this.roomId, r.pk, info.seatOffer, everyone));
         // Whoever holds the join code chose these: keep them to one safe line each.
         out.push({
           name: inlineText(info.name, 40) || "?",
@@ -1025,6 +1048,7 @@ export class Channel {
           ...check,
           sponsoredBy: r.sponsorUser ? { user: r.sponsorUser, name: inlineText(r.sponsorName, 80) || r.sponsorUser, email: r.sponsorEmail ?? null } : null,
           ...(auto ? { askedAs: auto } : {}),
+          ...(computer ? { vouchedBy: computer.pk, computer: { ...computer, ...(r.ownersOwn ? { own: true } : {}) } } : {}),
         });
       }
       return out;
@@ -1035,7 +1059,7 @@ export class Channel {
       yield* this.signHalf(req.id, ownerNonceStatement(this.roomId, req.pk, req.commit));
     }),
 
-    approve: Effect.fn("Channel.approve")({ self: this }, function* (this: Channel, req: JoinRequest, as?: Partial<MemberInfo>) {
+    approve: Effect.fn("Channel.approve")({ self: this }, function* (this: Channel, req: JoinRequest, as?: Partial<MemberInfo>, opts: { seat?: boolean } = {}) {
       yield* this.ownerOnly();
       if (req.check !== "ready" || !req.code) return yield* new Rejected(`${req.name} hasn't shown its code yet: approve once you've both seen the same 6 digits`);
       const kind = req.kind ?? "agent";
@@ -1070,6 +1094,8 @@ export class Channel {
       const sealed = yield* Effect.promise(() => sealRecord(current, rec));
       yield* this.request("/members", { method: "POST", body: JSON.stringify({ pk: req.pk, xpk: req.xpk, rec: sealed, keys, request: req.id, ...(post ? {} : { post }) }) });
       const member: Member = { pk: req.pk, xpk: req.xpk, ...info, owner: false, at: rec.at, active: true };
+      // "Let agents from <computer> in from now on": its later agents here come in on their own.
+      if (opts.seat && req.computer) yield* this.fx.seatComputer(req.computer);
       return member;
     }),
 
@@ -1189,9 +1215,9 @@ export class Channel {
       return gone.map((m) => m.name);
     }),
 
-    tendSeats: Effect.fn("Channel.tendSeats")({ self: this }, function* (this: Channel, computers: readonly { pk: string; xpk: string; label: string }[] = []) {
+    tendSeats: Effect.fn("Channel.tendSeats")({ self: this }, function* (this: Channel) {
       yield* this.ownerOnly();
-      const done = { seated: [] as string[], renewed: [] as string[], resigned: [] as string[] };
+      const done = { renewed: [] as string[], resigned: [] as string[] };
       const members = yield* this.fx.members();
       const now = Date.now();
       for (const m of members) {
@@ -1203,11 +1229,6 @@ export class Channel {
           yield* this.fx.resignAdmitted(m);
           done.resigned.push(m.name);
         }
-      }
-      for (const c of computers) {
-        // A key that was here and left (removed, or its computer revoked) isn't seated again on its own.
-        if (members.some((m) => m.pk === c.pk)) continue;
-        done.seated.push((yield* this.fx.seatComputer(c)).name);
       }
       return done;
     }),
@@ -1822,8 +1843,8 @@ export class Channel {
   }
 
   /** Admit a requester: sign its record, and wrap every epoch key to it. */
-  approve(req: JoinRequest, as?: Partial<MemberInfo>): Promise<Member> {
-    return run(this.fx.approve(req, as));
+  approve(req: JoinRequest, as?: Partial<MemberInfo>, opts?: { seat?: boolean }): Promise<Member> {
+    return run(this.fx.approve(req, as, opts));
   }
 
   deny(requestId: string): Promise<void> {
@@ -1907,8 +1928,8 @@ export class Channel {
     return run(this.fx.revokeComputer(pk));
   }
 
-  tendSeats(computers?: readonly { pk: string; xpk: string; label: string }[]): Promise<{ seated: string[]; renewed: string[]; resigned: string[] }> {
-    return run(this.fx.tendSeats(computers));
+  tendSeats(): Promise<{ renewed: string[]; resigned: string[] }> {
+    return run(this.fx.tendSeats());
   }
 
   /** New channel key, wrapped to every remaining member. */

@@ -10,7 +10,8 @@ import { join } from "node:path";
 import { signRequest } from "../src/auth.ts";
 import { Channel, RelayError } from "../src/client.ts";
 import { generateIdentity, sign, signText, type Identity } from "../src/identity.ts";
-import { newMachine, registerMachine } from "../src/machine.ts";
+import { computerOffer, newMachine, registerMachine, vouchFor, type MachineFile } from "../src/machine.ts";
+import { checked } from "./check.ts";
 import { Database } from "bun:sqlite";
 import { newChannelKey, sealTo } from "../src/crypto.ts";
 import { admitRoster, describeMember, freeAgentName, makeAdmittedRecord, openRecord, readRecord, sealRecord, type Member, type ReadEntry } from "../src/membership.ts";
@@ -462,5 +463,158 @@ describe("kiwi join on a seated computer", () => {
     } finally {
       for (const p of procs) p.kill();
     }
+  });
+});
+
+describe("seat on first approval (#1340)", () => {
+  let relay: string;
+  beforeAll(() => {
+    relay = relayAt();
+  });
+
+  /** A channel, its owner, and a computer of theirs that has no seat in it yet. */
+  async function unseated(at = relay) {
+    const owner = await generateIdentity("human");
+    const made = await Channel.create(at, owner, { name: "human" });
+    const ownerCh = new Channel(made.access, at, owner);
+    const computer: MachineFile = { identity: await generateIdentity("machine"), label: "Mac mini", relay: at };
+    return { ownerCh, code: made.code, roomId: made.access.roomId, computer };
+  }
+
+  /** An agent on `computer` asks to join, offering it for a seat; the owner sees the request with its code. */
+  async function ask(ownerCh: Channel, code: string, roomId: string, name: string, offer: (pk: string) => Promise<unknown>) {
+    const id = await generateIdentity(name);
+    const seatOffer = await offer(id.pk);
+    const { requestId } = await Channel.requestJoin(relay, code, id, { name, ...(seatOffer ? { seatOffer } : {}) } as never);
+    const req = (await checked(ownerCh, relay, code, [{ id, requestId }])).find((r) => r.id === requestId)!;
+    expect(req.check).toBe("ready");
+    return { id, req };
+  }
+
+  test("approving with seat seats the computer, and its next agent lets itself in", async () => {
+    const { ownerCh, code, roomId, computer } = await unseated();
+    const first = await ask(ownerCh, code, roomId, "claude", (pk) => computerOffer(computer, roomId, pk));
+    // No sign-in here, so nothing says it's the owner's: offered, but not ticked to begin with (no `own`).
+    expect(first.req.computer).toEqual({ pk: computer.identity.pk, xpk: computer.identity.xpk!, label: "Mac mini" });
+    expect(first.req.vouchedBy).toBe(computer.identity.pk);
+
+    await ownerCh.approve(first.req, undefined, { seat: true });
+    const seatRow = (await ownerCh.members()).find((m) => m.pk === computer.identity.pk)!;
+    expect(seatRow.kind).toBe("computer");
+    expect(seatRow.admits!.until).toBeGreaterThan(Date.now() + 80 * DAY);
+
+    const seat = new Channel(await Channel.resume(relay, code, computer.identity), relay, computer.identity);
+    const next = await agent("codex");
+    const { name } = await seat.admit(next.ask);
+    expect(name).toBe("codex");
+    // Seated now: a later request from it doesn't offer it again.
+    const later = await ask(ownerCh, code, roomId, "late", (pk) => computerOffer(computer, roomId, pk));
+    expect(later.req.computer).toBeUndefined();
+  });
+
+  test("approving without seat lets the agent in and seats nothing", async () => {
+    const { ownerCh, code, roomId, computer } = await unseated();
+    const { req } = await ask(ownerCh, code, roomId, "claude", (pk) => computerOffer(computer, roomId, pk));
+    await ownerCh.approve(req);
+    expect((await ownerCh.members()).some((m) => m.pk === computer.identity.pk)).toBe(false);
+    const seat = await Channel.resume(relay, code, computer.identity).catch((e: unknown) => e);
+    expect(seat).toBeInstanceOf(Error);
+  });
+
+  test("an offer whose signatures don't check out isn't offered", async () => {
+    const { ownerCh, code, roomId, computer } = await unseated();
+    // Its vouch is for another agent's key (copied from someone else's request).
+    const other = await generateIdentity("other");
+    const copied = await ask(ownerCh, code, roomId, "copycat", () => computerOffer(computer, roomId, other.pk));
+    expect(copied.req.computer).toBeUndefined();
+    // Its exchange key swapped for one the agent holds.
+    const swapped = await ask(ownerCh, code, roomId, "swapper", async (pk) => ({ ...(await computerOffer(computer, roomId, pk))!, xpk: other.xpk }));
+    expect(swapped.req.computer).toBeUndefined();
+    // Asking to seat it anyway seats nothing.
+    await ownerCh.approve(copied.req, undefined, { seat: true });
+    expect((await ownerCh.members()).some((m) => m.pk === computer.identity.pk)).toBe(false);
+  });
+
+  test("a computer that was removed isn't offered again", async () => {
+    const { ownerCh, code, roomId, computer } = await unseated();
+    const first = await ask(ownerCh, code, roomId, "claude", (pk) => computerOffer(computer, roomId, pk));
+    await ownerCh.approve(first.req, undefined, { seat: true });
+    await ownerCh.revokeComputer(computer.identity.pk);
+    const again = await ask(ownerCh, code, roomId, "again", (pk) => computerOffer(computer, roomId, pk));
+    expect(again.req.computer).toBeUndefined();
+  });
+
+  test("opening a channel never seats a computer: tendSeats only renews and re-signs", async () => {
+    const { ownerCh } = await unseated();
+    const before = (await ownerCh.members()).length;
+    expect(await ownerCh.tendSeats()).toEqual({ renewed: [], resigned: [] });
+    expect((await ownerCh.members()).length).toBe(before);
+  });
+
+  test("on a sign-in relay, another person's computer isn't offered; the owner's own is", async () => {
+    const at = relayAt(true);
+    const owner = await generateIdentity("alice");
+    const made = await Channel.create(at, owner, { name: "alice", kind: "human", sponsor: { user: "dev_alice", name: "Alice (dev)", handle: "alice" } }, [], undefined, "dev:alice");
+    const ownerCh = new Channel(made.access, at, owner, undefined, async () => "dev:alice");
+    const roomId = made.access.roomId;
+    const linkedTo = async (user: string) => {
+      const m = await newMachine(at);
+      await registerMachine(m);
+      expect((await fetch(`${at}/v1/machines/${m.identity.pk}/confirm`, { method: "POST", headers: { "x-human-token": user }, body: "{}" })).status).toBe(200);
+      return m;
+    };
+    const askFrom = async (m: MachineFile, name: string) => {
+      const id = await generateIdentity(name);
+      const { requestId } = await Channel.requestJoin(at, made.code, id, { name, seatOffer: (await computerOffer(m, roomId, id.pk))! }, null, await vouchFor(m, roomId, id.pk));
+      return (await checked(ownerCh, at, made.code, [{ id, requestId }])).find((r) => r.id === requestId)!;
+    };
+
+    const bobs = await askFrom(await linkedTo("dev:bob"), "bobbot");
+    expect(bobs.computer).toBeUndefined();
+
+    const mine = await linkedTo("dev:alice");
+    const alices = await askFrom(mine, "alicebot");
+    expect(alices.computer?.pk).toBe(mine.identity.pk);
+    expect(alices.computer?.own).toBe(true);
+    await ownerCh.approve(alices, undefined, { seat: true });
+    const seat = new Channel(await Channel.resume(at, made.code, mine.identity), at, mine.identity);
+    expect((await seat.admit((await agent("next")).ask)).name).toBe("next");
+  });
+});
+
+describe("kiwi join on a computer with no seat yet", () => {
+  test("its first agent asks; approved with seat, the next one lets itself in", async () => {
+    const relay = relayAt();
+    const home = mkdtempSync(join(tmpdir(), "kiwi-grant-first-"));
+    const claudeDir = mkdtempSync(join(tmpdir(), "kiwi-grant-claude-"));
+    dirs.push(home, claudeDir);
+    const machine = await generateIdentity("machine");
+    writeFileSync(join(home, "machine.json"), JSON.stringify({ identity: machine, label: "Build box", relay }));
+    const owner = await generateIdentity("human");
+    const made = await Channel.create(relay, owner, { name: "human" });
+    const ownerCh = new Channel(made.access, relay, owner);
+
+    const kiwi = (...args: string[]) => {
+      const env: Record<string, string | undefined> = { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1", CLAUDE_CONFIG_DIR: claudeDir };
+      delete env.CLAUDECODE;
+      const p = Bun.spawn(["bun", join(import.meta.dir, "../src/cli/main.ts"), ...args], { cwd: home, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      return Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]).then(([out, err, code]) => {
+        if (code !== 0) throw new Error(`kiwi ${args.join(" ")}: ${err}`);
+        return out;
+      });
+    };
+    const first = kiwi("join", made.code, "proj", "--as", "bot");
+    // The owner's side: its request, offering Build box, once its code shows.
+    let req;
+    for (let i = 0; i < 100 && !req; i++) {
+      const reqs = await ownerCh.requests();
+      for (const r of reqs) if (r.check === "unchecked") await ownerCh.checkRequest(r);
+      req = reqs.find((r) => r.check === "ready" && r.code);
+      if (!req) await Bun.sleep(200);
+    }
+    expect(req?.computer?.label).toBe("Build box");
+    await ownerCh.approve(req!, undefined, { seat: true });
+    expect(await first).toContain('You\'re "bot"');
+    expect(await kiwi("join", made.code, "proj2", "--as", "bot2")).toContain("let in by this computer");
   });
 });

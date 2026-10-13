@@ -34,7 +34,7 @@ import { CHAT_KINDS, COLORS, ignored, isColor, TASK_STATES, type Kind, type Mess
 import { chooseThread, COORDINATOR, humanOf, parseTaskId, similarOpenTasks, taskId, wentTo, type ChannelState } from "../state.ts";
 import { VERSION } from "../version.ts";
 import { channelFiles, runSh, sessionViews } from "../sh.ts";
-import { forgetMachine, linkUrl, loadMachine, machineCode, machineFx, newMachine, saveMachine, vouchFor, type MachineFile } from "../machine.ts";
+import { computerOffer, forgetMachine, linkUrl, loadMachine, machineCode, machineFx, newMachine, saveMachine, vouchFor, type MachineFile } from "../machine.ts";
 import { briefText, COMMANDS } from "../brief.ts";
 import { autoInstallExtraHooks, autoInstallHooks, bindDirectory, bindingFor, EXTRA_HARNESSES, extraInstalled, hooksInstalled, hooksListen, hooksStatus, installDetected, installExtra, installHooks, mcFor, runHook, uninstallDetected, uninstallExtra, uninstallHooks, type ExtraHarness } from "../hooks.ts";
 import { BadName } from "../refusals.ts";
@@ -142,6 +142,7 @@ const { values: opt, positionals: args } = parseArgs({
     dm: { type: "string" },
     main: { type: "boolean" },
     open: { type: "boolean" },
+    seat: { type: "boolean" },
     model: { type: "string" },
     tools: { type: "string" },
     stay: { type: "boolean" },
@@ -499,6 +500,10 @@ const pairSeat = Effect.fn("kiwi.pairSeat")(function* (code: string, slot: strin
 /** A command: its exit code, when it isn't 0. */
 type Command = () => Effect.Effect<void | number, unknown, Agent>;
 
+/** How a linked computer's agents come in: what kiwi setup says once it's linked. */
+const SEAT_HOW =
+  "Agents you start here ask to join, and you approve them. Approving the first one in a channel can let this computer's later agents into that channel on their own.";
+
 const commands: Record<string, Command> = {
   quick: () => commands.create!(),
 
@@ -704,14 +709,20 @@ const commands: Record<string, Command> = {
         );
       }
       const vouch = () => (linked ? Effect.promise(() => vouchFor(linked, roomId, id.pk)) : Effect.succeed(null));
+      // This computer, offered to the owner: approving this agent can seat it, so its later agents come in on their own.
+      const asking = () =>
+        Effect.promise(async () => {
+          const computer = seatedHere ? await computerOffer(seatedHere, roomId, id.pk) : null;
+          return computer ? { ...info, seatOffer: computer } : info;
+        });
       // Asking again with the same key resumes the same request, so re-running this is always safe.
       // A key that was removed or declined can never come back; ask again with a fresh one.
-      const req = yield* Channel.fx.requestJoin(relay, code, id, info, null, yield* vouch()).pipe(
+      const req = yield* Channel.fx.requestJoin(relay, code, id, yield* asking(), null, yield* vouch()).pipe(
         Effect.catchIf(outForGood, () =>
           Effect.gen(function* () {
             yield* keys.forgetIdentity(name, roomId);
             id = yield* keys.identity(name, roomId);
-            return yield* Channel.fx.requestJoin(relay, code, id, info, null, yield* vouch());
+            return yield* Channel.fx.requestJoin(relay, code, id, yield* asking(), null, yield* vouch());
           }),
         ),
       );
@@ -771,7 +782,7 @@ const commands: Record<string, Command> = {
         const st = yield* linkStatus(m);
         if (st?.status !== "linked") return out("This computer's link was removed. Run kiwi setup again.");
         out(`Linked to ${st.name ?? m.linked.name ?? "your account"} (${m.label}).`);
-        // What the link page shows, to compare before seating this computer in your channels.
+        // What the link page showed, and what its agents' join requests are compared against.
         return out(`Its code: ${yield* Effect.promise(() => machineCode(m.identity.pk))}`);
       }
 
@@ -783,15 +794,14 @@ const commands: Record<string, Command> = {
       const current = m?.linked && m.relay === relay ? yield* linkStatus(m) : null;
       if (m && current?.status === "linked") {
         const linked = m;
-        out(`2. This computer is already linked to ${current.name ?? m.linked?.name ?? "your account"}.`);
-        out(`   To let agents you start here into your channels with no code to compare, open this page once and check it shows ${yield* Effect.promise(() => machineCode(linked.identity.pk))}:`);
-        out(`   ${yield* Effect.promise(() => linkUrl(linked))}\n`);
+        out(`2. This computer is already linked to ${current.name ?? m.linked?.name ?? "your account"} (code ${yield* Effect.promise(() => machineCode(linked.identity.pk))}).`);
+        out(`   ${SEAT_HOW}\n`);
       } else {
         if (!m || m.relay !== relay || m.linked) m = yield* Effect.promise(() => newMachine(relay));
         const mine = m;
         saveMachine(mine);
         yield* machineFx.register(mine);
-        const url = yield* Effect.promise(() => linkUrl(mine));
+        const url = linkUrl(mine);
         out("2. Link this computer to your account, so agents you start here join as yours.");
         out(`   Open this page, sign in, and check it shows ${yield* Effect.promise(() => machineCode(mine.identity.pk))}:`);
         out(`   ${url}`);
@@ -803,7 +813,7 @@ const commands: Record<string, Command> = {
           if (st?.status === "linked") {
             mine.linked = { name: st.name, at: Date.now() };
             saveMachine(mine);
-            out(`   Linked to ${st.name ?? "your account"}. Agents you start here come into your own channels on their own; other owners approve each one.\n`);
+            out(`   Linked to ${st.name ?? "your account"}. ${SEAT_HOW}\n`);
             break;
           }
           if (st?.status === "expired" || Date.now() > deadline) return yield* die("the link expired before it was confirmed; run kiwi setup again");
@@ -902,8 +912,9 @@ const commands: Record<string, Command> = {
         const code = r.code ?? (r.check === "waiting" ? "waiting" : "unchecked");
         // A name someone here already holds comes as the next free one: asked for X, it joins as X-2.
         const asked = r.askedAs && r.askedAs !== r.name ? ` (asked as ${r.askedAs}, which is taken)` : "";
-        out(`${code.padEnd(8)} ${r.name}${asked}${r.role ? ` (${r.role})` : ""} · ${who} · key ${fingerprint(r.pk)} · ${ago(r.ts)}`);
+        out(`${code.padEnd(8)} ${r.name}${asked}${r.role ? ` (${r.role})` : ""} · ${who}${r.computer ? ` on ${r.computer.label}` : ""} · key ${fingerprint(r.pk)} · ${ago(r.ts)}`);
       }
+      if (reqs.some((r) => r.computer)) out("kiwi approve CODE --seat also lets that computer's later agents into this channel on their own");
       if (reqs.some((r) => r.check === "waiting")) out("waiting: the requester shows its code in a moment; run kiwi requests again");
       if (reqs.some((r) => r.check === "unchecked")) out(`unchecked: ${TOO_MANY_REQUESTS}`);
     }),
@@ -924,7 +935,8 @@ const commands: Record<string, Command> = {
   approve: () =>
     Effect.gen(function* () {
       const s = yield* session();
-      const r = yield* findRequest(s, args[1] ?? (yield* die("usage: kiwi approve CODE [--name NEWNAME] [--role ROLE] [--scopes member|read-only] [--yes]")));
+      const r = yield* findRequest(s, args[1] ?? (yield* die("usage: kiwi approve CODE [--name NEWNAME] [--role ROLE] [--scopes member|read-only] [--seat] [--yes]")));
+      if (opt.seat && !r.computer) return yield* die(`${r.name} didn't come from a computer that can be seated here; approve without --seat`);
       const scopes = opt.scopes === undefined ? undefined : (parseScopes(opt.scopes) ?? (yield* die(`"${opt.scopes}" isn't a level: say member or read-only`)));
       const name = opt.name ?? r.name;
       if (!NAME_RE.test(name) || name === OWNER_NAME) return yield* new BadName(`"${name}" isn't an allowed name; approve with --name NAME`);
@@ -934,11 +946,12 @@ const commands: Record<string, Command> = {
       const askedCoordinator = r.role?.trim().toLowerCase() === COORDINATOR && opt.role?.trim().toLowerCase() !== COORDINATOR;
       const role = opt.role ?? (askedCoordinator ? undefined : r.role);
       const may = scopes ? `, to ${mayDo(scopes)}` : "";
-      if (!(yield* confirm(`Let "${name}"${role ? ` (${role})` : ""} in${may}? Verification code ${r.code}`))) {
+      const seat = opt.seat && r.computer ? `, and let agents from ${r.computer.label} in from now on` : "";
+      if (!(yield* confirm(`Let "${name}"${role ? ` (${role})` : ""} in${may}${seat}? Verification code ${r.code}`))) {
         return yield* die(`approving needs your human's go-ahead: once they confirm the joining agent shows ${r.code}, re-run with --yes`);
       }
-      const admitted = yield* (yield* s.adminCh("let anyone in")).fx.approve(r, { name, role, about: r.about, ...(scopes ? { scopes } : {}) });
-      out(`approved ${admitted.name} (${r.code})${scopes ? `; they may ${describeScopes(scopes)}` : ""}${askedCoordinator ? `; it asked to be the coordinator, which takes: kiwi approve ${r.code} --role coordinator` : ""}`);
+      const admitted = yield* (yield* s.adminCh("let anyone in")).fx.approve(r, { name, role, about: r.about, ...(scopes ? { scopes } : {}) }, { seat: !!opt.seat });
+      out(`approved ${admitted.name} (${r.code})${scopes ? `; they may ${describeScopes(scopes)}` : ""}${seat ? `; agents from ${r.computer!.label} now come in on their own` : ""}${askedCoordinator ? `; it asked to be the coordinator, which takes: kiwi approve ${r.code} --role coordinator` : ""}`);
       // Coordinator mode with nobody coordinating yet: the first agent in takes it.
       const coordinator = yield* s.ensureCoordinator().pipe(Effect.catchCause(() => Effect.succeed(null)));
       if (coordinator) out(`${coordinator} is the coordinator: people talk with them (kiwi role ${coordinator} none to change that)`);

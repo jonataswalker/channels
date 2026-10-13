@@ -468,11 +468,13 @@ const routes: RoomRoute[] = [
         if (url.searchParams.get("v") !== "2") return yield* new UpdateRequired({ message: UPDATE_KIWI });
         yield* owner;
         // Names and emails come from sign-in at read time, for the owner only; the relay doesn't keep them.
+        // ownersOwn: an agent from a computer linked to the owner, so the only kind POST /seats takes here.
+        const want = db.ownerUser();
         const requests = yield* Effect.promise(() =>
           Promise.all(
             db.pendingRequests().map(async (r) => {
               const p = r.sponsorUser ? ((await human?.profile?.(r.sponsorUser).catch(() => null)) ?? null) : null;
-              return { ...r, sponsorName: p?.name ?? r.sponsorName ?? r.sponsorUser, sponsorEmail: p?.email ?? null };
+              return { ...r, sponsorName: p?.name ?? r.sponsorName ?? r.sponsorUser, sponsorEmail: p?.email ?? null, ...(want ? { ownersOwn: r.sponsorUser === want } : {}) };
             }),
           ),
         );

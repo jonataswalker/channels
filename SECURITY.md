@@ -51,11 +51,24 @@ agent                          relay                         owner's human
   own making, or strip the promise. A member never replaces a key it already
   holds for an epoch. The relay stores the wrapped keys; only that member can
   open them.
-- **Your own computers' agents skip the code: a seat.** When you link a
-  computer (`kiwi setup`), you compare its code in the browser. The link
-  also carries the computer's exchange key, signed by its key
-  (`kiwi-machine-xpk`). Your browser then gives that computer a *seat* in
-  every channel you own there. A seat is a member record **you** sign:
+- **Your own computers' agents skip the code: a seat, given on first
+  approval.** A computer gets a *seat* in a channel only when you approve
+  its first agent there with "let agents from <computer> in from now on"
+  (`kiwi approve CODE --seat`; `/approve CODE seat`; on the approve card,
+  ticked to begin with only when a sign-in relay says the computer is linked
+  to you, since the requester names its computer whatever it likes). That agent's join request offers its computer in the info
+  sealed to you: the computer's key, its exchange key, its name, and two
+  signatures by the computer's key, one over its exchange key
+  (`kiwi-machine-xpk`) and one over this channel and this agent's key
+  (`kiwi-vouch`). Your client offers the seat only when both check out and
+  that key has never been a member here (one you removed isn't seated again
+  from a request). So neither the relay nor another agent can offer a
+  computer that isn't the asking agent's, and you've compared that agent's
+  code before you tap. On a sign-in relay the relay says whether the agent's
+  computer is linked to you, and only then is the option shown; `/seats`
+  refuses any other computer anyway. Linking a computer seats it nowhere,
+  and opening a channel never seats one. A channel made with `kiwi create`
+  seats the computer that made it at once. A seat is a member record **you** sign:
   kind `computer`, read-only (the relay refuses its posts), with
   `admits: { since, until }`, 90 days. Because the seat is a member, it gets every
   rotated channel key like anyone else. Agents started on that computer
@@ -87,21 +100,27 @@ agent                          relay                         owner's human
   - **Upkeep on open.** When you open a channel, your browser renews seats
     with under 60 days left. It re-signs what your computers let in with
     your own key (only records that passed the check, keeping `via`), so
-    older clients read them too. It also seats your computers already
-    seated in your other channels. Which computers to seat comes only from
-    seats you signed or a link you just confirmed. It never comes from the
-    relay's list of your computers, which a relay could pad with a key of
-    its own.
+    older clients read them too. It never seats a computer: each channel's
+    seat takes your tap on that computer's first agent there. **Seats
+    from 0.10.0–0.10.2 are not scoped.** Those versions seated a computer in
+    every channel you owned when you linked it, and in each channel you
+    opened after. Those seats are kept and still renewed, so such a computer
+    can still let agents into all of those channels. To trim them: Your
+    computers → Remove (it removes the computer's seat, and the agents it
+    let in, in every channel you own in that browser), run `kiwi setup` on
+    it again, then approve its first agent with "let agents from it in from
+    now on" only in the channels you want it in.
   - **Revoking.** Your computers → Remove unlinks the computer, then
     removes its seat and every agent with `via` it in each channel you own
     in that browser, and rotates the key.
   - **The risk, stated.** Anything that can read a computer's machine key
-    can admit agents into your channels until you remove that computer.
+    can admit agents into the channels that computer has a seat in, until
+    you remove it. A program on that computer working in one channel can't
+    reach your others through it.
     That process can already read every agent key on that computer. Each
     admission is announced, and removing the computer undoes them all.
-  - **Computers linked before 0.9.1** have no exchange key on record. Run
-    `kiwi setup` on one again: it prints the page that seats it, after the
-    same code check.
+  - **Computers set up before 0.9.1** have no exchange key, so their agents
+    don't offer them and they can't be seated. Run `kiwi setup` on one again.
 
   On a channel made with `kiwi create`, the owner key is on that computer. An
   agent joining from that same computer is let in with the key directly:

@@ -11,7 +11,7 @@ import { cx } from "@/lib/utils"
 import { useControls } from "./controls"
 import { Icon } from "./icon"
 import { Button, IconButton, Monogram, TextField, errorText, toast } from "./kit"
-import { defaultScopes } from "./scopes"
+import { defaultScopes, SeatPicker } from "./scopes"
 
 /** Agents a computer let in since this view opened, by the computer's name. */
 export type JoinedVia = Map<string, number>
@@ -136,7 +136,11 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
   // A name someone here took since the request was listed (a race: a taken name usually comes offered as a free one): let it in under another.
   const taken = r.kind !== "human" && p.roster.some((m) => m.active && nameKey(m.name) === nameKey(r.name))
   const [rename, setRename] = useState(() => (taken ? freeAgentName(r.name, p.roster) : ""))
-  const who = r.kind === "human" ? `Signed in as ${r.sponsoredBy?.name ?? "someone"}` : r.sponsoredBy ? `Agent for ${r.sponsoredBy.name}, from their computer` : "An agent"
+  // Its computer's first agent here: one tap lets that computer's later ones in too (owner's pick, #1340).
+  // Ticked to begin with only for a computer the relay says is the owner's: anyone can name theirs anything.
+  const [seat, setSeat] = useState(!!r.computer?.own)
+  const from = r.computer ? `from ${r.computer.label}` : "from their computer"
+  const who = r.kind === "human" ? `Signed in as ${r.sponsoredBy?.name ?? "someone"}` : r.sponsoredBy ? `Agent for ${r.sponsoredBy.name}, ${from}` : r.computer ? `An agent ${from}` : "An agent"
   const lead = <Monogram name={r.name} agent={r.kind !== "human"} size={24} />
   if (auth.status === "signed-out") {
     return (
@@ -165,6 +169,7 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
               <span className="text-title font-semibold tracking-[0.04em] text-ink tabular-nums">{r.code}</span>
             </span>
           )}
+          {r.check === "ready" && r.code && r.computer && <SeatPicker computer={r.computer.label} value={seat} onChange={setSeat} disabled={busy} className="mt-1.5" />}
         </>
       }
     >
@@ -174,7 +179,7 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
           onSubmit={(e) => {
             e.preventDefault()
             const name = rename.trim()
-            if (name) void run(() => p.onApprove({ ...r, name }, defaultScopes(roomId)), `${r.name} joined as ${name}`)
+            if (name) void run(() => p.onApprove({ ...r, name }, defaultScopes(roomId), seat), `${r.name} joined as ${name}`)
           }}
         >
           <span className="text-meta text-ink-2">{r.name} is taken here. It matches: let in as</span>
@@ -185,7 +190,7 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
         </form>
       ) : r.check === "ready" ? (
         <>
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(() => p.onApprove(r, defaultScopes(roomId)), `${r.name} joined`)}>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(() => p.onApprove(r, defaultScopes(roomId), seat), `${r.name} joined`)}>
             It matches: let in
           </Button>
           <Button size="sm" variant="ghost" onClick={() => ask({ kind: "approve", req: r })}>

@@ -290,11 +290,10 @@ try {
   const channel = page.url()
   const code = new URL(channel).hash.slice(1)
   let opened = false
-  let fullLink = ""
   const setup = kiwi(["setup", "--relay", BASE], (out) => {
     const link = /(http\S+#link=\S+)/.exec(out)?.[1]
-    // Linked first without its exchange key, so it isn't seated: the first agent walks the requests sheet.
-    if (link && !opened) (opened = true), (fullLink = link), void page.goto(link.replace(/&x=.*$/, ""))
+    // Linking seats it nowhere: its first agent here asks.
+    if (link && !opened) (opened = true), void page.goto(link)
   })
   await page.getByRole("button", { name: "Yes, link it" }).click({ timeout: 20000 })
   await setup
@@ -318,17 +317,14 @@ try {
   await opens("Needs you → Choose what it can do…", () => needs.getByRole("button", { name: "Choose what it can do…" }).click())
   at = "approve"
   await needsOpen()
+  // Its computer's first agent here: "let agents from it in from now on" is on, so this seats the computer.
+  await needs.getByRole("checkbox", { name: /Let agents from .* in from now on/ }).waitFor()
   await letIn.click()
   await joining
   await addAgent.waitFor({ state: "hidden", timeout: 15000 })
   console.log(`ok  ${at}`)
 
-  // The same link with its exchange key seats the computer in this channel; its next agent lets itself in.
-  at = "seat the computer"
-  await page.goto(fullLink)
-  await page.getByRole("button", { name: "Yes, let its agents in" }).click({ timeout: 20000 })
-  await page.getByText(/now come into/).waitFor()
-  console.log(`ok  ${at}`)
+  // Seated on that approval: the computer's next agent lets itself in.
   at = "an agent from your own computer comes in on its own"
   await page.goto(channel)
   await page.getByText("smoke test", { exact: true }).first().waitFor()
