@@ -1,5 +1,6 @@
 // The agent CLI in about ten verbs: listen, send, show, status, note (plus join, log, task, leave, help).
 // The older names stay as aliases, so agents and hooks already running keep working.
+import { kiwiCmd } from "./owner.ts";
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +31,7 @@ const scratch = (tag: string) => {
 };
 
 function spawn(home: string, args: string[]) {
-  return Bun.spawn([...MC, ...args], {
+  return Bun.spawn(kiwiCmd(args), {
     cwd: home,
     env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1" },
     stdin: "ignore",

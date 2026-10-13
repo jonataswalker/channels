@@ -4,6 +4,7 @@
 // Owners approve through the client library; agents join with computer claims, people with person
 // claims. Tests that set channels up with raw create/approve calls should use this instead.
 
+import { join } from "node:path";
 import { Channel } from "../src/client.ts";
 import type { JoinRequest } from "../src/membership.ts";
 import type { ChannelAccess } from "../src/crypto.ts";
@@ -63,7 +64,7 @@ export async function joinAgent(
 ): Promise<{ id: Identity; ch: Channel; member: Member; req: JoinRequest }> {
   const id = await generateIdentity(name);
   const claim = await claimComputer(computer.machine, computer.cert, s.roomId, id.pk);
-  const { requestId } = await Channel.requestJoin(s.relay, s.code, id, { name, ...(opts.role ? { role: opts.role } : {}) }, null, null, { computer: claim });
+  const { requestId } = await Channel.requestJoin(s.relay, s.code, id, { name, ...(opts.role ? { role: opts.role } : {}) }, { computer: claim });
   let req: JoinRequest;
   if (opts.auto) {
     // The app's background loop: sign own halves without the budget, let the joiner reveal, approve.
@@ -92,11 +93,21 @@ export async function joinPerson(
 ): Promise<{ id: Identity; ch: Channel; member: Member }> {
   const id = await generateIdentity(name);
   const claim = await provePerson(person, s.roomId, id.pk);
-  const { requestId } = await Channel.requestJoin(s.relay, s.code, id, { name }, null, null, { person: claim });
+  const { requestId } = await Channel.requestJoin(s.relay, s.code, id, { name }, { person: claim });
   const req = (await handshake(s, [{ id, requestId }])).find((r) => r.id === requestId)!;
   await s.ownerCh.approve(req, undefined, { person: s.person.pk });
   const st = await Channel.joinStatus(s.relay, s.code, id, requestId);
   if (st.status !== "approved") throw new Error(`not approved: ${st.status}`);
   const member = (await s.ownerCh.members()).find((m) => m.pk === id.pk)!;
   return { id, ch: new Channel(st.access, s.relay, id), member };
+}
+
+const ADMIN = new Set(["create", "quick", "requests", "approve", "deny", "kick", "close", "role", "room"]);
+
+/** The command line for `kiwi ARGS` in a CLI test: the owner's verbs (gone from kiwi, the app's now) go to test/owner-cli.ts. */
+export function kiwiCmd(args: string[]): string[] {
+  let i = 0;
+  while (i < args.length && /^-/.test(args[i]!)) i += /^--(yes|open|json)$/.test(args[i]!) ? 1 : 2;
+  const script = ADMIN.has(args[i] ?? "") ? "owner-cli.ts" : "../src/cli/main.ts";
+  return [process.execPath, join(import.meta.dir, script), ...args];
 }

@@ -1,5 +1,6 @@
 // Coordinator mode by default (T1460): kiwi create starts it with its agent coordinating; removing the
 // coordinator hands the role to the next agent in, and with none left nobody is refused for want of one.
+import { kiwiCmd } from "./owner.ts";
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +31,7 @@ const scratch = () => {
 };
 
 function spawn(home: string, args: string[]) {
-  return Bun.spawn([...MC, ...args], { cwd: home, env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  return Bun.spawn(kiwiCmd(args), { cwd: home, env: { ...process.env, KIWI_HOME: home, KIWI_RELAY: relay, KIWI_NO_HOOKS: "1" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
 }
 
 async function ok(home: string, ...args: string[]): Promise<string> {
