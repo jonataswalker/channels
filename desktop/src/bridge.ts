@@ -20,6 +20,15 @@ export interface ChannelIdentityView {
   xpk?: string;
   xsk?: string;
   roomId?: string;
+  /** The renderer's record for this channel: its join code, channel access (keys), when, and (while waiting) the join request. Opaque here. */
+  code?: string;
+  /** The member key's name in the channel (label is what the person calls the channel). */
+  idName?: string;
+  /** The channel's sealed name, once known. */
+  name?: string;
+  access?: unknown;
+  at?: number;
+  requestId?: string;
 }
 
 /** A computer paired with this app (or adopted: this machine). */

@@ -7,9 +7,12 @@ import { Boundary } from "@/components/kit"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { noteSignInGone } from "@/lib/session"
 import { applyStoredAppearance } from "@/lib/theme"
+import { migrateChannelsToStore } from "@/lib/channel"
 import { initAccessibility } from "@/lib/accessibility"
 
 applyStoredAppearance()
+// Member keys an older renderer left in localStorage move to the app's secrets store, once.
+void migrateChannelsToStore().catch(() => {})
 initAccessibility()
 
 // A call nobody caught that failed because the sign-in ended: ask to sign in again, quietly.

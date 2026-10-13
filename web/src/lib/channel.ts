@@ -27,6 +27,7 @@ import { wholeLog } from "./history-plan"
 import { ICON_LIVE } from "./icon-event"
 import { addMarks, type Marks } from "./receipts"
 import { fork, run } from "./runtime"
+import { bridge, saveChannels, secrets, type ChannelIdentityView } from "./secrets"
 import { noteSignInGone } from "./session"
 
 /** How much history to load when the page opens. */
@@ -130,38 +131,103 @@ function read<T>(key: string): T | null {
   }
 }
 
+// Where member keys live: in the desktop app, its secrets store (lib/secrets.ts, kept with the OS
+// keychain); in a plain browser, localStorage as before. One entry per channel: a member (with
+// access) or a join this app is waiting on (with requestId).
+
+type Entry = ChannelIdentityView
+const asMember = (e: Entry): StoredMember | null =>
+  e.code && e.access ? { code: e.code, identity: entryIdentity(e), access: e.access as ChannelAccess, at: e.at ?? 0, ...(e.name ? { name: e.name } : {}) } : null
+const asPending = (e: Entry): PendingJoin | null => (e.code && !e.access && e.requestId ? { code: e.code, identity: entryIdentity(e), requestId: e.requestId } : null)
+function entryIdentity(e: Entry): Identity {
+  return { name: e.idName ?? e.label, pk: e.pk, sk: e.sk, ...(e.xpk ? { xpk: e.xpk } : {}), ...(e.xsk ? { xsk: e.xsk } : {}) }
+}
+const keysOf = (id: Identity) => ({ pk: id.pk, sk: id.sk, ...(id.xpk ? { xpk: id.xpk } : {}), ...(id.xsk ? { xsk: id.xsk } : {}) })
+const memberEntry = (m: StoredMember): Entry => ({ label: m.name ?? m.identity.name, idName: m.identity.name, ...keysOf(m.identity), roomId: m.access.roomId, code: m.code, access: m.access, at: m.at, ...(m.name ? { name: m.name } : {}) })
+const pendingEntry = (p: PendingJoin): Entry => ({ label: p.identity.name, idName: p.identity.name, ...keysOf(p.identity), code: p.code, requestId: p.requestId })
+
+const inApp = () => bridge() !== null
+const entries = (): Entry[] => secrets().channels
+const otherEntries = (code: string) => entries().filter((e) => e.code !== code)
+const writeEntries = (next: Entry[]) => void saveChannels(next).catch(() => {})
+
+/**
+ * Once, in the app: member keys and pending joins an older renderer kept in localStorage move to
+ * the secrets store, and leave localStorage only after the store has them. A key the store already
+ * holds for a channel wins (it's never swapped).
+ */
+export async function migrateChannelsToStore(): Promise<number> {
+  if (!inApp()) return 0
+  const found: { key: string; entry: Entry }[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)
+    if (k?.startsWith("mc.member.")) {
+      const m = read<StoredMember>(k)
+      if (m?.code && m.identity && m.access) found.push({ key: k, entry: memberEntry(m) })
+    } else if (k?.startsWith("mc.pending.")) {
+      const p = read<PendingJoin>(k)
+      if (p?.code && p.identity && p.requestId) found.push({ key: k, entry: pendingEntry(p) })
+    }
+  }
+  if (!found.length) return 0
+  const have = new Set(entries().filter((e) => e.access).map((e) => e.code))
+  const next = [...entries()]
+  for (const { entry } of found) {
+    if (have.has(entry.code)) continue
+    if (entry.access) have.add(entry.code)
+    // A member supersedes a pending join for the same code.
+    const i = next.findIndex((e) => e.code === entry.code)
+    if (i >= 0) next[i] = entry
+    else next.push(entry)
+  }
+  await saveChannels(next)
+  for (const { key } of found) localStorage.removeItem(key)
+  changed()
+  return found.length
+}
+
 export function loadMember(code: string): StoredMember | null {
-  return read<StoredMember>(MEMBER_KEY(code))
+  if (!inApp()) return read<StoredMember>(MEMBER_KEY(code))
+  const e = entries().find((x) => x.code === code && x.access)
+  return e ? asMember(e) : null
 }
 
 export function saveMember(m: StoredMember): void {
-  // This browser's key for a channel is never swapped for another one: losing an owner key
+  // This app's key for a channel is never swapped for another one: losing an owner key
   // would leave the channel impossible to manage or close.
   const prior = loadMember(m.code)
-  if (prior && prior.identity.pk !== m.identity.pk) throw new Error(`this browser is already in this channel as ${prior.identity.name}`)
-  localStorage.setItem(MEMBER_KEY(m.code), JSON.stringify(m))
-  localStorage.removeItem(PENDING_KEY(m.code))
+  if (prior && prior.identity.pk !== m.identity.pk) throw new Error(`this app is already in this channel as ${prior.identity.name}`)
+  if (inApp()) writeEntries([...otherEntries(m.code), memberEntry(m)])
+  else {
+    localStorage.setItem(MEMBER_KEY(m.code), JSON.stringify(m))
+    localStorage.removeItem(PENDING_KEY(m.code))
+  }
   rememberChannel(m.code)
   changed()
 }
 
 export function loadPending(code: string): PendingJoin | null {
-  return read<PendingJoin>(PENDING_KEY(code))
+  if (!inApp()) return read<PendingJoin>(PENDING_KEY(code))
+  const e = entries().find((x) => x.code === code && !x.access)
+  return e ? asPending(e) : null
 }
 
-/** Drop a join request this browser was waiting on, and nothing else. */
+/** Drop a join request this app was waiting on, and nothing else. */
 export function forgetPending(code: string): void {
-  localStorage.removeItem(PENDING_KEY(code))
+  if (inApp()) writeEntries(entries().filter((e) => !(e.code === code && !e.access)))
+  else localStorage.removeItem(PENDING_KEY(code))
   changed()
 }
 
 export function savePending(p: PendingJoin): void {
-  localStorage.setItem(PENDING_KEY(p.code), JSON.stringify(p))
+  if (inApp()) writeEntries([...otherEntries(p.code), pendingEntry(p)])
+  else localStorage.setItem(PENDING_KEY(p.code), JSON.stringify(p))
   changed()
 }
 
-/** Join requests this browser is waiting on. */
+/** Join requests this app is waiting on. */
 export function pendingChannels(): PendingJoin[] {
+  if (inApp()) return entries().flatMap((e) => asPending(e) ?? [])
   const out: PendingJoin[] = []
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)
@@ -172,8 +238,9 @@ export function pendingChannels(): PendingJoin[] {
   return out
 }
 
-/** Every channel this browser holds keys for. */
+/** Every channel this app holds keys for. */
 export function allMembers(): StoredMember[] {
+  if (inApp()) return entries().flatMap((e) => asMember(e) ?? [])
   const out: StoredMember[] = []
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)
@@ -188,6 +255,7 @@ export function allMembers(): StoredMember[] {
 export function forgetChannel(code: string): void {
   const member = loadMember(code)
   if (member) void forgetHistory(member.access.roomId, member.identity.pk).catch(() => {})
+  if (inApp()) writeEntries(otherEntries(code))
   localStorage.removeItem(MEMBER_KEY(code))
   localStorage.removeItem(PENDING_KEY(code))
   localStorage.removeItem(RECENT_KEY(code))
@@ -282,7 +350,7 @@ export function channelTitle(c: { name?: string }, recent: Recent | null): strin
 }
 
 /** How this browser relates to a channel in the list. */
-export type ListState = "member" | "pending" | "elsewhere" | "agents"
+export type ListState = "member" | "pending" | "agents"
 
 export interface ChannelRow {
   code: string

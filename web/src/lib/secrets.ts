@@ -7,9 +7,9 @@ import { useSyncExternalStore } from "react"
 
 import { generateIdentity } from "@mc/identity.ts"
 
-import type { ComputerView, KiwiBridge, PairAskView, PendingItem, PersonView, StoreSnapshot } from "../../../desktop/src/bridge.ts"
+import type { ChannelIdentityView, ComputerView, KiwiBridge, PairAskView, PendingItem, PersonView, StoreSnapshot } from "../../../desktop/src/bridge.ts"
 
-export type { ComputerView, KiwiBridge, PairAskView, PendingItem, PersonView, StoreSnapshot }
+export type { ChannelIdentityView, ComputerView, KiwiBridge, PairAskView, PendingItem, PersonView, StoreSnapshot }
 
 /** The desktop bridge, or null in a plain browser. */
 export function bridge(): KiwiBridge | null {
@@ -77,6 +77,15 @@ export async function createPerson(name: string): Promise<PersonView> {
   const p: PersonView = { name: id.name, pk: id.pk, sk: id.sk, xpk: id.xpk!, xsk: id.xsk! }
   writeLocal({ person: p })
   return p
+}
+
+/** Keep the channel identities (member keys, pending joins). Visible at once; the write follows. */
+export async function saveChannels(channels: ChannelIdentityView[]): Promise<void> {
+  const b = bridge()
+  if (b) {
+    publish({ ...snapshot, channels })
+    await b.saveChannels(channels)
+  } else writeLocal({ channels })
 }
 
 export async function saveComputers(computers: ComputerView[]): Promise<void> {
