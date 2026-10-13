@@ -99,7 +99,11 @@ function lines(p: ReturnType<typeof mc>) {
     },
     stop: async () => {
       p.kill();
-      await done;
+      await p.exited;
+      // Bun never ends a killed child's stdout (test/proc.ts): stop reading instead of waiting for EOF.
+      await Promise.race([done, Bun.sleep(300)]);
+      await reader.cancel().catch(() => {});
+      await done.catch(() => {});
     },
   };
 }
