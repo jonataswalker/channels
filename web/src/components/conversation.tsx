@@ -8,7 +8,6 @@ import { ignored, type Color, type Message } from "@mc/protocol.ts"
 import { describeScopes, wireScopes } from "@mc/scopes.ts"
 import type { Member as RosterMember } from "@mc/membership.ts"
 import type { HumanSession } from "@mc/client.ts"
-import { seatedComputers } from "@/lib/computers"
 import { colorOf, keptFromPeople, taskId, type ChannelState, type Task } from "@mc/state.ts"
 import { useAuth } from "@/lib/auth"
 import { channelTitle, forgetChannel, LEFT_CHANNEL, loadMember, loadRecent, saveMember, saveRecent, useChannel, useClock, useKnownChannels, type StoredMember } from "@/lib/channel"
@@ -78,8 +77,8 @@ function useChannelNews(room: string, top: number, arrivals: number, inOtherRoom
 /**
  * Owner: keep this channel's computer seats in order whenever it opens. Seats with under 60 days left
  * are renewed; agents a computer let in get the owner's own signature on their record (keeping which
- * computer it was), so every client, older ones too, reads them as the owner's; and computers already
- * seated in this person's other channels get a seat here too (a new channel included).
+ * computer it was), so every client, older ones too, reads them as the owner's. It never seats a
+ * computer here: that takes approving its first agent with "let agents from it in from now on".
  */
 function useTendSeats({ ch, isOwner, roster, human, refreshRoster, onJoined }: {
   ch: ReturnType<typeof useChannel>["ch"]
@@ -101,14 +100,13 @@ function useTendSeats({ ch, isOwner, roster, human, refreshRoster, onJoined }: {
     busy.current = true
     void (async () => {
       try {
-        const others = first ? await seatedComputers(human) : []
-        const done = await ch.tendSeats(others)
+        const done = await ch.tendSeats()
         seated.current = true
         // "2 agents joined via mac-mini", once per computer, rather than a line per agent.
         const via = new Map<string, number>()
         for (const m of roster) if (m.signedBy && done.resigned.includes(m.name)) via.set(m.viaName ?? "your computer", (via.get(m.viaName ?? "your computer") ?? 0) + 1)
         if (via.size) onJoined(via)
-        if (done.seated.length || done.resigned.length) await refreshRoster()
+        if (done.resigned.length) await refreshRoster()
       } catch {
         // Tried again the next time the channel opens; nothing here is urgent.
       } finally {
@@ -602,8 +600,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       online={online}
       state={state}
       now={now}
-      onApprove={async (r, scopes) => {
-        await ch.approve(r, wireScopes(scopes) ? { scopes } : undefined)
+      onApprove={async (r, scopes, seat) => {
+        await ch.approve(r, wireScopes(scopes) ? { scopes } : undefined, { seat: !!seat })
         await Promise.all([refreshRequests(), refreshRoster()])
       }}
       onScopes={async (m, scopes) => {

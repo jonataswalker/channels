@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth"
 import { noteAgentWorked, useClock } from "@/lib/channel"
 import { formatAgo, memberLine, memberName } from "@/lib/format"
 import { isSignInGone } from "@/lib/session"
-import { defaultScopes, saveDefaultScopes, ScopePicker, scopesLine } from "./scopes"
+import { defaultScopes, saveDefaultScopes, ScopePicker, scopesLine, SeatPicker } from "./scopes"
 import { Icon } from "./icon"
 import { Alert, Button, IconButton, Modal, Monogram, Tabs, TextField, errorText, toast } from "./kit"
 import { Menu, MenuItem, MenuSeparator } from "./ui/menu"
@@ -44,8 +44,8 @@ export interface ControlsProps {
   online: Map<string, unknown>
   state: ChannelState
   now: number
-  /** `scopes`: what they may do besides read; left out, everything. */
-  onApprove: (r: JoinRequest, scopes?: Scope[]) => Promise<void>
+  /** `scopes`: what they may do besides read; left out, everything. `seat`: let agents from its computer in from now on. */
+  onApprove: (r: JoinRequest, scopes?: Scope[], seat?: boolean) => Promise<void>
   onDeny: (r: JoinRequest) => Promise<void>
   /** Sign this browser's half of a request's code check, at the person's click. */
   onCheck: (r: JoinRequest) => Promise<void>
@@ -147,6 +147,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
   const [dialog, setDialog] = useState<"rename" | "charter" | "terminal" | null>(null)
   const [roleDraft, setRoleDraft] = useState({ role: "", about: "" })
   const [scopeDraft, setScopeDraft] = useState<Scope[]>([...SCOPES])
+  const [seatDraft, setSeatDraft] = useState(true)
   const active = p.roster.filter((m) => m.active)
   const taken = confirm?.kind === "approve" && active.some((m) => m.name === confirm.req.name)
   // A seat in use: seen in the last ten minutes or listening right now (the same rule as kiwi approve).
@@ -213,7 +214,10 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
     run,
     ask: (c) => {
       // Approving starts from what this browser picked for new members when inviting.
-      if (c?.kind === "approve") setScopeDraft(p.roomId ? defaultScopes(p.roomId) : [...SCOPES])
+      if (c?.kind === "approve") {
+        setScopeDraft(p.roomId ? defaultScopes(p.roomId) : [...SCOPES])
+        setSeatDraft(true)
+      }
       setConfirm(c)
     },
     openRequests: () => setSheet("requests"),
@@ -298,6 +302,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
               <span className="mt-4 mb-4 block text-[34px] leading-none font-semibold tracking-[0.04em] text-ink tabular-nums">{confirm.req.code}</span>
               <span className="mb-2 block text-ui font-medium text-ink">What {confirm.req.kind === "human" ? "they" : "it"} can do</span>
               <ScopePicker value={scopeDraft} onChange={setScopeDraft} disabled={busy} />
+              {confirm.req.computer && <SeatPicker computer={confirm.req.computer.label} value={seatDraft} onChange={setSeatDraft} disabled={busy} className="mt-3" />}
             </>
           )
         }
@@ -306,7 +311,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
           Cancel
         </Button>
         {confirm?.kind === "approve" && (
-          <Button disabled={busy || taken} onClick={() => run(() => p.onApprove(confirm.req, scopeDraft), `${confirm.req.name} joined`)}>
+          <Button disabled={busy || taken} onClick={() => run(() => p.onApprove(confirm.req, scopeDraft, seatDraft), `${confirm.req.name} joined`)}>
             {taken ? "That name is taken" : "Approve"}
           </Button>
         )}

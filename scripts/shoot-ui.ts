@@ -133,8 +133,8 @@ try {
   let opened = false
   const setup = kiwi(["setup", "--relay", BASE], (out) => {
     const link = /(http\S+#link=\S+)/.exec(out)?.[1]
-    // Linked without its exchange key, so it isn't seated: a pending request is there to shoot.
-    if (link && !opened) (opened = true), void owner.goto(link.replace(/&x=.*$/, ""))
+    // Linking seats it nowhere: a pending request is there to shoot.
+    if (link && !opened) (opened = true), void owner.goto(link)
   })
   await owner.getByRole("button", { name: "Yes, link it" }).click({ timeout: 20000 })
   await setup
@@ -151,7 +151,11 @@ try {
     if ((await banner.getAttribute("aria-expanded")) !== "true") await banner.click()
     await letIn.or(showCode).first().waitFor({ timeout: 30000 })
     if (await showCode.count()) await showCode.click()
-    await letIn.click({ timeout: 30000 })
+    await letIn.waitFor({ timeout: 30000 })
+    // Each agent asks, so each one is there to shoot: don't seat the computer.
+    const seat = needs.getByRole("checkbox", { name: /Let agents from .* in from now on/ })
+    if (await seat.count()) await seat.uncheck()
+    await letIn.click()
     await joining
   }
   await admit(["kiwi", "--as", "atlas", "--role", "backend"])

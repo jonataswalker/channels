@@ -3,50 +3,44 @@ import { useEffect, useState } from "react"
 import { machineCode } from "@mc/vouch.ts"
 import { displayName, useAuth } from "@/lib/auth"
 import { clockNow } from "@/lib/channel"
-import { computerInfo, confirmComputer, linkedXpk, myComputers, removeComputer, revokeEverywhere, seatEverywhere, type Computer, type ParsedLink } from "@/lib/computers"
+import { computerInfo, confirmComputer, myComputers, removeComputer, revokeEverywhere, type Computer, type ParsedLink } from "@/lib/computers"
 import { formatAgo } from "@/lib/format"
 import { Button, Modal, Spinner, Wordmark, errorText, toast } from "./kit"
 
 /**
  * The page `kiwi setup` opens: link that computer to the signed-in person, so
  * agents started there join as theirs. Only after they check the code matches.
- * Then it's seated in every channel they own here, so its agents come in with no code at all.
- * Opened again for a computer already linked, it only seats it (after the same code check).
+ * It isn't seated anywhere: approving its first agent in a channel can let its later ones in there.
  */
 export function LinkComputerPage({ link, onDone }: { link: ParsedLink; onDone: () => void }) {
   const pk = link.pk
   const auth = useAuth()
   const [code, setCode] = useState("")
   const [info, setInfo] = useState<{ label: string; status: string } | null>(null)
-  const [xpk, setXpk] = useState<string | null>(null)
   const [state, setState] = useState<"loading" | "ready" | "working" | "done" | "error">("loading")
-  const [seated, setSeated] = useState<number | null>(null)
   const [error, setError] = useState("")
 
   useEffect(() => {
     // The code comes from the key in this link, the same way the terminal derives it.
     void machineCode(pk).then(setCode)
-    void Promise.all([computerInfo(pk), linkedXpk(link)])
-      .then(([i, x]) => {
+    void computerInfo(pk)
+      .then((i) => {
         setInfo(i)
-        setXpk(x)
-        // Linked already, and nothing to seat: there's nothing left to do here.
-        setState(i.status === "linked" && !x ? "done" : "ready")
+        // Linked already: there's nothing left to do here.
+        setState(i.status === "linked" ? "done" : "ready")
       })
       .catch((err: unknown) => {
         setError(errorText(err))
         setState("error")
       })
-  }, [pk, link])
+  }, [pk])
 
   const confirm = async () => {
     setState("working")
     try {
       const token = await auth.token()
       if (!token) throw new Error("Sign in first.")
-      if (info?.status !== "linked") await confirmComputer(pk, token)
-      // The person just compared this computer's code here: seat it in the channels they own.
-      if (xpk) setSeated(await seatEverywhere({ pk, xpk, label: info?.label ?? "computer" }, auth.token))
+      await confirmComputer(pk, token)
       setState("done")
     } catch (err) {
       setError(errorText(err))
@@ -63,7 +57,7 @@ export function LinkComputerPage({ link, onDone }: { link: ParsedLink; onDone: (
         <div className="w-full max-w-[380px]">
           <h2 className="text-display leading-tight font-semibold tracking-[-0.02em]">Link this computer to your account?</h2>
           <p className="mt-2 text-body leading-normal text-ink-2">
-            Agents you start on <span className="font-medium text-ink">{info?.label ?? "it"}</span> will join channels as yours: yours on their own, anyone else's once its owner approves.
+            Agents you start on <span className="font-medium text-ink">{info?.label ?? "it"}</span> will ask to join channels as yours, and each channel’s owner approves them.
           </p>
           {state === "loading" && <Spinner className="mt-6" />}
           {state === "ready" && (
@@ -73,7 +67,7 @@ export function LinkComputerPage({ link, onDone }: { link: ParsedLink; onDone: (
               {auth.status === "signed-in" ? (
                 <div className="flex gap-2">
                   <Button size="lg" onClick={() => void confirm()}>
-                    {info?.status === "linked" ? "Yes, let its agents in" : "Yes, link it"}
+                    Yes, link it
                   </Button>
                   <Button size="lg" variant="secondary" onClick={onDone}>
                     Cancel
@@ -94,9 +88,7 @@ export function LinkComputerPage({ link, onDone }: { link: ParsedLink; onDone: (
             <>
               <p className="mt-6 text-body">Linked. Your terminal continues on its own; you can close this tab.</p>
               <p className="mt-2 text-ui text-ink-2">
-                {seated === null
-                  ? "Agents you start there ask to join; you approve each one."
-                  : `Agents you start there now come into ${seated === 1 ? "your channel" : `your ${seated} channels`} with no code to compare, and into each channel you open from now on. Every one shows up as joined via ${info?.label ?? "it"}.`}
+                Agents you start there ask to join, and you approve them. Approving the first one in a channel can let later agents from {info?.label ?? "it"} into that channel on their own.
               </p>
               <Button size="lg" variant="secondary" className="mt-4" onClick={onDone}>
                 Go to your channels
@@ -166,7 +158,7 @@ export function ComputersModal({ open, onClose }: { open: boolean; onClose: () =
       <div className="p-5">
         <h2 className="text-title font-semibold">Your computers</h2>
         <p className="mt-1 text-ui leading-normal text-ink-2">
-          Agents started on these come into channels you own on their own, and each shows up as joined via that computer. A computer unused for 30 days is unlinked on its own. Removing one also removes every agent it let in.
+          Where you let a computer's agents in from now on (when approving its first agent in a channel), its later agents come into that channel on their own, each shown as joined via that computer. A computer unused for 30 days is unlinked on its own. Removing one also removes every agent it let in.
         </p>
         <div className="mt-4 grid gap-1">
           {list === null && <Spinner />}

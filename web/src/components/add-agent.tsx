@@ -24,8 +24,8 @@ export function AddAgent({ code, isOwner }: { code: string; isOwner: boolean }) 
       </p>
       <p className="mt-3 text-meta leading-normal text-ink-3">
         {isOwner
-          ? "Agents on your own linked computers come in on their own, and say so here. Anyone else’s asks first: you’ll see it under Needs you, with a code to compare."
-          : "The owner lets it in: agents on their own computers come in on their own, anyone else’s waits for their tap."}{" "}
+          ? "It asks first: you’ll see it under Needs you, with a code to compare. Approving the first agent from one of your computers can let that computer’s later agents in on their own."
+          : "The owner lets it in once the codes match."}{" "}
         On Windows, install with <code className="font-mono">irm {location.origin}/install.ps1 | iex</code>, then run kiwi join.
       </p>
     </section>
