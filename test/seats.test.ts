@@ -1,7 +1,7 @@
 // Seats: which agent a command or hook acts for, with no -c/--as. Several agents can work from one
 // checkout; a session finds its own seat, a restart takes its old one back, and a second live agent
 // never acts as the first.
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -175,4 +175,43 @@ test("live listeners say who started them; an older record only who it listens a
   expect(isListening("ch", "a")).toBe(false);
   // The dead one's record is gone.
   expect(isListening("ch", "dead")).toBe(false);
+});
+
+describe("listening as someone never makes you them (review of T1571)", () => {
+  const A = { harness: "claude" as const, session: "A", pid: process.pid };
+  const B = { harness: "claude" as const, session: "B", pid: process.pid + 1 };
+  test("a session listening as a live session's agent doesn't take its seat", () => {
+    // B's harness process has to be alive for B to hold its seat: use this test's own parent.
+    const bLive = { ...B, pid: process.ppid };
+    bindDirectory(dir, { alias: "ch", as: "b", harness: "claude", session: "B", pid: process.ppid });
+    const listeners = () => [{ alias: "ch", as: "b", harness: "claude" as const, session: "A", pid: process.pid, cwd: dir }];
+    expect(bindingFor(dir, { who: A, listeners })).toBeNull();
+    expect(bindingFor(dir, { who: bLive, listeners })?.as).toBe("b");
+    expect(seatsAt(loadConfig(), dir)).toEqual([expect.objectContaining({ as: "b", session: "B" })]);
+  });
+  test("a session with a seat of its own stays itself, from a subfolder or in another channel", () => {
+    bindDirectory(dir, { alias: "ch", as: "a", harness: "claude", session: "A", pid: process.pid });
+    const sub = join(dir, "sub");
+    mkdirSync(sub);
+    const listeners = () => [{ alias: "ch", as: "b", session: "A", pid: process.pid, cwd: sub }];
+    expect(bindingFor(sub, { who: A, listeners })?.as).toBe("a");
+    // Its seat is in "ch"; listening as someone in "other" doesn't make it them there either.
+    const elsewhere = () => [{ alias: "other", as: "b", session: "A", pid: process.pid, cwd: dir }];
+    expect(bindingFor(dir, { who: A, alias: "other", listeners: elsewhere })).toBeNull();
+  });
+  test("a session listening as an agent someone else also listens as doesn't become it", () => {
+    bindDirectory(dir, { alias: "ch", as: "muse", plain: true });
+    const listeners = () => [
+      { alias: "ch", as: "muse", session: "A", pid: process.pid, cwd: dir },
+      { alias: "ch", as: "muse", cwd: dir },
+    ];
+    expect(bindingFor(dir, { who: A, listeners })).toBeNull();
+  });
+  test("a plain-terminal agent keeps its seat while it listens, beside a live session", () => {
+    bindDirectory(dir, { alias: "ch", as: "claude", harness: "claude", session: "B", pid: process.ppid });
+    bindDirectory(dir, { alias: "ch", as: "muse", plain: true });
+    const listeners = () => [{ alias: "ch", as: "muse", cwd: dir }];
+    expect(bindingFor(dir, { who: {}, listeners })?.as).toBe("muse");
+    expect(bindingFor(dir, { who: { harness: "gemini" }, listeners })?.as).toBe("muse");
+  });
 });

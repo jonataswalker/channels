@@ -157,6 +157,15 @@ export function bindingFor(dir: string, opts: SeatOptions = {}): Binding | null 
   // A listener this very session started (its session, or its harness's process).
   const ours = (l: Listener) => (!!who.session && l.session === who.session) || (!!who.pid && l.pid === who.pid);
   const cfg = loadConfig();
+  // Every seat from here up, whoever holds it.
+  const above: Binding[] = [];
+  for (let d = resolve(dir); !tooBroad(d); d = dirname(d)) above.push(...seatsAt(cfg, d).filter((b) => cfg.channels[b.alias]));
+  // A listener says who this session is only when it has no seat of its own anywhere up the tree (in any
+  // channel), and when nobody else live holds that agent's seat: listening as someone never makes you them.
+  const heardOk = (l: Listener) =>
+    !above.some((b) => !!who.session && b.session === who.session) &&
+    !above.some((b) => b.alias === l.alias && b.as === l.as && heldElsewhere(b, who, listening)) &&
+    !live.some((o) => o.alias === l.alias && o.as === l.as && !ours(o));
   for (let d = resolve(dir); !tooBroad(d); d = dirname(d)) {
     const seats = seatsAt(cfg, d).filter((b) => cfg.channels[b.alias] && (!opts.alias || b.alias === opts.alias));
     const mine = who.session ? seats.find((b) => b.session === who.session) : undefined;
@@ -169,7 +178,8 @@ export function bindingFor(dir: string, opts: SeatOptions = {}): Binding | null 
     }
     // This session listens as an agent from here: that's who it is, even when its seat was lost (a later join
     // from a plain terminal replaced it). It gets its seat back, beside the others.
-    const heard = live.find((l) => ours(l) && !!l.cwd && within(l.cwd, d) && cfg.channels[l.alias] && (!opts.alias || l.alias === opts.alias));
+    // Recorded where the listener runs, never deeper (the first level up from here that holds its folder).
+    const heard = live.find((l) => ours(l) && !!l.cwd && within(l.cwd, d) && cfg.channels[l.alias] && (!opts.alias || l.alias === opts.alias) && heardOk(l));
     if (heard) {
       const seat: Binding = {
         alias: heard.alias,
@@ -190,7 +200,8 @@ export function bindingFor(dir: string, opts: SeatOptions = {}): Binding | null 
     // (or one side doesn't say), and a session never takes over a seat joined from a plain terminal.
     const listenedElsewhere = (b: Binding) => live.some((l) => l.alias === b.alias && l.as === b.as && !ours(l));
     const free = seats.filter(
-      (b) => !heldElsewhere(b, who, listening) && !(!b.session && listenedElsewhere(b)) && !(b.plain && who.session) && (!b.harness || !who.harness || b.harness === who.harness),
+      // (Only a session asks whether someone else listens: a plain terminal can't tell its own listener from another's.)
+      (b) => !heldElsewhere(b, who, listening) && !(who.session && !b.session && listenedElsewhere(b)) && !(b.plain && who.session) && (!b.harness || !who.harness || b.harness === who.harness),
     );
     // Several free seats: the one of this session's harness, when there's exactly one; otherwise it would be guessing.
     const ofMine = free.filter((b) => who.harness && b.harness === who.harness);
