@@ -5,7 +5,6 @@ import "./index.css"
 import App from "./App.tsx"
 import { Boundary } from "@/components/kit"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { AuthProvider } from "@/lib/auth"
 import { noteSignInGone } from "@/lib/session"
 import { applyStoredAppearance } from "@/lib/theme"
 import { initAccessibility } from "@/lib/accessibility"
@@ -21,11 +20,9 @@ window.addEventListener("unhandledrejection", (e) => {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Boundary whole>
-      <AuthProvider>
-        <TooltipProvider delay={500}>
-          <App />
-        </TooltipProvider>
-      </AuthProvider>
+      <TooltipProvider delay={500}>
+        <App />
+      </TooltipProvider>
     </Boundary>
   </StrictMode>
 )
