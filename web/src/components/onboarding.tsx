@@ -345,9 +345,7 @@ function AskToJoin({ code, listed, onAsked, onCancel }: { code: string; listed?:
 
   const owner = invite.ownerName
   const intro =
-    listed?.state === "elsewhere"
-      ? { title: "Ask to join from here", text: "The owner lets this app in as you, like any new member." }
-      : listed?.state === "agents"
+    listed?.state === "agents"
         ? { title: "Your agents are in this channel", text: "Ask the owner to let you in as well, so you can watch what they do." }
         : { title: owner ? `${owner} invited you to a channel` : "You’re invited to a channel", text: null }
 
