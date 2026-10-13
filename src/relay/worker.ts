@@ -10,7 +10,6 @@ import * as Layer from "effect/Layer";
 import { CLOSE_CLOSED, CLOSE_REMOVED, PING, PONG } from "../protocol.ts";
 import { ChannelGone, NotFound, Refused, UpdateRequired } from "./failures.ts";
 import { Human, workosHumanAuth, workosProfiles, type HumanAuth } from "./human.ts";
-import { Machines } from "./machines.ts";
 import { Policy, policyFrom, type RelayPolicy } from "./policy.ts";
 import {
   Directory as ChannelLists, // the service; the Durable Object below counts owned channels instead
@@ -45,7 +44,7 @@ interface Env {
   WORKOS_CLIENT_ID?: string;
   /** The AuthKit domain (https://….authkit.app), whose keys may also sign tokens. */
   WORKOS_AUTHKIT_DOMAIN?: string;
-  /** Secret: unused since 0.11 (the relay no longer names the owner from sign-in). */
+  /** Secret, optional: lets the beta list match people by email (the relay never names owners from it). */
   WORKOS_API_KEY?: string;
   /** 20 mailbox writes per minute per client address (pairing codes are pasted by hand). */
   MAILBOX_WRITES: RateLimit;
@@ -77,22 +76,6 @@ function owned(env: Env): (user: string) => Promise<DirectoryEntry[]> {
   return peopleOf.list;
 }
 
-/** A stub where the Machines service was: the machine routes are gone, so nothing reads it. */
-const noMachines = {
-  get: async () => {
-    throw new Error("machine links are gone in 0.11");
-  },
-  put: async () => {
-    throw new Error("machine links are gone in 0.11");
-  },
-  remove: async () => {
-    throw new Error("machine links are gone in 0.11");
-  },
-  listFor: async () => {
-    throw new Error("machine links are gone in 0.11");
-  },
-};
-
 export class Channel extends DurableObject<Env> {
   private readonly sql: Sql;
   private readonly policy: RelayPolicy;
@@ -111,7 +94,6 @@ export class Channel extends DurableObject<Env> {
         Layer.succeed(Human, human(env)),
         Layer.succeed(Policy, this.policy),
         Layer.succeed(ChannelLists, { list: (user: string) => owned(env)(user) }),
-        Layer.succeed(Machines, noMachines),
       ),
     );
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING, PONG));

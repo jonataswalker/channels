@@ -102,13 +102,6 @@ export interface DirectoryEntry {
   at: number;
 }
 
-/** One channel's use of its quotas. */
-export interface RoomUsage {
-  messagesToday: number;
-  bytes: number;
-  members: number;
-}
-
 export interface DirectoryUpdate {
   user: string;
   room: string;
@@ -533,12 +526,6 @@ export const idleExpired: Effect.Effect<boolean, never, RoomServices> = Effect.g
 /** Expire exactly as a close would: off everyone's channel list, then every row gone. */
 export const expire: Effect.Effect<Effects, never, RoomStore> = Effect.map(RoomStore, (db) => ({ directory: db.unlinkAll(), wipe: true }));
 
-/** What this channel uses, for its owner's usage page. Counts only: nothing sealed. */
-export const usage: Effect.Effect<RoomUsage, never, RoomStore> = Effect.gen(function* () {
-  const db = yield* RoomStore;
-  return { messagesToday: db.messagesOn(yield* Clock.currentTimeMillis), bytes: db.storedBytes(), members: db.activeMembers() };
-});
-
 // ---------- lifecycle ----------
 
 /**
@@ -689,12 +676,12 @@ export const requestStatus = Effect.fn("Room.requestStatus")(function* (id: stri
   db.migrate();
   const r = db.sql.all<{ pk: string; status: string; owner_nonce: string | null; reveal: string | null }>("SELECT pk, status, owner_nonce, reveal FROM requests WHERE id = ?", id)[0];
   if (!r || r.pk !== pk) return yield* new NotFound({ message: "no such request" });
-  if (r.status === "pending") return { status: r.status, sponsored: false, ownerNonce: r.owner_nonce, revealed: !!r.reveal } satisfies RequestStatus;
-  if (r.status !== "approved" || !db.isMember(pk)) return { status: r.status, sponsored: false } satisfies RequestStatus;
-  return { status: "approved", sponsored: false, ...(yield* keysFor(pk)) } satisfies RequestStatus;
+  if (r.status === "pending") return { status: r.status, ownerNonce: r.owner_nonce, revealed: !!r.reveal } satisfies RequestStatus;
+  if (r.status !== "approved" || !db.isMember(pk)) return { status: r.status } satisfies RequestStatus;
+  return { status: "approved", ...(yield* keysFor(pk)) } satisfies RequestStatus;
 });
 
-type RequestStatus = { status: string; sponsored: boolean; ownerNonce?: string | null; revealed?: boolean; epoch?: number; keys?: Record<string, string> };
+type RequestStatus = { status: string; ownerNonce?: string | null; revealed?: boolean; epoch?: number; keys?: Record<string, string> };
 
 const pendingCheck = Effect.fn("Room.pendingCheck")(function* (id: string) {
   const db = yield* RoomStore;
@@ -964,24 +951,7 @@ export function parseRoomPath(pathname: string): { roomId: string; rest: string 
 
 export { CLOSE_CLOSED, CLOSE_REMOVED };
 
-/** A channel's newest message: its seq, and when it arrived. */
-export interface RoomHead {
-  head: number;
-  last: number;
-}
-
-/**
- * A channel's newest message, read without a RoomDb: no migration, nothing written, and a
- * channel with no tables (closed, or never made here) is null rather than a new empty room.
- */
-export function readHead(sql: Sql): RoomHead | null {
-  if (!sql.all("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'").length) return null;
-  if (!sql.all("SELECT 1 FROM meta WHERE k = 'owner_pk'").length) return null;
-  const top = sql.all<{ seq: number; ts: number }>("SELECT seq, ts FROM msgs ORDER BY seq DESC LIMIT 1")[0];
-  return { head: top?.seq ?? 0, last: top?.ts ?? 0 };
-}
-
-/** Relay-wide settings the web app needs: which WorkOS client to sign in with, if any. */
+/** Relay-wide settings the app needs: which WorkOS client to sign in with (to create), if any. Shape: { workosClientId, dev? }. */
 export function relayConfig(human: HumanAuth | null): Response {
   return Response.json({ workosClientId: human?.clientId ?? null, ...(human?.dev ? { dev: true } : {}) });
 }

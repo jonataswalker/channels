@@ -19,7 +19,6 @@ import { PAGE_LIMIT } from "../protocol.ts";
 import { ChannelGone, BadRequest, Forbidden, NotFound, NotOwner, SignInRequired, TooMany, Unauthorized, UpdateRequired, type Refusal } from "./failures.ts";
 import { answer, buildContext, describeRoutes, dispatch, incoming, json, Request_, type Route } from "./http.ts";
 import { Human, HUMAN_HEADER } from "./human.ts";
-import { Machines } from "./machines.ts";
 import { betaMessage, inBeta, Policy } from "./policy.ts";
 import {
   allow,
@@ -65,7 +64,7 @@ import {
 // ---------- the relay's services ----------
 
 /** What a relay runs its rooms with, from its adapter. */
-export type RelayServices = Human | Policy | Directory | Machines;
+export type RelayServices = Human | Policy | Directory;
 
 /** The relay's services, built once from the adapter's Layer. */
 export type Relay = Context.Context<RelayServices>;
@@ -104,7 +103,7 @@ const signedIn = Effect.gen(function* () {
   const { req } = yield* Request_;
   if (!human) return null;
   const user = yield* Effect.promise(() => human.verify(req.headers.get(HUMAN_HEADER) ?? ""));
-  if (!user) return yield* new SignInRequired({ message: "sign in required: channels on this relay are owned and run by a signed-in human (use the dashboard)" });
+  if (!user) return yield* new SignInRequired({ message: "sign in required: channels on this relay are owned and run by a signed-in human (sign in from the Kiwi app)" });
   return user;
 });
 
@@ -210,7 +209,7 @@ const routes: RoomRoute[] = [
     guard: "joiner",
     run: () =>
       Effect.gen(function* () {
-        const b = yield* json<RequestBody & { machine?: unknown }>();
+        const b = yield* json<RequestBody>();
         const { id, fresh } = yield* request(b);
         return { data: { id }, fx: fresh ? { broadcast: [frame({ t: "request" })] } : undefined };
       }),
