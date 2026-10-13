@@ -26,6 +26,7 @@ import { forgetHistory, readCached, rememberMessage } from "./history"
 import { wholeLog } from "./history-plan"
 import { ICON_LIVE } from "./icon-event"
 import { addMarks, type Marks } from "./receipts"
+import { personClaimFor } from "./person-claim"
 import { fork, run } from "./runtime"
 import { bridge, saveChannels, secrets, type ChannelIdentityView } from "./secrets"
 import { noteSignInGone } from "./session"
@@ -496,7 +497,10 @@ export async function inviteInfo(code: string): Promise<{ ownerName: string | nu
 export async function askToJoin(code: string, name: string, role?: string): Promise<PendingJoin> {
   const prior = loadPending(code)
   const identity = prior && prior.identity.name === name ? prior.identity : await generateIdentity(name)
-  const r = await Channel.requestJoin(relayUrl(), code, identity, { name, ...(role ? { role } : {}) })
+  // A person says which person key is theirs, so the owner can sign it into their record and recognise their computers.
+  const person = secrets().person
+  const claims = person ? { person: await personClaimFor(person, code, identity.pk) } : undefined
+  const r = await Channel.requestJoin(relayUrl(), code, identity, { name, ...(role ? { role } : {}) }, claims)
   const p: PendingJoin = { code, identity, requestId: r.requestId }
   savePending(p)
   return p
