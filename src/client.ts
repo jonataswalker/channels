@@ -37,7 +37,6 @@ import {
 } from "./crypto.ts";
 import { sign, signText, verify, verifyText, type Identity } from "./identity.ts";
 import { commitTo, joinCheckCode, joinNonce, ownerNonceStatement, spendAuto, type SigningBudget } from "./sas.ts";
-import type { PairRow } from "./pair.ts";
 import { canPost, scopesOf, wireScopes, type Scope } from "./scopes.ts";
 import { COORDINATOR, type ChannelState, type GuardFloor } from "./state.ts";
 import { freeAgentName, inlineText, makeRecord, NAME_RE, nameKey, readRecord, RESERVED_NAMES, sealRecord, verifiedComputer, verifiedPerson, type JoinClaims, type JoinRequest, type Member, type MemberInfo } from "./membership.ts";
@@ -161,10 +160,8 @@ export interface CallInit {
 export interface RelayApi {
   /** A channel's route, signed when `init.identity` is given. A refusal is a RelayError with the relay's own text. */
   readonly call: <T>(relay: string, roomId: string, path: string, init?: CallInit, params?: Record<string, string | number>) => Effect.Effect<T, Refusal>;
-  /** A signed-in person's route (/v1/me/…). */
-  readonly person: <T>(relay: string, path: string, human: string) => Effect.Effect<T, Refusal>;
-  /** Whether a relay requires a signed-in human, and with which WorkOS client. */
-  readonly config: (relay: string) => Effect.Effect<{ workosClientId: string | null }, Unreachable>;
+  /** Whether a relay requires a signed-in human to create channels, and with which WorkOS client. */
+  readonly config: (relay: string) => Effect.Effect<RelayConfig, Unreachable>;
 }
 
 /** The relay, as the client talks to it. `fetchRelay` is HTTP; a test or another transport provides its own. */
@@ -205,11 +202,9 @@ export const fetchRelay: RelayApi = {
       // once. The relay refused before doing anything, so even a write is safe to send twice.
       return Effect.retry(once, { times: 1, while: (err) => !!identity && expired(err) });
     }),
-  person: <T>(relay: string, path: string, human: string) =>
-    Effect.suspend(() => reach(new URL(path, relay), { headers: { "x-human-token": human } })).pipe(Effect.flatMap((res) => answered<T>(res))),
   config: (relay) =>
     Effect.suspend(() => reach(new URL("/v1/config", relay), {})).pipe(
-      Effect.flatMap((res) => (res.ok ? Effect.promise(() => res.json() as Promise<{ workosClientId: string | null }>) : Effect.succeed({ workosClientId: null }))),
+      Effect.flatMap((res) => (res.ok ? Effect.promise(() => res.json() as Promise<RelayConfig>) : Effect.succeed({ workosClientId: null }))),
     ),
 };
 
@@ -513,9 +508,9 @@ async function unwrapKeys(
 
 /** Where a join request stands, as joinStatus answers it. */
 export type JoinStatus =
-  | { status: "pending"; sponsored: boolean; code: string | null }
-  | { status: "denied"; sponsored: boolean }
-  | { status: "approved"; sponsored: boolean; access: ChannelAccess };
+  | { status: "pending"; code: string | null }
+  | { status: "denied" }
+  | { status: "approved"; access: ChannelAccess };
 
 /** A member list entry as the relay sends it. */
 type MemberRow = { pk: string; xpk: string; rec: string; e: number; active: number; read_only?: number };
@@ -558,7 +553,7 @@ export interface ChannelFx {
   leave(): Effect.Effect<void, MemberRefusal, Relay>;
   requests(opts?: { budget?: SigningBudget; person?: string }): Effect.Effect<JoinRequest[], Refused, Relay>;
   checkRequest(req: Pick<JoinRequest, "id" | "pk" | "commit">): Effect.Effect<void, Refused, Relay>;
-  approve(req: JoinRequest, as?: Partial<MemberInfo>, opts?: { seat?: boolean; person?: string }): Effect.Effect<Member, Refused, Relay>;
+  approve(req: JoinRequest, as?: Partial<MemberInfo>, opts?: { person?: string }): Effect.Effect<Member, Refused, Relay>;
   /**
    * The app's background approval: given the owner's person key, sign the check for every request
    * from the owner's own computers without spending the daily budget, and approve each one whose
@@ -571,36 +566,6 @@ export interface ChannelFx {
   updateRole(m: Member, role: string | null, about: string | null | undefined, since: number): Effect.Effect<void, Refused, Relay>;
   reconcilePosting(state: Pick<ChannelState, "members" | "scopeSets" | "roleSets">, members?: Member[]): Effect.Effect<string[], Refused, Relay>;
   remove(pk: string): Effect.Effect<void, Refused, Relay>;
-  /**
-   * Seats are gone in 0.11: a computer's agents join with requests like everyone else. These stay
-   * so older callers still compile, and fail when called.
-   *
-   * @deprecated
-   */
-  seatComputer(c: { pk: string; xpk: string; label: string }, until?: number): Effect.Effect<Member, Refused, Relay>;
-  /** @deprecated Seats are gone in 0.11. */
-  renewSeat(seat: Member, until?: number): Effect.Effect<void, Refused, Relay>;
-  /** @deprecated Seats are gone in 0.11. */
-  resignAdmitted(m: Member): Effect.Effect<void, Refused, Relay>;
-  /** @deprecated Seats are gone in 0.11: remove a computer's agents with remove() instead. */
-  revokeComputer(pk: string): Effect.Effect<string[], Refused, Relay>;
-  /** @deprecated Seats are gone in 0.11. */
-  tendSeats(): Effect.Effect<{ renewed: string[]; resigned: string[] }, Refused, Relay>;
-  /** @deprecated Seats are gone in 0.11. */
-  admit(agent: { pk: string; xpk: string; name: string; about?: string }): Effect.Effect<{ name: string; access: ChannelAccess }, Refused, Relay>;
-  /**
-   * Pairing a terminal moved to the pairing mailbox (src/mailbox.ts); the room's pairing slots are
-   * gone. These stay so older callers still compile, and fail when called.
-   *
-   * @deprecated
-   */
-  pairSlot(): Effect.Effect<string, Refused, Relay>;
-  /** @deprecated Room pairing slots are gone in 0.11. */
-  pairs(slot: string): Effect.Effect<PairRow[], Refused, Relay>;
-  /** @deprecated Room pairing slots are gone in 0.11. */
-  pairOpen(pairId: string, nonce: string, slot: string): Effect.Effect<string, Refused, Relay>;
-  /** @deprecated Room pairing slots are gone in 0.11. */
-  pairAnswer(p: PairRow, seat: Identity, slot: string): Effect.Effect<void, Refused, Relay>;
   /** Owner, right after making a channel: start it in coordinator mode (an owner-signed mode.set, and the settings). */
   startCoordinated(): Effect.Effect<void, Refused, Relay>;
   rotate(): Effect.Effect<number, Refused, Relay>;
@@ -741,27 +706,26 @@ export class Channel {
     /** Check a join request. Once approved, returns this member's access. */
     joinStatus: Effect.fn("Channel.joinStatus")(function* (relay: string, code: string, id: Identity, requestId: string): Effect.fn.Return<JoinStatus, Refusal, Relay> {
       const { roomId, info, signedKeys } = yield* pinnedInfo(relay, code);
-      const r = yield* callRelay<{ status: string; sponsored?: boolean; ownerNonce?: string | null; revealed?: boolean; epoch?: number; keys?: Record<string, string> }>(
+      const r = yield* callRelay<{ status: string; ownerNonce?: string | null; revealed?: boolean; epoch?: number; keys?: Record<string, string> }>(
         relay,
         roomId,
         `/requests/${requestId}`,
         { identity: id },
       );
-      const sponsored = !!r.sponsored;
-      if (r.status === "denied") return { status: "denied", sponsored };
+      if (r.status === "denied") return { status: "denied" };
       if (r.status !== "approved") {
         // The code exists once the owner has signed its half; then this side reveals its own.
         const ownerNonce = r.ownerNonce;
-        if (!ownerNonce) return { status: "pending", sponsored, code: null };
+        if (!ownerNonce) return { status: "pending", code: null };
         const nonce = yield* Effect.promise(() => joinNonce(id, roomId));
         if (!(yield* Effect.promise(async () => verifyText(info.ownerPk, ownerNonce, ownerNonceStatement(roomId, id.pk, await commitTo(roomId, id.pk, nonce)))))) {
           throw new Error("the relay passed on an owner signature that doesn't check out: don't let the owner approve this request, and tell them");
         }
         if (!r.revealed) yield* callRelay(relay, roomId, `/requests/${requestId}/reveal`, { method: "POST", identity: id, body: JSON.stringify({ nonce }) });
-        return { status: "pending", sponsored, code: yield* Effect.promise(() => joinCheckCode(roomId, id.pk, ownerNonce, nonce)) };
+        return { status: "pending", code: yield* Effect.promise(() => joinCheckCode(roomId, id.pk, ownerNonce, nonce)) };
       }
       const keys = yield* Effect.promise(() => unwrapKeys(id, roomId, r.keys ?? {}, info.ownerPk, signedKeys));
-      return { status: "approved", sponsored, access: { roomId, ownerPk: info.ownerPk, ownerXpk: info.ownerXpk, epoch: r.epoch ?? 0, keys, signedKeys } };
+      return { status: "approved", access: { roomId, ownerPk: info.ownerPk, ownerXpk: info.ownerXpk, epoch: r.epoch ?? 0, keys, signedKeys } };
     }),
 
     /**
@@ -777,25 +741,6 @@ export class Channel {
       return access;
     }),
 
-    /**
-     * Pairing a terminal moved to the pairing mailbox (src/mailbox.ts). Kept so older callers
-     * still compile; fails when called.
-     *
-     * @deprecated
-     */
-    pairAsk: Effect.fn("Channel.pairAsk")(function* (_relay: string, _code: string, _id: Identity, _nonce: string, _slot: string, _label?: string) {
-      return yield* new Rejected("room pairing slots are gone in 0.11: pair the computer with the app instead");
-    }),
-
-    /**
-     * Pairing a terminal moved to the pairing mailbox (src/mailbox.ts). Kept so older callers
-     * still compile; fails when called.
-     *
-     * @deprecated
-     */
-    pairCheck: Effect.fn("Channel.pairCheck")(function* (_relay: string, _code: string, _id: Identity, _pairId: string, _nonce: string, _pinned: string | null) {
-      return yield* new Rejected("room pairing slots are gone in 0.11: pair the computer with the app instead");
-    }),
   };
 
   readonly fx: ChannelFx = {
@@ -1025,7 +970,7 @@ export class Channel {
       yield* this.signHalf(req.id, ownerNonceStatement(this.roomId, req.pk, req.commit));
     }),
 
-    approve: Effect.fn("Channel.approve")({ self: this }, function* (this: Channel, req: JoinRequest, as?: Partial<MemberInfo>, opts: { seat?: boolean; person?: string } = {}) {
+    approve: Effect.fn("Channel.approve")({ self: this }, function* (this: Channel, req: JoinRequest, as?: Partial<MemberInfo>, opts: { person?: string } = {}) {
       yield* this.ownerOnly();
       if (req.check !== "ready" || !req.code) return yield* new Rejected(`${req.name} hasn't shown its code yet: approve once you've both seen the same 6 digits`);
       const kind = req.kind ?? "agent";
@@ -1161,51 +1106,6 @@ export class Channel {
       yield* this.ownerOnly();
       yield* this.request(`/members/${pk}`, { method: "DELETE" });
       yield* this.fx.rotate();
-    }),
-
-    seatComputer: Effect.fn("Channel.seatComputer")({ self: this }, function* (this: Channel, _c: { pk: string; xpk: string; label: string }, _until?: number) {
-      yield* this.ownerOnly();
-      return yield* new Rejected("computer seats are gone in 0.11: approve the agent's request instead");
-    }),
-
-    renewSeat: Effect.fn("Channel.renewSeat")({ self: this }, function* (this: Channel, _seat: Member, _until?: number) {
-      yield* this.ownerOnly();
-      return yield* new Rejected("computer seats are gone in 0.11");
-    }),
-
-    resignAdmitted: Effect.fn("Channel.resignAdmitted")({ self: this }, function* (this: Channel, _m: Member) {
-      yield* this.ownerOnly();
-      return yield* new Rejected("computer seats are gone in 0.11");
-    }),
-
-    revokeComputer: Effect.fn("Channel.revokeComputer")({ self: this }, function* (this: Channel, _pk: string) {
-      yield* this.ownerOnly();
-      return yield* new Rejected("computer seats are gone in 0.11: remove the computer's agents with remove() instead");
-    }),
-
-    tendSeats: Effect.fn("Channel.tendSeats")({ self: this }, function* (this: Channel) {
-      yield* this.ownerOnly();
-      return yield* new Rejected("computer seats are gone in 0.11");
-    }),
-
-    admit: Effect.fn("Channel.admit")({ self: this }, function* (_agent: { pk: string; xpk: string; name: string; about?: string }) {
-      return yield* new Rejected("computer seats are gone in 0.11: this computer has no seat in this channel");
-    }),
-
-    pairSlot: Effect.fn("Channel.pairSlot")({ self: this }, function* () {
-      return yield* new Rejected("room pairing slots are gone in 0.11: pair the computer with the app instead");
-    }),
-
-    pairs: Effect.fn("Channel.pairs")({ self: this }, function* (_slot: string) {
-      return yield* new Rejected("room pairing slots are gone in 0.11: pair the computer with the app instead");
-    }),
-
-    pairOpen: Effect.fn("Channel.pairOpen")({ self: this }, function* (_pairId: string, _nonce: string, _slot: string) {
-      return yield* new Rejected("room pairing slots are gone in 0.11: pair the computer with the app instead");
-    }),
-
-    pairAnswer: Effect.fn("Channel.pairAnswer")({ self: this }, function* (_p: PairRow, _seat: Identity, _slot: string) {
-      return yield* new Rejected("room pairing slots are gone in 0.11: pair the computer with the app instead");
     }),
 
     rotate: Effect.fn("Channel.rotate")({ self: this }, function* (this: Channel) {
@@ -1768,7 +1668,7 @@ export class Channel {
   }
 
   /** Admit a requester: sign its record, and wrap every epoch key to it. */
-  approve(req: JoinRequest, as?: Partial<MemberInfo>, opts?: { seat?: boolean; person?: string }): Promise<Member> {
+  approve(req: JoinRequest, as?: Partial<MemberInfo>, opts?: { person?: string }): Promise<Member> {
     return run(this.fx.approve(req, as, opts));
   }
 
@@ -1824,46 +1724,6 @@ export class Channel {
 
   startCoordinated(): Promise<void> {
     return run(this.fx.startCoordinated());
-  }
-
-  pairSlot(): Promise<string> {
-    return run(this.fx.pairSlot());
-  }
-
-  pairs(slot: string): Promise<PairRow[]> {
-    return run(this.fx.pairs(slot));
-  }
-
-  pairOpen(pairId: string, nonce: string, slot: string): Promise<string> {
-    return run(this.fx.pairOpen(pairId, nonce, slot));
-  }
-
-  pairAnswer(p: PairRow, seat: Identity, slot: string): Promise<void> {
-    return run(this.fx.pairAnswer(p, seat, slot));
-  }
-
-  seatComputer(c: { pk: string; xpk: string; label: string }, until?: number): Promise<Member> {
-    return run(this.fx.seatComputer(c, until));
-  }
-
-  admit(agent: { pk: string; xpk: string; name: string; about?: string }): Promise<{ name: string; access: ChannelAccess }> {
-    return run(this.fx.admit(agent));
-  }
-
-  renewSeat(seat: Member, until?: number): Promise<void> {
-    return run(this.fx.renewSeat(seat, until));
-  }
-
-  resignAdmitted(m: Member): Promise<void> {
-    return run(this.fx.resignAdmitted(m));
-  }
-
-  revokeComputer(pk: string): Promise<string[]> {
-    return run(this.fx.revokeComputer(pk));
-  }
-
-  tendSeats(): Promise<{ renewed: string[]; resigned: string[] }> {
-    return run(this.fx.tendSeats());
   }
 
   /** New channel key, wrapped to every remaining member. */
@@ -1949,49 +1809,20 @@ export function isDirectedAt(m: Message, agent: string): boolean {
 
 export { encodeJoinCode };
 
-/** A signed-in person's tie to a channel: they own it, are in it, and/or have agents in it. */
-export interface MyChannel {
-  room: string;
-  code: string;
-  owner: boolean;
-  member: boolean;
-  agents: number;
-  at: number;
-  /** The channel's newest seq, when the relay read it (recently active channels, newest first, up to 50). */
-  head?: number;
+/** Relay-wide settings: which WorkOS client signs people in to create channels (null: no sign-in), and whether it's dev sign-in. */
+export interface RelayConfig {
+  workosClientId: string | null;
+  dev?: boolean;
 }
 
-/** What a signed-in person uses of a relay's limits (null limits are unlimited). */
-export interface MyUsage {
-  limits: { channelsPerOwner: number | null; membersPerChannel: number | null; messagesPerDay: number | null; bytesPerChannel: number; expireAfterDays: number | null };
-  owned: number;
-  channels: { room: string; code: string; messagesToday: number; bytes: number; members: number }[];
-}
-
-/** The Effects behind myChannels, myUsage and relayConfig. */
+/** The Effect behind relayConfig. */
 export const fx = {
-  myChannels: Effect.fn("myChannels")(function* (relay: string, human: string) {
-    const json = yield* (yield* Relay).person<{ channels?: MyChannel[] }>(relay, "/v1/me/channels", human);
-    return json.channels ?? [];
-  }),
-  myUsage: Effect.fn("myUsage")(function* (relay: string, human: string) {
-    return yield* (yield* Relay).person<MyUsage>(relay, "/v1/me/usage", human);
-  }),
   relayConfig: Effect.fn("relayConfig")(function* (relay: string) {
     return yield* (yield* Relay).config(relay);
   }),
 };
 
-/** Every channel the signed-in person owns, is in, or has agents in, across all their devices. */
-export function myChannels(relay: string, human: string): Promise<MyChannel[]> {
-  return run(fx.myChannels(relay, human));
-}
-
-export function myUsage(relay: string, human: string): Promise<MyUsage> {
-  return run(fx.myUsage(relay, human));
-}
-
-/** Whether a relay requires a signed-in human to create and run channels, and with which WorkOS client. */
-export function relayConfig(relay: string): Promise<{ workosClientId: string | null }> {
+/** Whether a relay requires a signed-in human to create channels, and with which WorkOS client. */
+export function relayConfig(relay: string): Promise<RelayConfig> {
   return run(fx.relayConfig(relay));
 }

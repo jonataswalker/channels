@@ -17,7 +17,7 @@ import { parseArgs } from "node:util";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join as joinPath, join } from "node:path";
 import { existsSync } from "node:fs";
-import { homedir, hostname, userInfo } from "node:os";
+import { homedir } from "node:os";
 import { AgentLive, openPersonSession, openSession, type Agent, type AgentSession, type Delivery } from "../agent.ts";
 import { loadImages, saveImages } from "../attach.ts";
 import { Channel, ChannelGone, fx as relayFx, reason, RelayError } from "../client.ts";
@@ -28,13 +28,12 @@ import { describeMember, freeAgentName, handleFor, type JoinRequest } from "../m
 import { baseName, here, seatsNear } from "../seats.ts";
 import { ago, cardLine, charterLines, describeEvent, holdLine, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, stateWord, taskStateWord, statusJson } from "../format.ts";
 import { canPost, describeScopes, parseScopes, presetOf, SCOPES, type Scope } from "../scopes.ts";
-import { fingerprint, generateIdentity, type Identity } from "../identity.ts";
-import { PAIR_TTL_MS, pairNonce } from "../pair.ts";
+import { fingerprint, type Identity } from "../identity.ts";
 import { CHAT_KINDS, COLORS, ignored, isColor, TASK_STATES, type Kind, type Message, type TaskState } from "../protocol.ts";
 import { chooseThread, COORDINATOR, humanOf, parseTaskId, similarOpenTasks, taskId, wentTo, type ChannelState } from "../state.ts";
 import { VERSION } from "../version.ts";
 import { channelFiles, runSh, sessionViews } from "../sh.ts";
-import { computerOffer, forgetMachine, linkUrl, loadMachine, machineCode, machineFx, newMachine, saveMachine, vouchFor, type MachineFile } from "../machine.ts";
+import { forgetMachine, linkUrl, loadMachine, machineCode, machineFx, newMachine, saveMachine, vouchFor } from "../machine.ts";
 import { briefText, COMMANDS } from "../brief.ts";
 import { autoInstallExtraHooks, autoInstallHooks, bindDirectory, bindingFor, EXTRA_HARNESSES, extraInstalled, hooksInstalled, hooksListen, hooksStatus, installDetected, installExtra, installHooks, mcFor, runHook, uninstallDetected, uninstallExtra, uninstallHooks, type ExtraHarness } from "../hooks.ts";
 import { BadName } from "../refusals.ts";
@@ -336,23 +335,6 @@ const admitLocally = Effect.fn("kiwi.admitLocally")(function* (code: string, rel
 });
 
 /**
- * Let this agent in through this computer's seat, when its person seated it in the channel: the
- * computer signs the agent in itself, with no request and no code (see Channel.admit). Null when this
- * computer has no seat there; a refusal (the channel is on hold) says why, and the join asks instead.
- */
-const admitHere = Effect.fn("kiwi.admitHere")(function* (code: string, relay: string, m: MachineFile, id: Identity, name: string, about?: string) {
-  const seatAccess = yield* Channel.fx.resume(relay, code, m.identity).pipe(Effect.catchCause(() => Effect.succeed(null)));
-  if (!seatAccess || !id.xpk) return null;
-  return yield* new Channel(seatAccess, relay, m.identity).fx.admit({ pk: id.pk, xpk: id.xpk, name, ...(about ? { about } : {}) }).pipe(
-    Effect.catchCause((cause) => {
-      const why = reason(Cause.squash(cause));
-      if (!/no seat in this channel/.test(why)) out(`This computer couldn't let you in itself (${why}); asking the owner instead.`);
-      return Effect.succeed(null);
-    }),
-  );
-});
-
-/**
  * This process's seat as `name` on `alias`: its harness, session and process when the harness says. An agent
  * that joins from a process naming no harness is that process's (`plain`): no session takes it over later.
  */
@@ -468,37 +450,6 @@ const importSeat = Effect.fn("kiwi.importSeat")(function* (code: string, relay: 
   return alias;
 });
 
-/**
- * Pair this terminal with a person's seat (pair.ts): ask under a one-time key, show the code once the
- * person's browser opens the pairing, and take the seat when they approve it there. No key is ever copied.
- */
-const pairSeat = Effect.fn("kiwi.pairSeat")(function* (code: string, slot: string) {
-  // The seat can act as the person (the owner, maybe): never into a file an agent running this could read.
-  if (inAgentHarness()) return yield* die("your seat carries your key: run kiwi tui in a terminal of your own, outside Claude Code (not with !) or any agent's harness");
-  const relay = relayUrl();
-  const eph = yield* Effect.promise(() => generateIdentity("pair"));
-  const nonce = pairNonce();
-  // What the person sees next to the code, to tell this terminal from another (the relay could change it; the code is what counts).
-  const label = `${userInfo().username}@${hostname()}`.slice(0, 64);
-  const { pairId } = yield* Channel.fx.pairAsk(relay, code, eph, nonce, slot, label);
-  out(`Pairing this terminal (${label}) with your seat. In the browser that showed you this command, choose this terminal.`);
-  const deadline = Date.now() + PAIR_TTL_MS;
-  let pinned: string | null = null;
-  for (;;) {
-    const st: { wnonce: string | null; code: string | null; seat: Identity | null } = yield* Channel.fx.pairCheck(relay, code, eph, pairId, nonce, pinned);
-    if (st.wnonce && !pinned) {
-      pinned = st.wnonce;
-      out(`code ${st.code}: approve in your browser only if it shows the same 6 digits.`);
-    }
-    if (st.seat) {
-      out("approved.");
-      return yield* importSeat(code, relay, st.seat);
-    }
-    if (Date.now() > deadline) return yield* die("nobody approved this terminal within 10 minutes; run the same command to try again", 3);
-    yield* Effect.sleep(1500);
-  }
-});
-
 /** A command: its exit code, when it isn't 0. */
 type Command = () => Effect.Effect<void | number, unknown, Agent>;
 
@@ -538,11 +489,6 @@ const commands: Record<string, Command> = {
       const cfg = yield* keys.update((c) => {
         c.channels[alias] = { ...access, relay, code, as: name, owner: OWNER_NAME };
       });
-      // This computer, set up for this relay, gets a seat: agents started on it later let themselves in.
-      const machine = loadMachine();
-      if (machine?.relay === relay && machine.identity.xpk) {
-        yield* Effect.ignoreCause(new Channel(access, relay, owner).fx.seatComputer({ pk: machine.identity.pk, xpk: machine.identity.xpk, label: machine.label }));
-      }
       // A channel starts coordinated: people talk with the coordinator, agents work in their tasks' threads.
       // The agent making it is the first one in, so it's the coordinator, unless it was given a role.
       // --open: everyone talks with everyone, no coordinator (the owner can still make one later).
@@ -683,25 +629,12 @@ const commands: Record<string, Command> = {
 
       const machine = loadMachine();
       const linked = machine?.linked && machine.relay === relay ? machine : null;
-      const seatedHere = machine && machine.relay === relay ? machine : null;
       // The same key, already a member (the config was lost, or this is a re-run): resume. Only keys the
       // owner signed come back that way; one with no key for now goes on to this computer's seat below.
       if (hadKey) {
         const access = yield* Channel.fx.resume(relay, code, id).pipe(Effect.catchIf((err) => err instanceof RelayError && [401, 403, 404].includes(err.status), () => Effect.succeed(null)));
         const local = Object.values((yield* keys.config).channels).find((c) => c.roomId === roomId);
         if (access && (access.keys[String(access.epoch)] ?? local?.keys[String(access.epoch)])) return yield* settle(access, "resumed");
-      }
-      // This computer's own seat in the channel lets it in at once, with no request and no code.
-      if (seatedHere) {
-        const admitted = yield* admitHere(code, relay, seatedHere, id, name, opt.about);
-        if (admitted) {
-          if (admitted.name !== name) {
-            // Someone holds that name: this agent is in under the next free one, and its key moves with it.
-            if (!auto) out(`"${name}" is taken here; you're in as ${admitted.name}.`);
-            yield* renameKey(admitted.name);
-          }
-          return yield* settle(admitted.access, "admitted");
-        }
       }
       if (signIn && !linked) {
         return yield* die(
@@ -711,12 +644,7 @@ const commands: Record<string, Command> = {
         );
       }
       const vouch = () => (linked ? Effect.promise(() => vouchFor(linked, roomId, id.pk)) : Effect.succeed(null));
-      // This computer, offered to the owner: approving this agent can seat it, so its later agents come in on their own.
-      const asking = () =>
-        Effect.promise(async () => {
-          const computer = seatedHere ? await computerOffer(seatedHere, roomId, id.pk) : null;
-          return computer ? { ...info, seatOffer: computer } : info;
-        });
+      const asking = () => Effect.succeed(info);
       // Asking again with the same key resumes the same request, so re-running this is always safe.
       // A key that was removed or declined can never come back; ask again with a fresh one.
       const req = yield* Channel.fx.requestJoin(relay, code, id, yield* asking(), null, yield* vouch()).pipe(
@@ -973,12 +901,11 @@ const commands: Record<string, Command> = {
       const askedCoordinator = r.role?.trim().toLowerCase() === COORDINATOR && opt.role?.trim().toLowerCase() !== COORDINATOR;
       const role = opt.role ?? (askedCoordinator ? undefined : r.role);
       const may = scopes ? `, to ${mayDo(scopes)}` : "";
-      const seat = opt.seat && r.computer ? `, and let agents from ${r.computer.label} in from now on` : "";
-      if (!(yield* confirm(`Let "${name}"${role ? ` (${role})` : ""} in${may}${seat}? Verification code ${r.code}`))) {
+      if (!(yield* confirm(`Let "${name}"${role ? ` (${role})` : ""} in${may}? Verification code ${r.code}`))) {
         return yield* die(`approving needs your human's go-ahead: once they confirm the joining agent shows ${r.code}, re-run with --yes`);
       }
-      const admitted = yield* (yield* s.adminCh("let anyone in")).fx.approve(r, { name, role, about: r.about, ...(scopes ? { scopes } : {}) }, { seat: !!opt.seat });
-      out(`approved ${admitted.name} (${r.code})${scopes ? `; they may ${describeScopes(scopes)}` : ""}${seat ? `; agents from ${r.computer!.label} now come in on their own` : ""}${askedCoordinator ? `; it asked to be the coordinator, which takes: kiwi approve ${r.code} --role coordinator` : ""}`);
+      const admitted = yield* (yield* s.adminCh("let anyone in")).fx.approve(r, { name, role, about: r.about, ...(scopes ? { scopes } : {}) });
+      out(`approved ${admitted.name} (${r.code})${scopes ? `; they may ${describeScopes(scopes)}` : ""}${askedCoordinator ? `; it asked to be the coordinator, which takes: kiwi approve ${r.code} --role coordinator` : ""}`);
       // Coordinator mode with nobody coordinating yet: the first agent in takes it.
       const coordinator = yield* s.ensureCoordinator().pipe(Effect.catchCause(() => Effect.succeed(null)));
       if (coordinator) out(`${coordinator} is the coordinator: people talk with them (kiwi role ${coordinator} none to change that)`);
@@ -1667,7 +1594,7 @@ const commands: Record<string, Command> = {
       }
       if (!tty && !pairing) return yield* die("kiwi tui needs a terminal (stdin and stdout a TTY)");
       if (pairing && !opt.pair) return yield* die("copy the whole command from your browser: the channel's menu → Use in a terminal… (it ends with --pair …)");
-      const alias = link ? yield* importPerson(link) : pairing ? yield* pairSeat(pairing, opt.pair!) : yield* personAlias();
+      const alias = link ? yield* importPerson(link) : pairing ? yield* die("pairing a terminal with kiwi tui is gone in 0.11: use the Kiwi app") : yield* personAlias();
       // Paired from something that isn't a terminal: the seat is here now, for the next kiwi tui.
       if (!tty) return out(`Your seat is on this computer now. Open it in a terminal with: kiwi tui${Object.keys((yield* keys.config).channels).length > 1 ? ` -c ${alias}` : ""}`);
       const c = (yield* keys.config).channels[alias]!;

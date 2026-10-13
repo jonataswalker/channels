@@ -15,8 +15,7 @@ import { signRequest } from "./auth.ts";
 import { settle, Unreachable } from "./client.ts";
 import { home, writePrivate } from "./config.ts";
 import { generateIdentity, sign, signText, type Identity } from "./identity.ts";
-import type { ComputerOffer } from "./membership.ts";
-import { MACHINE_SCOPE, vouchStatement, xpkStatement } from "./vouch.ts";
+import { MACHINE_SCOPE, vouchStatement } from "./vouch.ts";
 
 export { machineCode } from "./vouch.ts";
 
@@ -107,13 +106,3 @@ export async function vouchFor(m: MachineFile, roomId: string, agentPk: string):
   return { pk: m.identity.pk, sig: await signText(m.identity, vouchStatement(roomId, agentPk)) };
 }
 
-/**
- * This computer, offered for a seat in a join request's sealed info: approving its agent can then let
- * its later agents into that channel on their own. Null for a machine key from before exchange keys.
- */
-export async function computerOffer(m: MachineFile, roomId: string, agentPk: string): Promise<ComputerOffer | null> {
-  const xpk = m.identity.xpk;
-  if (!xpk) return null;
-  const [xpkSig, { sig }] = await Promise.all([signText(m.identity, xpkStatement(m.identity.pk, xpk)), vouchFor(m, roomId, agentPk)]);
-  return { pk: m.identity.pk, xpk, label: m.label, xpkSig, sig };
-}

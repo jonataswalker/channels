@@ -59,7 +59,6 @@ export function looksLikeLine(ids: number[]): string {
  * by title as well as id.
  */
 /** " via mac-mini": the computer that let an agent in, as its join reads. */
-const via = (name: string | undefined) => (name ? ` via ${inlineText(name, 40)}` : "");
 
 export function describeEvent(m: Message, state?: ChannelState): string {
   const ev = m.ev;
@@ -76,7 +75,7 @@ export function describeEvent(m: Message, state?: ChannelState): string {
       const who = state?.members.get(m.from);
       const role = ev.role && (who?.owner || who?.role === ev.role) ? ev.role : undefined;
       const about = ev.about && (who?.owner || who?.about === ev.about) ? ev.about : undefined;
-      return `joined${role ? ` as ${role}` : ""}${about ? ` (${about})` : ""}${via(who?.viaName)}`;
+      return `joined${role ? ` as ${role}` : ""}${about ? ` (${about})` : ""}`;
     }
     case "role.set":
       return ev.role ? `made ${ev.member} ${ev.role}${ev.about ? ` (${ev.about})` : ""}` : `cleared ${ev.member}'s role`;

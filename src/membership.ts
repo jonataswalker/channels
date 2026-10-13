@@ -68,24 +68,6 @@ export interface MemberInfo {
    * one means "give me a free one like it", never a RECLAIM of that seat.
    */
   auto?: boolean;
-  /**
-   * In a join request from a 0.10 client: the computer the agent runs on, offered for a seat.
-   * Seats are gone in 0.11: kept so older requests still parse, never read.
-   *
-   * @deprecated
-   */
-  seatOffer?: ComputerOffer;
-}
-
-/** A computer as a join request offers it for a seat: its keys, its name, and its two signatures. */
-export interface ComputerOffer {
-  pk: string;
-  xpk: string;
-  label: string;
-  /** Over xpkStatement(pk, xpk). */
-  xpkSig: string;
-  /** Over vouchStatement(room, the agent's key). */
-  sig: string;
 }
 
 /** "jonatas" from "Jonatas Walker" or "jonatas@x.com": a channel handle for a signed-in person. */
@@ -129,13 +111,6 @@ export interface Member extends MemberInfo {
    * @deprecated
    */
   signedBy?: string;
-  /**
-   * The name of the computer that let this agent in. Seats are gone in 0.11 (`from` says which
-   * computer an agent runs on instead): kept so older readers still compile.
-   *
-   * @deprecated
-   */
-  viaName?: string;
 }
 
 export const NAME_RE = /^[\p{L}\p{N}_.\-]{1,32}$/u;
@@ -343,9 +318,9 @@ export interface JoinRequest extends MemberInfo {
 }
 
 /** How a member reads in lists: "win · key QRskRn4Z · agent of @jonatas" / "Jonatas Walker (@jonatas)". */
-export function describeMember(m: { name: string; pk: string; kind?: string; display?: string; sponsor?: Sponsor; owner?: boolean; viaName?: string }): string {
+export function describeMember(m: { name: string; pk: string; kind?: string; display?: string; sponsor?: Sponsor; owner?: boolean }): string {
   const key = `key ${m.pk.slice(0, 8)}`;
   if (m.kind === "human") return `${m.display ?? m.name} (@${m.name})${m.owner ? " · owner" : ""} · ${key}`;
   const sponsor = m.sponsor ? ` · agent of @${m.sponsor.handle ?? handleFor(m.sponsor.name)}` : "";
-  return `${m.name} · ${key}${sponsor}${m.viaName ? ` · via ${inlineText(m.viaName, 40)}` : ""}`;
+  return `${m.name} · ${key}${sponsor}`;
 }
