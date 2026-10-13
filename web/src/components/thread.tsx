@@ -27,12 +27,13 @@ export function ThreadPanel({ count, children, composer, onClose }: { count: num
     }
   }, [])
 
-  // On the rail's tone, bubbles and the field step up to the raised one so they still stand out.
+  // On the rail's tone, the field steps up to the raised one so the composer still stands out.
+  // Others' bubbles stay Messages grey, as in the main conversation.
   return (
     <ResizablePanel>
       <aside
         aria-label="Thread"
-        className="animate-slide-in flex h-full w-full flex-col bg-rail [--bubble-them:var(--raised)] [--field:var(--raised)]"
+        className="animate-slide-in flex h-full w-full flex-col bg-rail [--field:var(--raised)]"
         onKeyDown={(e) => {
           if (e.key !== "Escape") return
           e.preventDefault()
