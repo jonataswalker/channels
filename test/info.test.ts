@@ -60,7 +60,7 @@ test("no fingerprint is 426 before any room lookup, and names no owner", async (
 
 test("this client sends it: joining still pins the owner", async () => {
   const joiner = await generateIdentity("win");
-  const ask = await Channel.requestJoin(relay, code, joiner, { name: "win" }, "dev:bob");
+  const ask = await Channel.requestJoin(relay, code, joiner, { name: "win" });
   expect(ask.requestId).toBeTruthy();
 });
 

@@ -18,26 +18,25 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join as joinPath, join } from "node:path";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { AgentLive, openPersonSession, openSession, type Agent, type AgentSession, type Delivery } from "../agent.ts";
+import { AgentLive, openSession, type Agent, type AgentSession, type Delivery } from "../agent.ts";
 import { loadImages, saveImages } from "../attach.ts";
-import { Channel, ChannelGone, fx as relayFx, reason, RelayError } from "../client.ts";
-import { TOO_MANY_REQUESTS } from "../sas.ts";
+import { Channel, ChannelGone, reason, RelayError } from "../client.ts";
 import { Cursor, DEFAULT_RELAY, home, Keystore, type ChannelConfig } from "../config.ts";
-import { b64url, decodeJoinCode, fromB64url, newRoomId, type ChannelAccess } from "../crypto.ts";
-import { describeMember, freeAgentName, handleFor, type JoinRequest } from "../membership.ts";
+import { decodeJoinCode, type ChannelAccess } from "../crypto.ts";
+import { describeMember, freeAgentName, handleFor } from "../membership.ts";
 import { baseName, here, seatsNear } from "../seats.ts";
-import { ago, cardLine, charterLines, describeEvent, holdLine, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, mayDo, modeLine, parseDuration, stateWord, taskStateWord, statusJson } from "../format.ts";
-import { canPost, describeScopes, parseScopes, presetOf, SCOPES, type Scope } from "../scopes.ts";
-import { fingerprint, type Identity } from "../identity.ts";
-import { CHAT_KINDS, COLORS, ignored, isColor, TASK_STATES, type Kind, type Message, type TaskState } from "../protocol.ts";
-import { chooseThread, COORDINATOR, humanOf, parseTaskId, similarOpenTasks, taskId, wentTo, type ChannelState } from "../state.ts";
+import { cardLine, charterLines, describeEvent, holdLine, formatFact, formatMessage, formatRooms, formatShown, formatStatus, formatTask, formatTasks, looksLikeLine, modeLine, parseDuration, taskStateWord, statusJson } from "../format.ts";
+import { canPost, describeScopes, presetOf, SCOPES, type Scope } from "../scopes.ts";
+import { fingerprint } from "../identity.ts";
+import { CHAT_KINDS, COLORS, ignored, isColor, type Kind, type Message, type TaskState } from "../protocol.ts";
+import { chooseThread, humanOf, parseTaskId, similarOpenTasks, taskId, wentTo, type ChannelState } from "../state.ts";
 import { VERSION } from "../version.ts";
 import { channelFiles, runSh, sessionViews } from "../sh.ts";
-import { forgetMachine, linkUrl, loadMachine, machineCode, machineFx, newMachine, saveMachine, vouchFor } from "../machine.ts";
+import { computerClaimFor } from "../machine.ts";
 import { briefText, COMMANDS } from "../brief.ts";
 import { autoInstallExtraHooks, autoInstallHooks, bindDirectory, bindingFor, EXTRA_HARNESSES, extraInstalled, hooksInstalled, hooksListen, hooksStatus, installDetected, installExtra, installHooks, mcFor, runHook, uninstallDetected, uninstallExtra, uninstallHooks, type ExtraHarness } from "../hooks.ts";
 import { BadName } from "../refusals.ts";
-import { detectCard, inAgentHarness } from "../card.ts";
+import { detectCard } from "../card.ts";
 
 const CLAIMS_GONE = "claims are gone: say what you're working on in the task, or post it";
 
@@ -71,18 +70,13 @@ Agents
   kiwi note [KEY [VALUE] [--ttl 7d] | KEY --clear]   shared notes: all of them, one, set one, or remove one
   kiwi leave                                     leave the channel and forget it on this machine
 
-People
-  kiwi setup                                     set up this computer, once (link it to your account; Claude Code)
-  kiwi pair kp1-…                                pair this computer with your app (approve it there; the cert stays here)
+This computer
+  kiwi setup                                     set it up once: Claude Code's hooks, the PATH, and how to pair it
+  kiwi pair kp1-…                                pair it with your Kiwi app (approve it there): its agents get in on their own
   kiwi daemon                                    this computer's hub: keeps every local agent listening (starts on its own)
-  kiwi create [alias] [--open]                   make a channel you own; prints its join code. It starts coordinated
-                                                 (people talk with the coordinator); --open lets everyone talk with everyone
-  kiwi tui [mc2-…]                               your seat in this terminal, like the web page; with the join code,
-                                                 pair it by a code you approve in your browser (Use in a terminal)
-  kiwi web [--sign-in]                           your dashboard link (it carries the owner key: keep it to yourself)
-  kiwi hold ["why"] | kiwi hold off              stop every agent at once / let them carry on (owner)
-  kiwi requests · approve CODE · deny CODE · kick NAME · close   who gets in and who goes (owner)
   kiwi demo · doctor · hooks install|uninstall|status · mcp · channels · relay --help
+
+Running a channel (create, approve, remove, roles, hold, charter, close) is the owner's, in the Kiwi app.
 
 Older names still work: tail, wait, read, watch (listen); ask, escalate (send); thread, save (show);
 members, who, facts, charter (status); set, get, unset (note); tasks; and the rest of the earlier commands.
@@ -123,27 +117,19 @@ const { values: opt, positionals: args } = parseArgs({
     global: { type: "boolean" },
     json: { type: "boolean" },
     timeout: { type: "string" },
-    "sign-in": { type: "boolean" },
     yes: { type: "boolean", short: "y" },
-    "no-strict": { type: "boolean" },
-    link: { type: "string" },
-    name: { type: "string" },
     push: { type: "boolean" },
     clear: { type: "boolean" },
     force: { type: "boolean" },
-    scopes: { type: "string" },
     needs: { type: "string" },
     review: { type: "string" },
     once: { type: "boolean" },
-    pair: { type: "string" },
     now: { type: "boolean" },
     ask: { type: "boolean" },
     escalate: { type: "boolean" },
     task: { type: "string" },
     dm: { type: "string" },
     main: { type: "boolean" },
-    open: { type: "boolean" },
-    seat: { type: "boolean" },
     model: { type: "string" },
     tools: { type: "string" },
     stay: { type: "boolean" },
@@ -183,7 +169,7 @@ const channelAlias = Effect.fn("kiwi.channelAlias")(function* () {
   // Never a machine-wide default: other agents on this machine are in other channels.
   const alias = opt.channel ?? process.env.KIWI_CHANNEL ?? bindingFor(process.cwd())?.alias ?? (all.length === 1 ? all[0] : undefined);
   if (!alias) {
-    if (!all.length) return yield* die("no channel: create or join one first");
+    if (!all.length) return yield* die("no channel: join one first (kiwi join <code>)");
     return yield* die(`this directory isn't bound to a channel, and this machine is in several (${all.join(", ")}); pass -c ALIAS --as NAME, or run kiwi from the directory you joined in`);
   }
   if (!cfg.channels[alias]) return yield* die(`unknown channel "${alias}" (see: kiwi channels)`);
@@ -253,12 +239,6 @@ const taskArg = Effect.fn("kiwi.taskArg")(function* (i = 2) {
   return parseTaskId(raw) ?? (yield* die(`"${raw}" isn't a task id (like T12)`));
 });
 
-/** A task id from the command line, or a stop naming it. */
-const taskIdOf = (x: string) => {
-  const id = parseTaskId(x);
-  return id === null ? die(`"${x}" isn't a task id`) : Effect.succeed(id);
-};
-
 const text = (from: number) =>
   Effect.promise(async () => {
     if (args.length > from && args[from] !== "-") return args.slice(from).join(" ");
@@ -284,56 +264,6 @@ const joinedAlias = Effect.fn("kiwi.joinedAlias")(function* (roomId: string, ali
   return candidates.find(free) ?? `ch-${roomId.slice(0, 8)}`;
 });
 
-/** Owner dashboard link: the code plus the owner key, so the page can approve and post as the human. */
-const ownerLink = Effect.fn("kiwi.ownerLink")(function* (c: ChannelConfig) {
-  const id = yield* (yield* Keystore).identity(c.owner!, c.roomId);
-  return `${c.relay}/#${encodeURIComponent(c.code)}&id=${b64url(new TextEncoder().encode(JSON.stringify(id)))}`;
-});
-
-const findRequest = Effect.fn("kiwi.findRequest")(function* (s: AgentSession, needle: string, opts: { byKey?: boolean } = {}) {
-  const reqs = yield* s.requests();
-  // Refusing is harmless, so `deny` also takes a request's key: one still unchecked has no code yet.
-  if (opts.byKey && needle.replace(/\D/g, "").length !== 6) {
-    const byKey = reqs.filter((x) => needle.length >= 6 && fingerprint(x.pk).startsWith(needle));
-    if (byKey.length === 1) return byKey[0]!;
-    return yield* die(byKey.length ? `several requests match key ${needle}` : `no pending request with key ${needle} (see: kiwi requests)`);
-  }
-  // Only the 6-digit code identifies a request: a name is whatever the requester typed, and
-  // anyone holding the join code can ask under the same one.
-  const digits = needle.replace(/\D/g, "");
-  if (digits.length !== 6) return yield* die(`use the 6-digit verification code (see: kiwi requests), not a name`);
-  const matches = reqs.filter((x) => x.code?.replace("-", "") === digits);
-  if (matches.length > 1) return yield* die(`several requests share code ${needle}; deny them all and ask the requester to try again`);
-  const r = matches[0];
-  if (!r) return yield* die(reqs.length ? `no pending request shows code ${needle} yet (see: kiwi requests)` : "no pending join requests");
-  return r;
-});
-
-/**
- * The channel's owner key is on this machine (`kiwi create` made the channel here): let this request in
- * with it. Whoever can run kiwi here can already read that key, so comparing codes would only be this
- * machine checking itself. Returns whether it let them in.
- */
-const admitLocally = Effect.fn("kiwi.admitLocally")(function* (code: string, relay: string, id: Identity, requestId: string, as: { name?: string; role?: string; about?: string }) {
-  const keys = yield* Keystore;
-  const { roomId } = decodeJoinCode(code);
-  const local = Object.values((yield* keys.config).channels).find((c) => c.roomId === roomId && c.owner && c.relay === relay);
-  if (!local?.owner || !(yield* keys.identitiesIn(roomId)).includes(local.owner)) return false;
-  const owner = new Channel(local, relay, yield* keys.identity(local.owner, roomId));
-  const find = Effect.map(owner.fx.requests(), (reqs) => reqs.find((r) => r.id === requestId && r.pk === id.pk));
-  let r = yield* find;
-  if (!r) return false;
-  if (r.check === "unchecked") yield* owner.fx.checkRequest(r);
-  // This side reveals its half as it checks its status; then the code exists on both.
-  yield* Channel.fx.joinStatus(relay, code, id, requestId);
-  r = yield* find;
-  if (r?.check !== "ready") return false;
-  // A name someone holds is offered a free one like it (askedAs): let it in under that, not the typed one.
-  const name = r.askedAs ? undefined : as.name;
-  yield* owner.fx.approve(r, { ...(name ? { name } : {}), ...(as.role ? { role: as.role } : {}), ...(as.about ? { about: as.about } : {}) });
-  return true;
-});
-
 /**
  * This process's seat as `name` on `alias`: its harness, session and process when the harness says. An agent
  * that joins from a process naming no harness is that process's (`plain`): no session takes it over later.
@@ -354,14 +284,6 @@ function settleIn(alias: string, name: string): void {
   if (extras) process.stderr.write(`kiwi: installed ${extras} so this agent keeps listening; \`kiwi hooks uninstall\` removes them\n`);
 }
 
-/** Open a page in this computer's browser; if that fails, the printed link is still there. */
-function openBrowser(url: string): void {
-  const cmd = process.platform === "darwin" ? ["open", url] : process.platform === "win32" ? ["cmd", "/c", "start", "", url] : ["xdg-open", url];
-  try {
-    Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" });
-  } catch {}
-}
-
 const confirm = (question: string) =>
   Effect.promise(async () => {
     if (opt.yes) return true;
@@ -371,13 +293,6 @@ const confirm = (question: string) =>
     return false;
   });
 
-/** Whether a relay requires a signed-in person (one that can't say, doesn't). */
-const signInOn = (relay: string) =>
-  relayFx.relayConfig(relay).pipe(
-    Effect.map((c) => !!c.workosClientId),
-    Effect.catchCause(() => Effect.succeed(false)),
-  );
-
 /**
  * This key can never come back: it was removed, or its request denied. By the relay's tag; by its
  * text only for relays from before tags (0.7 and older), which send none.
@@ -385,132 +300,17 @@ const signInOn = (relay: string) =>
 const outForGood = (err: unknown) =>
   err instanceof RelayError && (err.tag === "Removed" || err.tag === "Denied" || (!err.tagged && err.status === 403 && /removed|denied/.test(err.message)));
 
-/** The channel `kiwi tui` opens: as flags or this folder say, else the only one with a person's seat here. */
-const personAlias = Effect.fn("kiwi.personAlias")(function* () {
-  const cfg = yield* config;
-  if (opt.channel ?? process.env.KIWI_CHANNEL ?? bindingFor(process.cwd())) return yield* channelAlias();
-  const seats = Object.entries(cfg.channels).filter(([, c]) => c.person || c.owner);
-  if (seats.length === 1) return (acting.alias = seats[0]![0]);
-  if (!seats.length) return yield* die("no channel on this computer has your seat yet. On the web, open the channel's menu → Use in a terminal, and run the command it copies");
-  return yield* die(`you have a seat in several channels here (${seats.map(([a]) => a).join(", ")}); pass -c ALIAS`);
-});
-
-/**
- * Bring a person's seat from a web link (`…/#<join code>&id=<identity>`): check the key is a
- * member, keep it here, and name the channel. Returns its alias.
- */
-const importPerson = Effect.fn("kiwi.importPerson")(function* (link: string) {
-  let url: URL;
-  try {
-    url = new URL(link.trim());
-  } catch {
-    return yield* die("that isn't a link: copy it from the channel's menu → Use in a terminal");
-  }
-  const [codePart = "", ...rest] = url.hash.replace(/^#/, "").split("&id=");
-  const code = decodeURIComponent(codePart).trim();
-  let roomId: string;
-  try {
-    roomId = decodeJoinCode(code).roomId;
-  } catch {
-    return yield* die("that link has no join code in it: copy it again from the channel's menu → Use in a terminal");
-  }
-  let id: Identity;
-  try {
-    id = JSON.parse(new TextDecoder().decode(fromB64url(rest.join("&id=")))) as Identity;
-  } catch {
-    return yield* die("that link carries no key (an invite link only asks to join): copy the one from Use in a terminal");
-  }
-  return yield* importSeat(code, (opt.relay ?? process.env.KIWI_RELAY ?? url.origin).replace(/\/+$/, ""), id);
-});
-
-/** Keep a person's seat here (from a link, or paired): check the key is a member, save it, and name the channel. Returns its alias. */
-const importSeat = Effect.fn("kiwi.importSeat")(function* (code: string, relay: string, id: Identity) {
-  const keys = yield* Keystore;
-  const { roomId } = decodeJoinCode(code);
-  if (typeof id?.name !== "string" || !NAME_RE.test(id.name) || typeof id.pk !== "string" || typeof id.sk !== "string" || typeof id.xsk !== "string") return yield* die("that seat's key isn't one kiwi can use");
-  const gone = (err: unknown) => err instanceof RelayError && [401, 403, 404].includes(err.status);
-  const access = yield* Channel.fx.resume(relay, code, id).pipe(Effect.catchIf(gone, () => die("that key isn't in this channel any more (it left, was removed, or the channel closed)")));
-  const mine = (yield* keys.identitiesIn(roomId)).includes(id.name);
-  if (mine && (yield* keys.identity(id.name, roomId)).pk !== id.pk) return yield* die(`this computer already has a different key named ${id.name} in this channel`);
-  if (!mine) yield* keys.saveIdentity(id, roomId);
-  const title = yield* new Channel(access, relay, id).fx.title().pipe(Effect.catchCause(() => Effect.succeed(null)));
-  const existing = Object.entries((yield* keys.config).channels).find(([, c]) => c.roomId === roomId)?.[0];
-  const alias = existing ?? (yield* joinedAlias(roomId, opt.channel, title));
-  const cfg = yield* keys.update((c) => {
-    const prior = c.channels[alias];
-    c.channels[alias] = prior
-      ? { ...prior, ...access, keys: { ...prior.keys, ...access.keys }, ...(prior.owner === id.name ? {} : { person: id.name }) }
-      : { ...access, relay, code, person: id.name, ...(title ? { title } : {}) };
-  });
-  const several = Object.values(cfg.channels).filter((c) => c.person || c.owner).length > 1;
-  process.stderr.write(
-    `kiwi: your seat in "${alias}" (${id.name}${id.pk === access.ownerPk ? ", owner" : ""}) is kept in ${home()}, readable only by you.\n` +
-      `  Anything running as you on this computer can read it, agents too. From now on: kiwi tui${several ? ` -c ${alias}` : ""}\n`,
-  );
-  return alias;
-});
-
 /** A command: its exit code, when it isn't 0. */
 type Command = () => Effect.Effect<void | number, unknown, Agent>;
 
-/** How a linked computer's agents come in: what kiwi setup says once it's linked. */
-const SEAT_HOW =
-  "Agents you start here ask to join, and you approve them. Approving the first one in a channel can let this computer's later agents into that channel on their own.";
+/** What an admin verb says since 0.11: the CLI is for agents, and the owner runs the channel from the app. */
+const ADMIN_GONE = "that's the owner's to do, in the Kiwi app: the kiwi command is for agents since 0.11";
+
+/** Verbs the CLI had before 0.11 that only an owner or a person's seat used. They say where that went. */
+const GONE = ["create", "quick", "requests", "check", "approve", "deny", "kick", "close", "role", "scope", "mode", "room", "tui", "web"] as const;
 
 const commands: Record<string, Command> = {
-  quick: () => commands.create!(),
-
-  create: () =>
-    Effect.gen(function* () {
-      const keys = yield* Keystore;
-      // No --as: the agent is called by what it runs in (claude, codex…).
-      const name = opt.as || process.env.KIWI_AS ? yield* agentName() : baseName(here());
-      if (name === OWNER_NAME) return yield* die(`"${OWNER_NAME}" is reserved for the channel owner; pick an agent name with --as`);
-      const relay = relayUrl();
-      if (yield* signInOn(relay)) {
-        return yield* die(
-          `channels on ${relay} are created and owned by a signed-in human, not an agent.\n` +
-            `  Ask your human to open ${relay}/ , sign in, create the channel, and give you its join line (kiwi join mc2-…).`,
-        );
-      }
-      const roomId = newRoomId();
-      const [owner, agent] = yield* Effect.all([keys.identity(OWNER_NAME, roomId), keys.identity(name, roomId)], { concurrency: "unbounded" });
-      const { code, access } = yield* Channel.fx.create(
-        relay,
-        owner,
-        { name: OWNER_NAME, role: "owner" },
-        [{ ...agent, info: { name, ...(opt.role ? { role: opt.role } : {}), ...(opt.about ? { about: opt.about } : {}) } }],
-        roomId,
-        null,
-        // The alias you gave becomes the channel's (sealed) name, so everyone who joins sees it.
-        args[1],
-      );
-      const alias = yield* joinedAlias(access.roomId, args[1]);
-      const cfg = yield* keys.update((c) => {
-        c.channels[alias] = { ...access, relay, code, as: name, owner: OWNER_NAME };
-      });
-      // A channel starts coordinated: people talk with the coordinator, agents work in their tasks' threads.
-      // The agent making it is the first one in, so it's the coordinator, unless it was given a role.
-      // --open: everyone talks with everyone, no coordinator (the owner can still make one later).
-      const ownerCh = new Channel(access, relay, owner);
-      if (!opt.open) {
-        yield* ownerCh.fx.startCoordinated();
-        if (!opt.role) yield* ownerCh.fx.send(`made ${name} ${COORDINATOR}`, { kind: "event", ev: { op: "role.set", member: name, role: COORDINATOR }, to: [name] });
-      }
-      // The channel's setting-up isn't news to the agent that set it up.
-      yield* (yield* Cursor).write(alias, name, yield* ownerCh.fx.head());
-      const s = yield* openSession(alias, cfg.channels[alias]!, name);
-      yield* s.hello(opt.role, opt.about);
-      settleIn(alias, name);
-      process.stderr.write(`created "${alias}": you (${OWNER_NAME}) own it, ${name} is in (key ${fingerprint(agent.pk)})\n`);
-      out(`join code: ${code}`);
-      out(`  Agents ask to join with: kiwi join ${code}${relay === DEFAULT_RELAY ? "" : ` --relay ${relay}`}`);
-      out(`  The code only lets them ask. Your human lets each one in from kiwi tui (or kiwi web), after checking its 6-digit verification code.`);
-      // The owner key never goes into an agent's transcript; `kiwi web` prints the private link when asked.
-      out(`  Your private owner dashboard link: run \`kiwi web\` yourself (it carries the owner key).`);
-      out("");
-      out(joinedText(alias, name, { human: OWNER_NAME, role: opt.role, about: opt.about }));
-    }),
+  ...Object.fromEntries(GONE.map((v) => [v, () => die(v === "tui" || v === "web" ? `kiwi ${v} is gone: open the Kiwi app` : ADMIN_GONE)])),
 
   join: () =>
     Effect.gen(function* () {
@@ -554,9 +354,6 @@ const commands: Record<string, Command> = {
       let id = yield* keys.identity(name, roomId);
       const info = { name, ...(opt.role ? { role: opt.role } : {}), ...(opt.about ? { about: opt.about } : {}), ...(auto ? { auto: true } : {}) };
 
-      // Agents join from a computer its person linked with `kiwi setup`; the computer vouches for them.
-      const signIn = yield* signInOn(relay);
-
       /**
        * This agent's key goes by `to` from now on. Only ever this key's own files are removed: another
        * agent on this machine waiting under that name (its own request) has its key moved aside, and its
@@ -583,7 +380,7 @@ const commands: Record<string, Command> = {
         });
 
       /** In: write the config, bind this folder, and print the instructions. */
-      const settle = (access: ChannelAccess, how: "approved" | "resumed" | "admitted") =>
+      const settle = (access: ChannelAccess, how: "approved" | "resumed") =>
         Effect.gen(function* () {
           if (auto) yield* doneAsking;
           // This key's name is whatever its record says: the owner's side may have given it another one
@@ -620,47 +417,34 @@ const commands: Record<string, Command> = {
           if (canPost(scopes)) yield* Effect.ignoreCause(s.refreshCard(detectCard()));
           process.stderr.write(`${how === "resumed" ? "back in" : "joined"} "${alias}" as ${name} (key ${fingerprint(id.pk)})\n`);
           if (how === "resumed") out("this key is already a member: resumed, nothing new was granted.");
-          if (how === "admitted") out("let in by this computer, which its person linked and seated here: no code to compare.");
-          if (signIn) out(`Your human can watch everything you do here at ${relay}/#${encodeURIComponent(code)}`);
           const { state } = yield* s.state();
           const seat = state.members.get(name);
           out(joinedText(alias, name, { scopes, hold: holdLine(state), charter: charterLines(state), mode: modeLine(state, name), human: humanOf(state, name), role: seat?.role, about: seat?.about }));
         });
 
-      const machine = loadMachine();
-      const linked = machine?.linked && machine.relay === relay ? machine : null;
       // The same key, already a member (the config was lost, or this is a re-run): resume. Only keys the
-      // owner signed come back that way; one with no key for now goes on to this computer's seat below.
+      // owner signed come back that way; one with no key for now asks again below.
       if (hadKey) {
         const access = yield* Channel.fx.resume(relay, code, id).pipe(Effect.catchIf((err) => err instanceof RelayError && [401, 403, 404].includes(err.status), () => Effect.succeed(null)));
         const local = Object.values((yield* keys.config).channels).find((c) => c.roomId === roomId);
         if (access && (access.keys[String(access.epoch)] ?? local?.keys[String(access.epoch)])) return yield* settle(access, "resumed");
       }
-      if (signIn && !linked) {
-        return yield* die(
-          "this computer isn't set up for Kiwi yet. Its person runs this once, in a terminal:\n" +
-            "  kiwi setup\n" +
-            "Then run this join again.",
-        );
-      }
-      const vouch = () => (linked ? Effect.promise(() => vouchFor(linked, roomId, id.pk)) : Effect.succeed(null));
-      const asking = () => Effect.succeed(info);
+      // On a computer paired with its person's app, the request carries the computer's claim: the
+      // app lets its own computers' agents in at once, and the owner sees whose computer it is.
+      const claims = () => Effect.promise(() => computerClaimFor(roomId, id.pk));
       // Asking again with the same key resumes the same request, so re-running this is always safe.
       // A key that was removed or declined can never come back; ask again with a fresh one.
-      const req = yield* Channel.fx.requestJoin(relay, code, id, yield* asking(), null, yield* vouch()).pipe(
+      const req = yield* Channel.fx.requestJoin(relay, code, id, info, yield* claims()).pipe(
         Effect.catchIf(outForGood, () =>
           Effect.gen(function* () {
             yield* keys.forgetIdentity(name, roomId);
             id = yield* keys.identity(name, roomId);
-            return yield* Channel.fx.requestJoin(relay, code, id, yield* asking(), null, yield* vouch());
+            return yield* Channel.fx.requestJoin(relay, code, id, info, yield* claims());
           }),
         ),
       );
       out(`asked to join as ${name}.`);
-      if (linked) out(`Vouched for by this computer${linked.linked?.name ? `, linked to ${linked.linked.name}` : ""}.`);
-      if ((yield* admitLocally(code, relay, id, req.requestId, { ...(auto ? {} : { name }), role: opt.role, about: opt.about }))) {
-        out("The channel's owner key is on this computer, so it let you in itself (no code to compare).");
-      } else out(`waiting for the owner to open your request…`);
+      out(`waiting for the owner to open your request…`);
       const deadline = Date.now() + parseDuration(opt.timeout ?? "30m") * 1000;
       let shown: string | null = null;
       for (;;) {
@@ -689,73 +473,18 @@ const commands: Record<string, Command> = {
 
   hook: () => runHook(args[1] ?? ""),
 
-  /**
-   * Set up this computer, once, by its person: what Kiwi keeps and where, linking the computer to
-   * their account (so agents started here join already vouched for as theirs), and whether Kiwi
-   * may keep Claude Code agents reachable.
-   */
+  /** Set up this computer for agents, once: what Kiwi keeps, Claude Code's hooks, the PATH, and pairing with your app. */
   setup: () =>
     Effect.gen(function* () {
       const keys = yield* Keystore;
-      const relay = relayUrl();
-      const sub = args[1];
-      const linkStatus = (m: Parameters<typeof machineFx.status>[0]) => machineFx.status(m).pipe(Effect.catchCause(() => Effect.succeed(null)));
-      if (sub === "unlink") {
-        const m = loadMachine() ?? (yield* die("this computer isn't linked"));
-        yield* Effect.ignoreCause(machineFx.unlink(m));
-        forgetMachine();
-        return out("This computer is unlinked. Agents started here now need their person to vouch for them from a link.");
-      }
-      if (sub === "status") {
-        const m = loadMachine();
-        if (!m?.linked) return out("This computer isn't linked to an account. Run kiwi setup.");
-        const st = yield* linkStatus(m);
-        if (st?.status !== "linked") return out("This computer's link was removed. Run kiwi setup again.");
-        out(`Linked to ${st.name ?? m.linked.name ?? "your account"} (${m.label}).`);
-        // What the link page showed, and what its agents' join requests are compared against.
-        return out(`Its code: ${yield* Effect.promise(() => machineCode(m.identity.pk))}`);
-      }
-
       out("Setting up Kiwi on this computer.\n");
       out(`1. What Kiwi keeps: everything lives in ${home()}, readable only by you. That's your agents' keys and the`);
       out("   channels they're in. Nothing else on this computer is touched.\n");
-
-      let m = loadMachine();
-      const current = m?.linked && m.relay === relay ? yield* linkStatus(m) : null;
-      if (m && current?.status === "linked") {
-        const linked = m;
-        out(`2. This computer is already linked to ${current.name ?? m.linked?.name ?? "your account"} (code ${yield* Effect.promise(() => machineCode(linked.identity.pk))}).`);
-        out(`   ${SEAT_HOW}\n`);
-      } else {
-        if (!m || m.relay !== relay || m.linked) m = yield* Effect.promise(() => newMachine(relay));
-        const mine = m;
-        saveMachine(mine);
-        yield* machineFx.register(mine);
-        const url = linkUrl(mine);
-        out("2. Link this computer to your account, so agents you start here join as yours.");
-        out(`   Open this page, sign in, and check it shows ${yield* Effect.promise(() => machineCode(mine.identity.pk))}:`);
-        out(`   ${url}`);
-        openBrowser(url);
-        out("   Waiting for you to confirm in the browser…");
-        const deadline = Date.now() + 15 * 60_000;
-        for (;;) {
-          const st = yield* linkStatus(mine);
-          if (st?.status === "linked") {
-            mine.linked = { name: st.name, at: Date.now() };
-            saveMachine(mine);
-            out(`   Linked to ${st.name ?? "your account"}. ${SEAT_HOW}\n`);
-            break;
-          }
-          if (st?.status === "expired" || Date.now() > deadline) return yield* die("the link expired before it was confirmed; run kiwi setup again");
-          yield* Effect.sleep(2000);
-        }
-      }
-
       if (existsSync(join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude")))) {
         if (hooksInstalled()) {
-          out("3. Claude Code: Kiwi keeps your agents reachable there (3 hooks). kiwi hooks uninstall removes them.\n");
+          out("2. Claude Code: Kiwi keeps your agents reachable there (3 hooks). kiwi hooks uninstall removes them.\n");
         } else {
-          out("3. Claude Code: Kiwi can keep agents reachable by adding 3 hooks to its settings. They only act in folders");
+          out("2. Claude Code: Kiwi can keep agents reachable by adding 3 hooks to its settings. They only act in folders");
           out("   where an agent joined a channel: they remind it to listen and hand it messages it missed.");
           const yes = yield* confirm("   Add them?");
           yield* keys.update((c) => {
@@ -765,9 +494,9 @@ const commands: Record<string, Command> = {
           out(yes ? "   Added.\n" : "   Skipped. kiwi hooks install adds them any time.\n");
         }
       }
-
       if (!Bun.which("kiwi")) out(`To type plain kiwi, add this line to your shell profile:\n  export PATH="${join(homedir(), ".kiwi", "bin")}:$PATH"\n`);
-      out("Done. To bring an agent into a channel, give it the channel's join command (in Details, on the web).");
+      out("To let this computer's agents in on their own, pair it with your Kiwi app: Your computers → Add a computer,");
+      out("then run the kiwi pair kp1-… command it shows, here.");
     }),
 
   /**
@@ -857,68 +586,6 @@ const commands: Record<string, Command> = {
       return yield* die(usage);
     }),
 
-  requests: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const reqs = yield* s.requests();
-      if (!reqs.length) return out("no pending join requests");
-      for (const r of reqs) {
-        const who = r.kind === "human" ? `person, signed in as ${r.sponsoredBy?.name ?? "?"}` : r.sponsoredBy ? `agent of ${r.sponsoredBy.name}` : "agent";
-        const code = r.code ?? (r.check === "waiting" ? "waiting" : "unchecked");
-        // A name someone here already holds comes as the next free one: asked for X, it joins as X-2.
-        const asked = r.askedAs && r.askedAs !== r.name ? ` (asked as ${r.askedAs}, which is taken)` : "";
-        out(`${code.padEnd(8)} ${r.name}${asked}${r.role ? ` (${r.role})` : ""} · ${who}${r.computer ? ` on ${r.computer.label}` : ""} · key ${fingerprint(r.pk)} · ${ago(r.ts)}`);
-      }
-      if (reqs.some((r) => r.computer)) out("kiwi approve CODE --seat also lets that computer's later agents into this channel on their own");
-      if (reqs.some((r) => r.check === "waiting")) out("waiting: the requester shows its code in a moment; run kiwi requests again");
-      if (reqs.some((r) => r.check === "unchecked")) out(`unchecked: ${TOO_MANY_REQUESTS}`);
-    }),
-
-  check: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const owner = yield* s.adminCh("check join requests");
-      const key = (args[1] ?? (yield* die("usage: kiwi check KEY (the request's key, from kiwi requests)"))).trim();
-      const r = (yield* s.requests()).find((x) => x.check === "unchecked" && fingerprint(x.pk).startsWith(key));
-      if (!r) return yield* die(`no unchecked request with key ${key} (see: kiwi requests)`);
-      const what = `${r.name} (key ${fingerprint(r.pk)})`;
-      if (!(yield* confirm(`Start the code check for ${what}?`))) return yield* die("checking needs your human's go-ahead; re-run with --yes once they confirm");
-      yield* owner.fx.checkRequest(r);
-      out(`checking ${what}: the requester shows its 6-digit code in a moment (kiwi requests)`);
-    }),
-
-  approve: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const r = yield* findRequest(s, args[1] ?? (yield* die("usage: kiwi approve CODE [--name NEWNAME] [--role ROLE] [--scopes member|read-only] [--seat] [--yes]")));
-      if (opt.seat && !r.computer) return yield* die(`${r.name} didn't come from a computer that can be seated here; approve without --seat`);
-      const scopes = opt.scopes === undefined ? undefined : (parseScopes(opt.scopes) ?? (yield* die(`"${opt.scopes}" isn't a level: say member or read-only`)));
-      const name = opt.name ?? r.name;
-      if (!NAME_RE.test(name) || name === OWNER_NAME) return yield* new BadName(`"${name}" isn't an allowed name; approve with --name NAME`);
-      const taken = (yield* s.members(true)).find((m) => m.name === name && m.active);
-      if (taken) return yield* new BadName(`"${name}" is already a member; approve under another name with --name`);
-      // Asking to be the coordinator doesn't make you one: the owner says --role coordinator themselves.
-      const askedCoordinator = r.role?.trim().toLowerCase() === COORDINATOR && opt.role?.trim().toLowerCase() !== COORDINATOR;
-      const role = opt.role ?? (askedCoordinator ? undefined : r.role);
-      const may = scopes ? `, to ${mayDo(scopes)}` : "";
-      if (!(yield* confirm(`Let "${name}"${role ? ` (${role})` : ""} in${may}? Verification code ${r.code}`))) {
-        return yield* die(`approving needs your human's go-ahead: once they confirm the joining agent shows ${r.code}, re-run with --yes`);
-      }
-      const admitted = yield* (yield* s.adminCh("let anyone in")).fx.approve(r, { name, role, about: r.about, ...(scopes ? { scopes } : {}) });
-      out(`approved ${admitted.name} (${r.code})${scopes ? `; they may ${describeScopes(scopes)}` : ""}${askedCoordinator ? `; it asked to be the coordinator, which takes: kiwi approve ${r.code} --role coordinator` : ""}`);
-      // Coordinator mode with nobody coordinating yet: the first agent in takes it.
-      const coordinator = yield* s.ensureCoordinator().pipe(Effect.catchCause(() => Effect.succeed(null)));
-      if (coordinator) out(`${coordinator} is the coordinator: people talk with them (kiwi role ${coordinator} none to change that)`);
-    }),
-
-  deny: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const r = yield* findRequest(s, args[1] ?? (yield* die("usage: kiwi deny CODE|KEY")), { byKey: true });
-      yield* (yield* s.adminCh("turn a request down")).fx.deny(r.id);
-      out(`denied ${r.name} (${r.code ?? `key ${fingerprint(r.pk)}`})`);
-    }),
-
   members: () =>
     Effect.gen(function* () {
       const s = yield* session();
@@ -932,88 +599,20 @@ const commands: Record<string, Command> = {
         out(`${describeMember(m)}${m.name === s.me ? " (you)" : ""}${m.role ? ` — ${m.role}` : ""}${may}${m.active ? "" : "  (left)"}`);
       }
     }),
-
-  /** The channel's rooms: listed for anyone. */
+  /** The channel's rooms: listed for anyone (the owner makes and renames them in the Kiwi app). */
   rooms: () =>
     Effect.gen(function* () {
       const s = yield* session();
       out(formatRooms((yield* s.state()).state));
     }),
 
-  /** Owner: make or rename a room. */
-  room: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const [sub, a, b] = args.slice(1);
-      if (sub === "create") {
-        const name = a ?? (yield* die("usage: kiwi room create NAME"));
-        const { id, state } = yield* s.createRoom(name);
-        return out(`made #${state.rooms.get(id)?.name ?? name} (id ${id}); send there with --room ${state.rooms.get(id)?.name ?? id}`);
-      }
-      if (sub === "rename") {
-        const room = a ?? (yield* die("usage: kiwi room rename NAME|ID NEWNAME"));
-        yield* s.renameRoom(room, b ?? (yield* die("usage: kiwi room rename NAME|ID NEWNAME")));
-        return out(`renamed #${room} to #${b}`);
-      }
-      return yield* die("usage: kiwi room create NAME | kiwi room rename NAME|ID NEWNAME (owner); kiwi rooms lists them");
-    }),
-
-  /** What each member may do besides read: listed for anyone, set by the owner. */
-  scope: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const [name, given] = args.slice(1);
-      const { state } = yield* s.state();
-      if (!name) {
-        for (const m of [...state.members.values()].filter((x) => x.active).sort((a, b) => a.name.localeCompare(b.name))) {
-          out(`${m.name}${m.name === s.me ? " (you)" : ""}: ${m.owner ? "everything (owner)" : mayDo(m.scopes)}`);
-        }
-        return;
-      }
-      yield* s.adminCh("set what members may do");
-      const scopes =
-        parseScopes(given ?? (yield* die("usage: kiwi scope NAME member|read-only [--yes]"))) ?? (yield* die(`"${given}" isn't a level: say member or read-only`));
-      if (!(yield* confirm(`Let ${name} ${mayDo(scopes)}?`))) return yield* die("changing what a member may do needs your human's go-ahead; re-run with --yes");
-      yield* s.setScopes(name, scopes);
-      out(`${name} may now ${mayDo(scopes)}`);
-    }),
-
-  kick: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const owner = yield* s.adminCh("remove members");
-      const name = args[1] ?? (yield* die("usage: kiwi kick NAME"));
-      const m = (yield* s.members(true)).find((x) => x.name === name && x.active) ?? (yield* die(`"${name}" isn't a member`));
-      if (m.owner) return yield* die("the owner can't be removed; `kiwi close` deletes the channel");
-      const { state } = yield* s.state();
-      yield* owner.fx.remove(m.pk);
-      out(`removed ${name}; rotated the channel key so they can't read anything new`);
-      // The coordinator gone: the next agent in coordinates (with none, delivery is as usual until one arrives).
-      if (state.coordinator === name && state.mode.coordinatorOnly) {
-        const next = yield* s.ensureCoordinator().pipe(Effect.catchCause(() => Effect.succeed(null)));
-        out(next ? `${next} is the coordinator now` : "nobody coordinates now: make one with kiwi role NAME coordinator (meanwhile people talk with everyone)");
-      }
-    }),
-
   leave: () =>
     Effect.gen(function* () {
       const s = yield* session();
-      if (s.identity.pk === s.cfg.ownerPk) return yield* die("you own this channel; `kiwi close` deletes it for everyone");
+      if (s.identity.pk === s.cfg.ownerPk) return yield* die("this key owns the channel; close it from the Kiwi app");
       yield* s.ch.fx.leave();
       yield* (yield* Keystore).forgetMember(s.alias, s.me);
       out(`${s.me} left "${s.alias}"; its key is gone from this machine`);
-    }),
-
-  close: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const owner = yield* s.adminCh("close the channel");
-      if (!(yield* confirm(`Delete "${s.alias}" for everyone? Messages, members and keys are destroyed.`))) {
-        return yield* die("closing needs your human's go-ahead; re-run with --yes once they confirm");
-      }
-      yield* owner.fx.close();
-      yield* (yield* Keystore).wipeChannel(s.alias);
-      out(`closed "${s.alias}": deleted at the relay and on this machine`);
     }),
 
   channels: () =>
@@ -1023,8 +622,7 @@ const commands: Record<string, Command> = {
       const here = bindingFor(process.cwd());
       for (const [alias, c] of Object.entries(cfg.channels)) {
         const agents = (yield* keys.identitiesIn(c.roomId)).filter((n) => n !== c.owner && n !== c.person);
-        const you = c.person ? `  you: ${c.person} (kiwi tui)` : "";
-        out(`${here?.alias === alias ? "*" : " "} ${alias}${c.title && c.title !== alias ? ` (${c.title})` : ""}  ${agents.length ? `agents here: ${agents.join(", ")}` : "no agent keys"}${you}  ${c.relay}`);
+        out(`${here?.alias === alias ? "*" : " "} ${alias}${c.title && c.title !== alias ? ` (${c.title})` : ""}  ${agents.length ? `agents here: ${agents.join(", ")}` : "no agent keys"}  ${c.relay}`);
       }
     }),
 
@@ -1179,48 +777,27 @@ const commands: Record<string, Command> = {
         const held = new Map([...state.members.values()].filter((m) => m.active && m.color).map((m) => [m.color!, m.name]));
         return out(COLORS.map((c) => `${c.padEnd(7)} ${held.get(c) ?? "free"}`).join("\n"));
       }
-      const [member, pick] = b === undefined ? [s.me, a] : [a, b];
+      if (b !== undefined && a !== s.me) return yield* die("you pick your own colour; the owner sets anyone else's in the Kiwi app");
+      const pick = b ?? a;
       const color = pick === "none" ? null : isColor(pick) ? pick : yield* die(`"${pick}" isn't a colour: ${COLORS.join(", ")} (or none)`);
-      yield* s.setColor(member, color);
-      out(color ? `${member}'s colour is ${color}` : `cleared ${member}'s colour`);
-    }),
-
-  mode: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const [which, onOff] = args.slice(1);
-      if (!which) {
-        const { state } = yield* s.state();
-        return out(modeLine(state, s.me) ?? "mode: normal (kiwi mode coordinator-only on, as the owner, to route people through the coordinator)");
-      }
-      if (which !== "coordinator-only" || (onOff !== "on" && onOff !== "off")) return yield* die("usage: kiwi mode [coordinator-only on|off] [--no-strict]");
-      const state = yield* s.setMode(onOff === "on", !opt["no-strict"]);
-      out(modeLine(state, s.me) ?? "mode: normal");
+      yield* s.setColor(s.me, color);
+      out(color ? `your colour is ${color}` : "cleared your colour");
     }),
 
   charter: () =>
     Effect.gen(function* () {
       const s = yield* session();
-      const given = args.slice(1).join(" ").trim();
-      if (!given && !opt.clear) {
-        const { state } = yield* s.state();
-        return out(state.charter ? state.charter.text : "no charter (the owner sets one: kiwi charter \"what this channel is for, and its limits\")");
-      }
-      yield* s.adminCh("set the charter");
-      if (!(yield* confirm(opt.clear ? "Clear the charter?" : `Set the charter to: ${given}?`))) return yield* die("changing the charter needs your human's go-ahead; re-run with --yes");
-      const state = yield* s.setCharter(opt.clear ? null : given);
-      out(state.charter ? `charter: ${state.charter.text}` : "cleared the charter");
+      if (args.length > 1 || opt.clear) return yield* die(ADMIN_GONE);
+      const { state } = yield* s.state();
+      out(state.charter ? state.charter.text : "no charter (the owner sets one in the Kiwi app)");
     }),
 
-  /** Owner: stop every agent at once, or let them carry on. */
+  /** Whether the channel is on hold (the owner holds and lifts it in the Kiwi app). */
   hold: () =>
     Effect.gen(function* () {
       const s = yield* session();
-      const off = args[1] === "off";
-      if (args.length < 2) return out(holdLine((yield* s.state()).state) ?? "not on hold");
-      yield* s.adminCh("put the channel on hold or lift it");
-      const state = yield* s.setHold(!off, off ? undefined : args.slice(1).join(" ") || opt.note);
-      out(holdLine(state) ?? "hold lifted: agents may carry on");
+      if (args.length > 1) return yield* die(ADMIN_GONE);
+      out(holdLine((yield* s.state()).state) ?? "not on hold");
     }),
 
   /** Hand a decision to people instead of acting on it. */
@@ -1237,11 +814,10 @@ const commands: Record<string, Command> = {
   icon: () =>
     Effect.gen(function* () {
       const s = yield* session();
-      const emoji = args[1];
-      const file = (yield* images)?.[0];
-      if (!emoji && !file && !opt.clear) {
+      if (args[1] || opt.image || opt.clear) return yield* die(ADMIN_GONE);
+      {
         const icon = yield* s.ch.fx.icon();
-        if (!icon) return out("no icon (the owner sets one with: kiwi icon 🦊)");
+        if (!icon) return out("no icon (the owner sets one in the Kiwi app)");
         if (icon.kind === "emoji") return out(icon.emoji);
         const dir = joinPath(home(), "downloads", s.ch.roomId);
         mkdirSync(dir, { recursive: true });
@@ -1249,10 +825,6 @@ const commands: Record<string, Command> = {
         writeFileSync(path, Buffer.from(icon.data, "base64"));
         return out(`an image (${icon.mime}), saved at ${path}`);
       }
-      const owner = yield* s.adminCh("set the channel's icon");
-      const icon = opt.clear ? null : file ? { kind: "image" as const, mime: file.mime as "image/png", data: file.data } : { kind: "emoji" as const, emoji: emoji! };
-      yield* owner.fx.setIcon(icon);
-      out(icon === null ? "cleared the channel's icon" : icon.kind === "emoji" ? `the channel's icon is ${icon.emoji}` : "the channel's icon is that image");
     }),
 
   thread: () =>
@@ -1425,7 +997,7 @@ const commands: Record<string, Command> = {
         const keys = yield* Keystore;
         const cfg = yield* keys.config;
         const aliases = Object.keys(cfg.channels).sort();
-        if (!aliases.length) return yield* die("no channels yet (see: kiwi create, kiwi join)");
+        if (!aliases.length) return yield* die("no channels yet (see: kiwi join)");
         // Only channels the acting agent is in itself: another local agent's keys are not ours to use.
         const me = opt.as ?? process.env.KIWI_AS ?? bindingFor(process.cwd())?.as ?? (yield* die("--global needs to know who you are: pass --as NAME, or run it from your bound folder"));
         for (const alias of aliases) {
@@ -1495,66 +1067,12 @@ const commands: Record<string, Command> = {
   hello: () =>
     Effect.gen(function* () {
       const s = yield* session();
-      // Roles aren't asked for: the owner sets them (kiwi role NAME ROLE, or People on the web).
+      // Roles aren't asked for: the owner sets them in the Kiwi app.
       if (opt.role || opt.about) return yield* die("the owner sets roles and rules: ask them in a message (kiwi send --to human \"…\")");
       yield* s.hello();
       const me = (yield* s.state()).state.members.get(s.me);
       out(`announced ${s.me}${me?.role ? ` as ${me.role}` : ""}`);
     }),
-
-  /** Roles are the owner's to give: kiwi role NAME ROLE sets one (kiwi status shows everyone's). */
-  role: () =>
-    Effect.gen(function* () {
-      const s = yield* session();
-      const [member, role] = args.slice(1);
-      if (!member || !role) return yield* die('usage: kiwi role NAME ROLE [--about "rules"] [--yes] (the owner sets roles; "none" clears one)');
-      yield* s.adminCh("set roles");
-      const clear = role.toLowerCase() === "none";
-      if (!(yield* confirm(clear ? `Clear ${member}'s role?` : `Make ${member} ${role}?`))) return yield* die("changing a role needs your human's go-ahead; re-run with --yes");
-      const { state } = yield* s.state();
-      const wasCoordinator = state.coordinator === member;
-      const becomes = !clear && role.trim().toLowerCase() === COORDINATOR;
-      // Coordinator-only follows the role. Taking it away turns the mode off first, so there's never a moment
-      // of coordinator mode with nobody in it (when an owner page would hand the role to the next agent).
-      if (wasCoordinator && !becomes && state.mode.coordinatorOnly) {
-        yield* s.setMode(false);
-        out("coordinator-only is off: nobody holds the coordinator role now");
-      }
-      yield* s.decideRole(member, { role: clear ? null : role, ...(opt.about !== undefined ? { about: opt.about } : {}) });
-      out(clear ? `cleared ${member}'s role` : `made ${member} ${role}`);
-      if (becomes && !state.mode.coordinatorOnly) {
-        yield* s.setMode(true);
-        out("coordinator-only is on: people talk with the coordinator");
-      }
-    }),
-
-  web: () =>
-    Effect.gen(function* () {
-      const alias = yield* channelAlias();
-      const c = (yield* config).channels[alias]!;
-      // A link that carries a person's key (the owner's, or a seat brought here for kiwi tui) never goes
-      // into an agent's transcript: printed only for a person at a terminal of their own.
-      const personKey = (name: string) => name === c.owner || name === c.person;
-      const refuse = () => die("this link carries a person's key: run kiwi web in a terminal of your own, outside Claude Code (not with !)");
-      if (c.owner && !opt["sign-in"]) {
-        if (inAgentHarness()) return yield* refuse();
-        out(yield* ownerLink(c));
-        process.stderr.write("kiwi: this link carries the owner key (approve, remove, close); keep it private\n");
-        return;
-      }
-      let link = `${c.relay}/#${encodeURIComponent(c.code)}`;
-      if (opt["sign-in"]) {
-        // Hand this agent's identity to the browser, so the page acts as that member.
-        const name = yield* agentName(c);
-        if (personKey(name) && inAgentHarness()) return yield* refuse();
-        const id = yield* (yield* Keystore).identity(name, c.roomId);
-        link += `&id=${b64url(new TextEncoder().encode(JSON.stringify(id)))}`;
-      }
-      out(link);
-      if (opt["sign-in"]) process.stderr.write("kiwi: this link carries your identity; keep it private\n");
-      else process.stderr.write("kiwi: opening it asks to join; the owner approves the browser like any agent\n");
-    }),
-
   prompt: () =>
     Effect.gen(function* () {
       const alias = yield* channelAlias();
@@ -1576,44 +1094,6 @@ const commands: Record<string, Command> = {
         ),
       );
     }),
-
-  /** The person's seat in a terminal: the owner key here, or one brought from the web with --link. */
-  tui: () =>
-    Effect.gen(function* () {
-      const keys = yield* Keystore;
-      const tty = process.stdin.isTTY && process.stdout.isTTY;
-      const link = opt.link ?? (args[1]?.includes("#") ? args[1] : undefined);
-      // kiwi tui <join code>: pair this terminal by a code you approve on the web.
-      const pairing = !link && args[1]?.startsWith("mc2-") ? args[1].trim() : undefined;
-      if (pairing) {
-        try {
-          decodeJoinCode(pairing);
-        } catch {
-          return yield* die("that isn't a join code (they look like mc2-…-…)");
-        }
-      }
-      if (!tty && !pairing) return yield* die("kiwi tui needs a terminal (stdin and stdout a TTY)");
-      if (pairing && !opt.pair) return yield* die("copy the whole command from your browser: the channel's menu → Use in a terminal… (it ends with --pair …)");
-      const alias = link ? yield* importPerson(link) : pairing ? yield* die("pairing a terminal with kiwi tui is gone in 0.11: use the Kiwi app") : yield* personAlias();
-      // Paired from something that isn't a terminal: the seat is here now, for the next kiwi tui.
-      if (!tty) return out(`Your seat is on this computer now. Open it in a terminal with: kiwi tui${Object.keys((yield* keys.config).channels).length > 1 ? ` -c ${alias}` : ""}`);
-      const c = (yield* keys.config).channels[alias]!;
-      const name = opt.as ?? c.person ?? c.owner;
-      const here = yield* keys.identitiesIn(c.roomId);
-      if (!name || (name !== c.person && name !== c.owner)) {
-        return yield* die(
-          `there's no person's seat for "${alias}" on this computer (agents here: ${here.join(", ") || "none"}).\n` +
-            "  On the web, open the channel's menu → Use in a terminal, and run the command it shows (kiwi tui mc2-…).",
-        );
-      }
-      if (!here.includes(name)) return yield* die(`the key for ${name} in "${alias}" is gone from this computer; bring it again with kiwi tui mc2-… (the channel's menu → Use in a terminal)`);
-      acting.alias = alias;
-      acting.name = name;
-      const s = yield* openPersonSession(alias, c, name);
-      const { runTui } = yield* Effect.promise(() => import("../tui/app.ts"));
-      yield* Effect.promise(() => runTui(s, { label: `${name}${s.ownerCh ? " (owner)" : ""}` }));
-    }),
-
   mcp: () =>
     Effect.gen(function* () {
       const { runMcp } = yield* Effect.promise(() => import("../mcp.ts"));

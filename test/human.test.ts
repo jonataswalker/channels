@@ -121,7 +121,7 @@ describe("agents join with computer claims, people with person claims", () => {
     const stray = await generateIdentity("stray");
     const roomId = s.roomId;
     const wrongAgent = await claimComputer(computer.machine, computer.cert, roomId, (await generateIdentity("other")).pk);
-    const { requestId } = await Channel.requestJoin(relay, s.code, stray, { name: "stray" }, null, null, { computer: wrongAgent });
+    const { requestId } = await Channel.requestJoin(relay, s.code, stray, { name: "stray" }, { computer: wrongAgent });
     const [r] = (await s.ownerCh.requests({ person: s.person.pk })).filter((x) => x.id === requestId);
     expect(r?.computer).toBeUndefined();
     await s.ownerCh.deny(requestId);
@@ -155,17 +155,17 @@ describe("names", () => {
     // A person who types someone else's name gets exactly what they typed (there's no account
     // handle anymore); a second requester under a taken name is refused at approval.
     const bob1 = await generateIdentity("b1");
-    const ask1 = await Channel.requestJoin(relay, s.code, bob1, { name: "alice" }, null, null, { person: await provePerson(await generateIdentity("p1"), s.roomId, bob1.pk) });
+    const ask1 = await Channel.requestJoin(relay, s.code, bob1, { name: "alice" }, { person: await provePerson(await generateIdentity("p1"), s.roomId, bob1.pk) });
     await s.ownerCh.approve((await checked(s.ownerCh, relay, s.code, [{ id: bob1, requestId: ask1.requestId }]))[0]!);
     const bob2 = await generateIdentity("b2");
-    const ask2 = await Channel.requestJoin(relay, s.code, bob2, { name: "alice" }, null, null, { person: await provePerson(await generateIdentity("p2"), s.roomId, bob2.pk) });
+    const ask2 = await Channel.requestJoin(relay, s.code, bob2, { name: "alice" }, { person: await provePerson(await generateIdentity("p2"), s.roomId, bob2.pk) });
     const dup = (await checked(s.ownerCh, relay, s.code, [{ id: bob2, requestId: ask2.requestId }]))[0]!;
     await expect(s.ownerCh.approve(dup)).rejects.toThrow(/already someone's name/);
     // An agent can't take a person's name, nor one that reads as theirs ("alice-2"): it's offered an agent's.
     const computer = await pairComputer(s.person);
     const agent = await generateIdentity("agent");
     const claim = await claimComputer(computer.machine, computer.cert, s.roomId, agent.pk);
-    const ask3 = await Channel.requestJoin(relay, s.code, agent, { name: "alice" }, null, null, { computer: claim });
+    const ask3 = await Channel.requestJoin(relay, s.code, agent, { name: "alice" }, { computer: claim });
     const taken = (await checkedByHand(s.ownerCh, relay, s.code, [{ id: agent, requestId: ask3.requestId }])).find((r) => r.id === ask3.requestId)!;
     expect(taken.name).toBe("agent");
     await s.ownerCh.approve(taken);

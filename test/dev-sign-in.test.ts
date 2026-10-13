@@ -67,7 +67,7 @@ test("agents join with a computer claim and people with a person claim; nobody n
   const agent = await generateIdentity("unclaimed");
   const roomId = decodeJoinCode(s.code).roomId;
   const badClaim = await claimComputer(computer.machine, computer.cert, roomId, (await generateIdentity("other")).pk);
-  const { requestId } = await Channel.requestJoin(relay, s.code, agent, { name: "unclaimed" }, null, null, { computer: badClaim });
+  const { requestId } = await Channel.requestJoin(relay, s.code, agent, { name: "unclaimed" }, { computer: badClaim });
   const [req] = (await s.ownerCh.requests({ person: s.person.pk })).filter((r) => r.id === requestId);
   expect(req?.computer).toBeUndefined();
   await s.ownerCh.deny(requestId);

@@ -684,15 +684,9 @@ export class Channel {
       code: string,
       id: Identity,
       info: MemberInfo,
-      /** Ignored since 0.11 (only channel creation takes a session). Kept so older callers compile. */
-      human?: string | null,
-      /** Ignored since 0.11 (the relay no longer vouches for anyone). Kept so older callers compile. */
-      machine?: { pk: string; sig: string } | null,
       /** The claims sealed into the request: an agent's computer claim, a person's person claim. */
       claims?: JoinClaims,
     ) {
-      void human;
-      void machine;
       const { roomId, info: room } = yield* pinnedInfo(relay, code);
       if (!id.xpk) return yield* new MissingKey("identity has no exchange key");
       const xpk = id.xpk;
@@ -1538,14 +1532,10 @@ export class Channel {
     code: string,
     id: Identity,
     info: MemberInfo,
-    /** Ignored since 0.11 (only channel creation takes a session). Kept so older callers compile. */
-    human?: string | null,
-    /** Ignored since 0.11 (the relay no longer vouches for anyone). Kept so older callers compile. */
-    machine?: { pk: string; sig: string } | null,
     /** The claims sealed into the request: an agent's computer claim, a person's person claim. */
     claims?: JoinClaims,
   ): Promise<{ roomId: string; requestId: string }> {
-    return run(Channel.fx.requestJoin(relay, code, id, info, human, machine, claims));
+    return run(Channel.fx.requestJoin(relay, code, id, info, claims));
   }
 
   /** Check a join request. Once approved, returns this member's access. */

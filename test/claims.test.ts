@@ -53,7 +53,7 @@ describe("computer claims", () => {
     const id = await generateIdentity("sneaky");
     // The vouch is for another key: the computer never vouched for this agent.
     const forged = await claimComputer(computer.machine, computer.cert, s.roomId, (await generateIdentity("other")).pk);
-    const { requestId } = await Channel.requestJoin(relay, s.code, id, { name: "sneaky" }, null, null, { computer: forged });
+    const { requestId } = await Channel.requestJoin(relay, s.code, id, { name: "sneaky" }, { computer: forged });
     const req = (await s.ownerCh.requests()).find((r) => r.id === requestId)!;
     expect(req.computer).toBeUndefined();
     expect(req.check).toBe("unchecked");
@@ -75,7 +75,7 @@ describe("person claims", () => {
     const person = await generateIdentity("mallory");
     const id = await generateIdentity("mallory-agent");
     const wrongKey = await provePerson(person, s.roomId, (await generateIdentity("other")).pk);
-    const { requestId } = await Channel.requestJoin(relay, s.code, id, { name: "mallory-agent" }, null, null, { person: wrongKey });
+    const { requestId } = await Channel.requestJoin(relay, s.code, id, { name: "mallory-agent" }, { person: wrongKey });
     const req = (await s.ownerCh.requests()).find((r) => r.id === requestId)!;
     expect(req.person).toBeUndefined();
     expect(req.kind).toBe("agent");
@@ -113,11 +113,11 @@ describe("auto-approval", () => {
     const other = await pairComputer(otherPerson, "stranger-box");
 
     const ownId = await generateIdentity("own-agent");
-    const ownReq = await Channel.requestJoin(relay, s.code, ownId, { name: "own-agent" }, null, null, {
+    const ownReq = await Channel.requestJoin(relay, s.code, ownId, { name: "own-agent" }, {
       computer: await claimComputer(own.machine, own.cert, s.roomId, ownId.pk),
     });
     const otherId = await generateIdentity("other-agent");
-    const otherReq = await Channel.requestJoin(relay, s.code, otherId, { name: "other-agent" }, null, null, {
+    const otherReq = await Channel.requestJoin(relay, s.code, otherId, { name: "other-agent" }, {
       computer: await claimComputer(other.machine, other.cert, s.roomId, otherId.pk),
     });
 
