@@ -58,6 +58,7 @@ import {
   PROTOCOL_VERSION,
   WS_PROTOCOL,
   wellFormed,
+  wellFormedRead,
   type Envelope,
   type Event,
   type ImageAttachment,
@@ -65,6 +66,7 @@ import {
   type Message,
   type Payload,
   type Presence,
+  type ReadMark,
   type ServerFrame,
 } from "./protocol.ts";
 
@@ -271,6 +273,8 @@ export type Live =
   | { readonly _tag: "Ready"; readonly head: number }
   | { readonly _tag: "Message"; readonly message: Message }
   | { readonly _tag: "Presence"; readonly presence: Presence & { sigOk: boolean } }
+  /** How far members have read (by key): one mark as it moves, or all of them on connect. */
+  | { readonly _tag: "Read"; readonly reads: readonly ReadMark[] }
   /** The channel's info changed, the member list changed, someone asked to join. */
   | { readonly _tag: "Info" | "Roster" | "Request" }
   /** The relay has been out of reach for the quiet window (`after` ms); still retrying. Said once per outage. */
@@ -331,7 +335,7 @@ function clockFrom(now: () => number): Clock.Clock {
 }
 
 /** The frame each Live came from, for the line about one whose handling failed. */
-const FRAME: Record<Live["_tag"], string> = { Open: "open", Ready: "ready", Message: "msg", Presence: "eph", Info: "info", Roster: "roster", Request: "request", Down: "status", Skipped: "status" };
+const FRAME: Record<Live["_tag"], string> = { Open: "open", Ready: "ready", Message: "msg", Presence: "eph", Info: "info", Roster: "roster", Request: "request", Read: "read", Down: "status", Skipped: "status" };
 const failedFrame = (frame: string, err: unknown) => `dropped a ${frame} frame whose handling failed: ${reason(err)}`;
 
 /** What went wrong, in words: a relay out of reach says what fetch said, as it always has. */
@@ -586,6 +590,12 @@ export interface ChannelFx {
   rotateIfDue(): Effect.Effect<boolean, Refused, Relay>;
   close(): Effect.Effect<void, Refused, Relay>;
   head(): Effect.Effect<number, MemberRefusal, Relay>;
+  /**
+   * Tell the channel this member has read everything up to `seq`, so senders see "Read". Best effort:
+   * it never fails, sends nothing that doesn't move the mark forward, and stops asking a relay that
+   * doesn't know read marks (an older one).
+   */
+  markRead(seq: number): Effect.Effect<void, never, Relay>;
   send(body: string, opts?: SendOptions): Effect.Effect<number, Refused, Relay>;
   decrypt(env: Envelope): Effect.Effect<Message | null, never, Relay>;
   history(since: number): Effect.Effect<{ head: number; messages: Message[] }, MemberRefusal, Relay>;
@@ -603,6 +613,9 @@ export class Channel {
   readonly name: string;
   /** The key fetch in flight, shared by everyone who needs it meanwhile. */
   private refreshing: Fiber.Fiber<void, MemberRefusal> | null = null;
+  /** How far this member has told the relay it read, and whether the relay knows read marks at all. */
+  private markedTo = 0;
+  private marksUnknown = false;
 
   constructor(
     public access: ChannelAccess,
@@ -1259,6 +1272,14 @@ export class Channel {
       return (yield* this.request<{ head: number }>("/")).head;
     }),
 
+    markRead: Effect.fn("Channel.markRead")({ self: this }, function* (this: Channel, seq: number) {
+      if (this.marksUnknown || !Number.isSafeInteger(seq) || seq <= this.markedTo) return;
+      const exit = yield* Effect.exit(this.request("/read", { method: "POST", body: JSON.stringify({ seq }) }));
+      if (Exit.isSuccess(exit)) this.markedTo = seq;
+      // An older relay answers an unknown route "not found": don't ask it again.
+      else if (/not found/i.test(String((Cause.squash(exit.cause) as Error)?.message ?? ""))) this.marksUnknown = true;
+    }),
+
     send: Effect.fn("Channel.send")({ self: this }, function* (this: Channel, body: string, opts: SendOptions = {}) {
       const imgs = opts.imgs?.slice(0, MAX_IMAGES);
       // The same raster list as icons. A caller that skips the file picker still cannot attach SVG.
@@ -1595,6 +1616,14 @@ export class Channel {
           return { _tag: "Request" } satisfies Live;
         case "ready":
           return { _tag: "Ready", head: f.head } satisfies Live;
+        case "read": {
+          const mark = wellFormedRead(f);
+          return mark && ({ _tag: "Read", reads: [mark] } satisfies Live);
+        }
+        case "reads": {
+          const reads = Array.isArray(f.reads) ? f.reads.map(wellFormedRead).filter((r): r is ReadMark => r !== null) : [];
+          return { _tag: "Read", reads } satisfies Live;
+        }
         default:
           return null;
       }

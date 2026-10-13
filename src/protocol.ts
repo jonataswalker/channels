@@ -80,7 +80,24 @@ export type ServerFrame =
   /** Membership channels: someone asked to join; the owner should look. */
   | { t: "request" }
   /** The channel's info changed (its icon); refetch it. */
-  | { t: "info" };
+  | { t: "info" }
+  /** A member has read everything up to `seq` (their word for it, at the relay's `at`). Older clients ignore it. */
+  | ({ t: "read" } & ReadMark)
+  /** On connect, before ready: how far each member has read. */
+  | { t: "reads"; reads: ReadMark[] };
+
+/** How far one member has read: a seq and when it got there. A number, never content. */
+export interface ReadMark {
+  pk: string;
+  seq: number;
+  at: number;
+}
+
+/** A read mark as it came off the wire, or null. */
+export function wellFormedRead(x: unknown): ReadMark | null {
+  const r = x as Partial<ReadMark> | null;
+  return r && typeof r.pk === "string" && r.pk.length <= 64 && Number.isSafeInteger(r.seq) && r.seq! > 0 && Number.isSafeInteger(r.at) ? { pk: r.pk, seq: r.seq!, at: r.at! } : null;
+}
 
 /**
  * Frames a client sends over the WebSocket. `send` is stored and gets a

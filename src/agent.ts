@@ -35,6 +35,10 @@ export { Rejected };
 
 /** How often a listening agent re-announces itself. Receivers treat 2.5x this as offline. */
 export const PRESENCE_EVERY_MS = 60_000;
+/** How often a listener tells the channel how far it has read, at most. */
+export const MARK_EVERY_MS = 1_000;
+/** How long a command that's done waits for its last read mark to land. */
+const LAST_MARK_MS = 2_000;
 /** What `--to` takes for "everyone, on purpose". */
 const EVERYONE = new Set(["all", "everyone", "*"]);
 export const PRESENCE_TTL_MS = 150_000;
@@ -60,6 +64,12 @@ export interface Hearing<R = never> {
   onStatus?: (line: string) => Effect.Effect<void>;
   /** Something the owner's machine should act on: a join request whose code both sides can see. */
   onNotice?: (text: string) => Effect.Effect<void, never, R>;
+  /**
+   * Tell the channel what this hands on has been read (default true). Off for a listener whose
+   * handing-on isn't reading yet: the hooks' background listener (its session reads at its next turn)
+   * and the MCP wait (a cancelled call gives its messages back).
+   */
+  marks?: boolean;
 }
 
 /** What a session needs: the relay, and this computer's files. */
@@ -298,8 +308,14 @@ export class AgentSession {
     const seen = yield* cursor.seen(this.alias, this.me);
     const unread = messages.filter((m) => m.seq > since && !seen.has(m.seq) && this.wants(m, state, d));
     yield* cursor.write(this.alias, this.me, Math.max(since, state.head));
+    if (unread.length) yield* this.markRead(state.head);
     return { messages: unread, state };
   });
+
+  /** Tell the channel this agent has read up to `seq`, waiting a moment for it to land; never fails. */
+  markRead(seq: number): Effect.Effect<void, never, Relay> {
+    return Effect.ignoreCause(Effect.timeout(this.ch.fx.markRead(seq), LAST_MARK_MS));
+  }
 
   readonly unreadCount = Effect.fn("AgentSession.unreadCount")({ self: this }, function* (this: AgentSession, state: ChannelState, messages: Message[]) {
     const cursor = yield* Cursor;
@@ -334,6 +350,8 @@ export class AgentSession {
       /** In the background, for as long as this listens; its failure is nobody's business. */
       const aside = <E, R2>(e: Effect.Effect<unknown, E, R2>) => Effect.forkScoped(Effect.ignoreCause(e));
 
+      /** How far this has handed messages on (read marks follow it). */
+      let readTo = 0;
       const hear = (m: Message) =>
         Effect.gen({ self: this }, function* () {
           if (m.seq > (messages.at(-1)?.seq ?? 0)) {
@@ -346,7 +364,14 @@ export class AgentSession {
           }
           if (!seen.has(m.seq) && this.wants(m, state, opts)) yield* onMessage(m, state);
           yield* cursor.write(this.alias, this.me, m.seq);
+          readTo = m.seq;
         });
+
+      // What's been handed on is read: say so a second apart at most, and once more when this ends.
+      if (opts.marks !== false) {
+        yield* Effect.forkScoped(Effect.forever(Effect.andThen(Effect.sleep(MARK_EVERY_MS), Effect.suspend(() => this.ch.fx.markRead(readTo)))));
+        yield* Effect.addFinalizer(() => Effect.suspend(() => this.markRead(readTo)));
+      }
 
       const opened = (presence: Extract<Live, { _tag: "Open" }>["presence"]) =>
         Effect.gen({ self: this }, function* () {
