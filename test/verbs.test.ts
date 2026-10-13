@@ -158,7 +158,10 @@ describe("ten verbs", () => {
     await ok(owner, "send", "--to", "dev", "streamed");
     await until(() => got.includes("streamed"), "streamed message");
     stream.kill();
-    await reading;
+    await stream.exited;
+    // Bun never ends a killed child's stdout (test/proc.ts): stop reading instead of waiting for EOF.
+    await reader.cancel().catch(() => {});
+    await reading.catch(() => {});
   });
 
   test("show: the message, what it answers, its replies, and the rest of its thread", async () => {

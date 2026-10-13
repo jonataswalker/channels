@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Channel } from "../src/client.ts";
 import { generateIdentity } from "../src/identity.ts";
 import { startRelay } from "../src/relay/bun.ts";
+import { killAndRead } from "./proc.ts";
 
 setDefaultTimeout(30_000);
 
@@ -105,8 +106,7 @@ test("tail started while the relay is down keeps waiting instead of exiting", as
       backSince ??= Date.now();
       return Date.now() - backSince >= 1_000;
     }, "tail still listening after the relay came back");
-    tail.kill();
-    expect(await new Response(tail.stderr).text()).not.toContain("socket");
+    expect(await killAndRead(tail)).not.toContain("socket");
   } finally {
     server.stop(true);
     rmSync(dir, { recursive: true, force: true });
