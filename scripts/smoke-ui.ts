@@ -336,6 +336,17 @@ try {
   await page.getByText(/joined via/).first().waitFor({ timeout: 15000 })
   console.log(`ok  ${at}`)
 
+  // Read receipts (T1554): once the agents it went to have read your newest message, it says so.
+  at = "read receipt"
+  await page.getByRole("textbox", { name: "Message" }).fill("smoke, read me")
+  await page.keyboard.press("Enter")
+  await page.getByText("smoke, read me", { exact: true }).first().waitFor()
+  // Nothing yet: an agent counts only once it has ever said how far it read (an older kiwi never does).
+  for (const as of ["bot", "helper"]) await kiwi(["-c", "smoke", "--as", as, "listen", "--now"])
+  await page.getByText(/^Read( by|\s\d)/).waitFor({ timeout: 15000 })
+  if (process.env.SMOKE_SHOTS) await page.screenshot({ path: join(process.env.SMOKE_SHOTS, "read.png") })
+  console.log(`ok  ${at}`)
+
   // Your seat in a terminal (T1389): kiwi tui <code> on another computer shows a code, the dialog shows
   // the same, and "It matches" hands the seat over sealed. Nothing with a key is copied.
   at = "pair a terminal"

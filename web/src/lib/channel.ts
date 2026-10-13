@@ -27,6 +27,7 @@ import { fold, type ChannelState, type GuardFloor, type Roster } from "@mc/state
 import { forgetHistory, readCached, rememberMessage } from "./history"
 import { wholeLog } from "./history-plan"
 import { ICON_LIVE } from "./icon-event"
+import { addMarks, type Marks } from "./receipts"
 import { fork, run } from "./runtime"
 import { noteSignInGone } from "./session"
 import { Storage } from "./storage"
@@ -630,6 +631,10 @@ export interface ChannelHandle {
   refreshRoster: () => Promise<void>
   /** The channel's newest seq when this view opened (0 until the relay says). */
   head: number
+  /** How far each member's key has read, as this view heard it (receipts.ts). */
+  marks: Marks
+  /** A current member's key, by name. */
+  pkOf: (name: string) => string | undefined
 }
 
 /** What a channel view does with each step of opening and following a channel. */
@@ -706,6 +711,7 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
   const [messages, setMessages] = useState<Message[]>([])
   const [roster, setRoster] = useState<Member[]>([])
   const [online, setOnline] = useState<Map<string, Online>>(new Map())
+  const [marks, setMarks] = useState<Marks>(new Map())
   const [requests, setRequests] = useState<JoinRequest[]>([])
   const now = useClock(15_000)
   const isOwner = ch.isOwner
@@ -826,6 +832,9 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
             return void refreshRoster()
           case "Request":
             return void refreshRequests()
+          case "Read":
+            setMarks((prev) => addMarks(prev, ev.reads, ev.snapshot))
+            return
           case "Info":
             setInfoAt(Date.now())
             window.dispatchEvent(new CustomEvent(ICON_LIVE, { detail: member.code }))
@@ -908,6 +917,8 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
     [onGone]
   )
 
-  return { ch, connection, gone, messages, roster, state, online: live, isOwner, requests, send, refreshRequests, refreshRoster, head: start?.head ?? 0 }
+  const pkOf = useCallback((name: string) => keyOf.get(name), [keyOf])
+
+  return { ch, connection, gone, messages, roster, state, online: live, isOwner, requests, send, refreshRequests, refreshRoster, head: start?.head ?? 0, marks, pkOf }
 }
 

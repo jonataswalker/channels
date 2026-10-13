@@ -14,9 +14,10 @@ import { useAuth } from "@/lib/auth"
 import { channelTitle, forgetChannel, LEFT_CHANNEL, loadMember, loadRecent, saveMember, saveRecent, useChannel, useClock, useKnownChannels, type StoredMember } from "@/lib/channel"
 import { markSeen, setOpenNews } from "@/lib/news"
 import { useIcons, useLiveIcon } from "@/lib/icons"
-import { excerpt, memberName } from "@/lib/format"
+import { excerpt, formatTime, memberName } from "@/lib/format"
 import { usePlaceSlot } from "@/lib/place-slot"
 import { coordinatorMood, ERROR_MS, moodInputs, SPEAKING_MS, type Mood } from "@/lib/coordinator-mood"
+import { receipt } from "@/lib/receipts"
 import { dmPlace, markSeenIn, MAIN, placeFromKey, placeKey, seenIn, sendFrom, useSeen, threadMembers, type Place, type PlaceSummary } from "@/lib/threads"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
@@ -127,7 +128,7 @@ const summarised = (m: Message) => m.ev?.op === "task.add" || (m.ev?.op === "tas
 export function Conversation({ member, onBack, onGone }: { member: StoredMember; onBack: () => void; onGone: () => void }) {
   const me = member.identity.name
   const auth = useAuth()
-  const { ch, connection, gone, messages, roster, state, online, isOwner, requests, send, refreshRequests, refreshRoster, head } = useChannel(
+  const { ch, connection, gone, messages, roster, state, online, isOwner, requests, send, refreshRequests, refreshRoster, head, marks, pkOf } = useChannel(
     member,
     auth.status === "loading" ? null : auth.token,
   )
@@ -427,6 +428,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
 
   // ---------- the conversation: stamps, bubbles in runs, events as centred lines ----------
   const group = memberCount > 2
+  // Your newest message here says whether the agents it went to have read it, as Messages does.
+  const lastMine = visible.findLast((m) => m.from === me && m.kind !== "event")?.seq
   const bubble = (m: Message, first: boolean, last: boolean, prev: Message | undefined, anchor?: string) => (
     <Bubble
       key={m.seq}
@@ -450,6 +453,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       onJump={jump}
       thread={search || anchor ? undefined : summaryOf(m.seq)}
       onOpenThread={setThreadRoot}
+      receipt={!anchor && m.seq === lastMine ? (receipt(m, state, marks, pkOf, formatTime) ?? undefined) : undefined}
       // The coordinator's runs end on its face; only the latest one moves.
       face={coord && m.from === coord ? <CoordinatorAvatar size={28} mood={mood} live={m.seq >= (said?.last ?? 0) && !anchor} seed={0.3} /> : undefined}
     />

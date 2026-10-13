@@ -137,6 +137,8 @@ function phrase(m: Message, me: string, nameOf: (n: string) => string, repliedTo
 interface BubbleProps {
   m: Message
   me: string
+  /** Under your newest message: whether the agents it went to have read it (receipts.ts). */
+  receipt?: string
   /** Coordinator-only: an agent sent this to a person directly, not through this coordinator. */
   direct?: string
   /** Found by the key that signed the message, so two members sharing a name still read right. */
@@ -183,7 +185,7 @@ export interface ThreadSummary {
  * bubbles meet, on the sender's side, are tighter. An escalation is a plain bubble with an amber
  * "Decision for you" over it; a forged one (shown only when the owner asks) is struck through.
  */
-export const Bubble = memo(function Bubble({ m, me, author, trust, online, first, last, fresh, group, adjacentReply, highlighted, quoted, nameOf, onReply, onJump, thread, onOpenThread, anchor = "m", color, direct, face }: BubbleProps) {
+export const Bubble = memo(function Bubble({ m, me, author, trust, online, first, last, fresh, group, adjacentReply, highlighted, quoted, nameOf, onReply, onJump, thread, onOpenThread, anchor = "m", color, direct, face, receipt }: BubbleProps) {
   const forged = ignored(trust)
   const mine = m.from === me
   const repliedTo = new Set((m.re ?? []).map((seq) => quoted(seq)?.from).filter((f): f is string => !!f))
@@ -288,6 +290,11 @@ export const Bubble = memo(function Bubble({ m, me, author, trust, online, first
             <button type="button" onClick={() => onReply(m)} className="font-medium text-decide hover:underline">
               Answer
             </button>
+          </p>
+        )}
+        {receipt && mine && !forged && (
+          <p className="mt-0.5 px-3 text-stamp text-ink-3" aria-live="polite">
+            {receipt}
           </p>
         )}
         {direct && !forged && <p className="mt-0.5 px-3 text-stamp text-ink-3">Sent directly, not through {nameOf(direct)}.</p>}

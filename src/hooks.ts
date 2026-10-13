@@ -115,12 +115,13 @@ function noteDelivered(alias: string, as: string, session: string, seq: number):
 }
 
 /** The session took its turn after the listener woke it: what it was handed is read now. */
-const commitDelivered = Effect.fn("Hooks.commitDelivered")(function* (alias: string, as: string, session: string) {
-  const upTo = deliveredUpTo(alias, as, session);
+const commitDelivered = Effect.fn("Hooks.commitDelivered")(function* (s: AgentSession, session: string) {
+  const upTo = deliveredUpTo(s.alias, s.me, session);
   if (!upTo) return;
   const cursor = yield* Cursor;
-  if (((yield* cursor.read(alias, as)) ?? 0) < upTo) yield* cursor.write(alias, as, upTo);
-  rmSync(deliveredFile(alias, as, session), { force: true });
+  if (((yield* cursor.read(s.alias, s.me)) ?? 0) < upTo) yield* cursor.write(s.alias, s.me, upTo);
+  rmSync(deliveredFile(s.alias, s.me, session), { force: true });
+  yield* s.markRead(upTo);
 });
 
 /** Hold the one background listener slot for `as` on `alias` in this session; false when a live one already has it. */
@@ -611,7 +612,7 @@ const answer = Effect.fn("Hooks.answer")(function* (event: string, input: HookIn
   const listening = hooked || isListening(b.alias, b.as);
   const s = yield* openSession(b.alias, cfg, b.as);
   // A hook from the session the listener woke: it has seen what it was handed.
-  if (who.session) yield* commitDelivered(b.alias, b.as, who.session);
+  if (who.session) yield* commitDelivered(s, who.session);
 
   if (event === "session-start") {
     const { state } = yield* s.state();
@@ -712,6 +713,8 @@ const listen = Effect.fn("Hooks.listen")(function* (b: Binding, cfg: ChannelConf
     .listen((m, state) => Effect.andThen(Effect.sync(() => void got.push(formatMessage(m, state.trust.get(m.seq), state, s.me))), woke), {
       client: "hook",
       onNotice: (text) => Effect.andThen(Effect.sync(() => void got.push(`* ${text}`)), woke),
+      // Handed over isn't read yet: the session's next hook commits it, and marks it read then.
+      marks: false,
     })
     .pipe(Effect.provideService(Cursor, peek));
   // Its session ending ends it too: nobody would get what it read.

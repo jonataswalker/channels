@@ -169,13 +169,15 @@ export const runMcp = Effect.fn("Mcp.run")(function* (s: AgentSession, opts: { p
             // Linger briefly so a burst of messages is delivered as one wake-up.
             return lines.length === 1 ? Effect.asVoid(Effect.forkScoped(Effect.andThen(Effect.sleep(400), Deferred.succeed(enough, undefined)))) : Effect.void;
           });
-        const listening = s.listen((m, state) => heard(formatMessage(m, state.trust.get(m.seq), state, s.me)), { client: "mcp-wait", onNotice: heard });
+        const listening = s.listen((m, state) => heard(formatMessage(m, state.trust.get(m.seq), state, s.me)), { client: "mcp-wait", onNotice: heard, marks: false });
         const over = Effect.raceFirst(Deferred.await(enough), Effect.raceFirst(Effect.sleep(seconds * 1000), cancelled(extra.signal)));
         yield* Effect.raceFirst(listening, over).pipe(
           Effect.ensuring(Effect.suspend(() => (extra.signal.aborted ? cursor.write(s.alias, s.me, since) : Effect.void))),
           Effect.scoped,
         );
         if (extra.signal.aborted || !lines.length) return "no messages yet, call wait_for_messages again.\nNext: call wait_for_messages.";
+        // Handed back to the session: read now.
+        yield* s.markRead((yield* cursor.read(s.alias, s.me)) ?? 0);
         return `${lines.join("\n")}\nNext: handle these. If one needs an answer, call reply. Then call wait_for_messages.`;
       }),
     ),

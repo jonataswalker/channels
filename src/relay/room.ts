@@ -62,6 +62,7 @@ import {
   WS_PROTOCOL,
   type ClientFrame,
   type Envelope,
+  type ReadMark,
   type ServerFrame,
 } from "../protocol.ts";
 
@@ -153,6 +154,12 @@ export function allow(key: string, limit: number): boolean {
 
 /** Most join requests a room holds at once; stops request spam. */
 const MAX_PENDING = 20;
+
+/** How far each member has read: the relay keeps a seq and a time per key, never what was read. */
+const READS_TABLE = "CREATE TABLE reads (pk TEXT PRIMARY KEY, seq INTEGER NOT NULL, at INTEGER NOT NULL)";
+
+/** Read marks one member may send per minute: an agent marks as it reads, a second apart at most. */
+export const READS_PER_MINUTE = 60;
 /** Pending requests expire after this long. */
 const REQUEST_TTL_MS = 60 * 60_000;
 /** What a member the owner lets only read is told when they post anyway. */
@@ -263,6 +270,7 @@ export class RoomDb {
     this.sql.run(
       `CREATE TABLE requests (id TEXT PRIMARY KEY, pk TEXT NOT NULL UNIQUE, xpk TEXT NOT NULL, box TEXT NOT NULL, sig TEXT NOT NULL, ts INTEGER NOT NULL, status TEXT NOT NULL, ${REQUEST_COLUMNS.map(([col, def]) => `${col} ${def}`).join(", ")})`,
     );
+    this.sql.run(READS_TABLE);
   }
 
   /** A room from before a column existed gets it added (a new room is created with all of them). */
@@ -277,6 +285,12 @@ export class RoomDb {
     for (const [col, def] of REQUEST_COLUMNS) {
       if (!cols.has(col)) this.sql.run(`ALTER TABLE requests ADD COLUMN ${col} ${def}`);
     }
+    this.sql.run(READS_TABLE.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS"));
+  }
+
+  /** How far each current member has read. */
+  reads(): ReadMark[] {
+    return this.sql.all<ReadMark>("SELECT r.pk AS pk, r.seq AS seq, r.at AS at FROM reads r JOIN members m ON m.pk = r.pk AND m.active = 1");
   }
 
   get(k: string): string | undefined {
@@ -1033,8 +1047,21 @@ export const remove = Effect.fn("Room.remove")(function* (pk: string) {
   db.sql.run("UPDATE members SET active = 0 WHERE pk = ?", pk);
   db.sql.run("DELETE FROM keys WHERE pk = ?", pk);
   db.sql.run("DELETE FROM requests WHERE pk = ?", pk);
+  db.sql.run("DELETE FROM reads WHERE pk = ?", pk);
   // Its keys are revoked at the relay; the owner rotates so they also can't decrypt anything newer.
   db.set("rotate", 1);
+});
+
+/** A member has read up to `seq`: kept only when it moves forward, and never past the head. Null when nothing changed. */
+export const markRead = Effect.fn("Room.markRead")(function* (pk: string, seq: unknown) {
+  const db = yield* RoomStore;
+  if (!Number.isSafeInteger(seq) || (seq as number) < 1) return yield* new BadRequest({ message: "seq must be a positive whole number" });
+  const upTo = Math.min(seq as number, db.head());
+  const was = db.sql.all<{ seq: number }>("SELECT seq FROM reads WHERE pk = ?", pk)[0]?.seq ?? 0;
+  if (upTo <= was) return null;
+  const at = yield* Clock.currentTimeMillis;
+  db.sql.run("INSERT INTO reads (pk, seq, at) VALUES (?, ?, ?) ON CONFLICT (pk) DO UPDATE SET seq = excluded.seq, at = excluded.at", pk, upTo, at);
+  return { pk, seq: upTo, at } satisfies ReadMark;
 });
 
 export const rotate = Effect.fn("Room.rotate")(function* (epoch: number, keys: Record<string, string>) {
@@ -1092,7 +1119,7 @@ export const welcomeFrames = (since: number): Effect.Effect<string[], never, Roo
     const backlog = db.since(since);
     const head = db.head();
     const last = backlog.at(-1)?.seq ?? since;
-    return [...backlog.map(msgFrame), frame({ t: "ready", head, more: last < head })];
+    return [...backlog.map(msgFrame), frame({ t: "reads", reads: db.reads() }), frame({ t: "ready", head, more: last < head })];
   });
 
 /** Handle one frame from an authenticated socket. It never fails: whatever goes wrong is the sender's err frame. */
@@ -1111,6 +1138,14 @@ export const onClientFrame = Effect.fn("Room.onClientFrame")(function* (raw: str
       return { reply: frame({ t: "err", error: "bad ephemeral frame" }) } satisfies Effects;
     }
     return { others: frame({ t: "eph", iv: f.iv, ct: f.ct }) } satisfies Effects;
+  }
+  if (f.t === "read") {
+    // How far this member has read: kept and passed on only when it moves forward. Too many is just dropped.
+    if (!allow(`read:${db.roomId}:${sender}`, READS_PER_MINUTE)) return {} satisfies Effects;
+    return yield* markRead(sender, f.seq).pipe(
+      Effect.map((mark): Effects => (mark ? { broadcast: [frame({ t: "read", ...mark })] } : {})),
+      Effect.catchCause(() => Effect.succeed<Effects>({ reply: frame({ t: "err", error: "bad read mark" }) })),
+    );
   }
   if (f.t !== "send") return { reply: frame({ t: "err", error: "unknown frame" }) } satisfies Effects;
   if (!allow(`${db.roomId}:${sender}`, MESSAGES_PER_MINUTE)) return { reply: frame({ t: "err", error: "too many messages; wait a minute", id: f.id }) } satisfies Effects;
@@ -1150,6 +1185,7 @@ export const onClientFrame = Effect.fn("Room.onClientFrame")(function* (raw: str
  *   GET    /                          member: {head}
  *   GET    /messages?since=N          member
  *   POST   /messages                  member: {iv, ct, e}
+ *   POST   /read                      member: {seq}, how far it has read (a number, never content)
  */
 
 /** A refusal as its response; anything else is a bug or an outage, logged without details, and a 500. */
