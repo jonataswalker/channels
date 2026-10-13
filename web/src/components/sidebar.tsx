@@ -1,33 +1,28 @@
-import { ArrowDown01Icon, ChartColumnIcon, ComputerIcon, Key01Icon, LockIcon, Login01Icon, Logout01Icon, PencilEdit02Icon, Search01Icon, Settings01Icon, SmartPhone01Icon, Add01Icon } from "@hugeicons/core-free-icons"
+import { ArrowDown01Icon, ComputerIcon, LockIcon, Login01Icon, PencilEdit02Icon, Search01Icon, Settings01Icon, Add01Icon } from "@hugeicons/core-free-icons"
 import { useState } from "react"
 
-import { displayName, useAuth } from "@/lib/auth"
 import type { ChannelRow } from "@/lib/channel"
 import type { RowNews } from "@/lib/news"
 import { useIcons, useMemberIcons } from "@/lib/icons"
-import { atChannelLimit, type MyUsage } from "@/lib/usage"
 import { formatShort } from "@/lib/format"
-import { lockVault, useVault } from "@/lib/vault"
+import { useSecrets } from "@/lib/secrets"
 import { setPlaceSlot } from "@/lib/place-slot"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { CoordinatorAvatar } from "./coordinator-head"
 import { Icon } from "./icon"
-import { Button, IconButton, Wordmark } from "./kit"
+import { IconButton, Wordmark } from "./kit"
 import { Menu, MenuItem, MenuNote, MenuSeparator } from "./ui/menu"
-import { usageLine } from "./usage"
-import { offerVault, VaultCard } from "./vault"
 
 /** What a row says on hover: what was said last, or why this browser can't open it yet. */
 function rowNote(c: ChannelRow): string {
   if (c.state === "pending") return "Waiting for the owner to let you in"
-  if (c.state === "elsewhere") return "On another device of yours"
   if (c.state === "agents") return c.agents === 1 ? "One of your agents is here" : `${c.agents} of your agents are here`
   if (c.recent?.text) return c.recent.from ? `${c.recent.from}: ${c.recent.text}` : c.recent.text
   return "No messages yet"
 }
 
-/** Your channels: the ones this browser is in, plus (signed in) every one you own, joined, or have agents in. */
+/** Your channels: the ones this app is in or waiting on. */
 export function Sidebar({
   rows,
   news,
@@ -36,11 +31,7 @@ export function Sidebar({
   onNew,
   onJoin,
   onComputers,
-  onAddDevice,
-  onPasskeys,
   onSettings,
-  usage,
-  onUsage,
   onPalette,
   className,
 }: {
@@ -52,17 +43,12 @@ export function Sidebar({
   onNew: () => void
   onJoin: () => void
   onComputers: () => void
-  onAddDevice: () => void
-  onPasskeys: () => void
   onSettings: () => void
-  usage: MyUsage | null
-  onUsage: () => void
   onPalette: () => void
   className?: string
 }) {
-  const auth = useAuth()
+  const person = useSecrets().person
   const [query, setQuery] = useState("")
-  const vault = useVault()
   const q = query.trim().toLowerCase()
   const newsOf = new Map(rows.map((c, i) => [c.room, news[i]]))
   const shown = q ? rows.filter((c) => c.title.toLowerCase().includes(q) || c.recent?.text.toLowerCase().includes(q)) : rows
@@ -74,65 +60,56 @@ export function Sidebar({
       {/* Kiwi's mark, who you are, then new: the list's one row of chrome. */}
       <header className="flex h-14 shrink-0 items-center gap-1.5 pr-2.5 pl-3.5">
         <CoordinatorAvatar size={26} label="Kiwi" />
-        {auth.status === "signed-in" ? (
+        {person ? (
           <Menu
             className="w-60"
             trigger={
               <button type="button" className="flex min-w-0 items-center gap-1 rounded-ctl py-1 pr-1.5 pl-1.5 transition-colors hover:bg-wash data-popup-open:bg-wash">
-                <span className="truncate text-ui font-semibold">{displayName(auth.user)}</span>
+                <span className="truncate text-ui font-semibold">{person.name}</span>
                 <Icon icon={ArrowDown01Icon} size={14} className="shrink-0 text-ink-3" />
               </button>
             }
           >
-            <MenuNote>{auth.user?.email}</MenuNote>
+            <MenuNote>Key {person.pk.slice(0, 12)}</MenuNote>
             <MenuItem icon={ComputerIcon} onClick={onComputers}>Your computers</MenuItem>
-            {vault.kind === "open" && <MenuItem icon={Key01Icon} onClick={onPasskeys}>Passkeys</MenuItem>}
-            {vault.kind === "none" && <MenuItem icon={Key01Icon} onClick={offerVault}>Save channels to a passkey…</MenuItem>}
-            <MenuItem icon={SmartPhone01Icon} onClick={onAddDevice}>Add a device</MenuItem>
-            {usage && <MenuItem icon={ChartColumnIcon} onClick={onUsage}>Usage</MenuItem>}
-            <MenuItem icon={Settings01Icon} onClick={onSettings}>Settings…</MenuItem>
             <MenuSeparator />
-            <MenuItem icon={Logout01Icon} onClick={() => void lockVault().finally(auth.signOut)}>Sign out</MenuItem>
+            <MenuItem icon={Settings01Icon} onClick={onSettings}>Settings…</MenuItem>
           </Menu>
         ) : (
           <Wordmark className="pl-1 text-title" />
         )}
         <span className="flex-1" />
-        {(auth.status !== "signed-out" || rows.length > 0) && (
-          <Menu
-            align="end"
-            className="w-52"
-            trigger={
-              <IconButton label="New channel or join" round className="size-8">
-                <Icon icon={PencilEdit02Icon} size={17} />
-              </IconButton>
-            }
-          >
-            <MenuItem icon={Add01Icon} onClick={onNew}>New channel</MenuItem>
-            <MenuItem icon={Login01Icon} onClick={onJoin}>Join with a code</MenuItem>
-          </Menu>
-        )}
+        <Menu
+          align="end"
+          className="w-52"
+          trigger={
+            <IconButton label="New channel or join" round className="size-8">
+              <Icon icon={PencilEdit02Icon} size={17} />
+            </IconButton>
+          }
+        >
+          <MenuItem icon={Add01Icon} onClick={onNew}>New channel</MenuItem>
+          <MenuItem icon={Login01Icon} onClick={onJoin}>Join with a code</MenuItem>
+        </Menu>
       </header>
 
       {/* Search, as in Messages: a pill at the top of the list. ⌘K goes anywhere. */}
-      {(auth.status !== "signed-out" || rows.length > 0) && (
-        <div className="flex shrink-0 items-center gap-1.5 px-3 pt-1 pb-2">
-          <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-ctl bg-wash-2 px-2.5 text-ink-3 focus-within:shadow-[0_0_0_3px_var(--accent-wash)]">
-            <Icon icon={Search01Icon} size={14} className="shrink-0" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-              placeholder="Search"
-              aria-label="Search channels"
-              className="min-w-0 flex-1 bg-transparent text-ui text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
-            />
-          </label>
-          <IconButton label={`Go to… (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"}K)`} className="size-8" onClick={onPalette}>
-            <span className="text-meta font-medium text-ink-3">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "^K"}</span>
-          </IconButton>
-        </div>
-      )}
+      <div className="flex shrink-0 items-center gap-1.5 px-3 pt-1 pb-2">
+        <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-ctl bg-wash-2 px-2.5 text-ink-3 focus-within:shadow-[0_0_0_3px_var(--accent-wash)]">
+          <Icon icon={Search01Icon} size={14} className="shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+            placeholder="Search"
+            aria-label="Search channels"
+            className="min-w-0 flex-1 bg-transparent text-ui text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
+          />
+        </label>
+        <IconButton label={`Go to… (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"}K)`} className="size-8" onClick={onPalette}>
+          <span className="text-meta font-medium text-ink-3">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "^K"}</span>
+        </IconButton>
+      </div>
 
       <nav aria-label="Channels" className="flex-1 overflow-y-auto px-2 pt-1 pb-3">
         {shown.map((c) => {
@@ -182,27 +159,11 @@ export function Sidebar({
         {rows.length > 0 && shown.length === 0 && <p className="px-3 py-6 text-ui text-ink-3">No channel matches “{query}”.</p>}
         {rows.length === 0 && (
           <p className="px-3 py-4 text-ui leading-normal text-ink-3">
-            {auth.status === "signed-out" ? "Sign in to see your channels from any device." : "Channels you create or join show up here."}
+            Channels you create or join show up here.
           </p>
         )}
       </nav>
 
-      {auth.status === "signed-in" && <VaultCard />}
-      {usage && usageLine(usage) && (
-        <button type="button" onClick={onUsage} className="mx-2 mb-2 shrink-0 rounded-ctl px-2.5 py-2 text-left text-meta text-ink-3 transition-colors hover:bg-wash">
-          <span className={cx("tabular-nums", atChannelLimit(usage) && "font-medium text-ink-2")}>{usageLine(usage)}</span>
-          {atChannelLimit(usage) && <span> · close one to create another</span>}
-        </button>
-      )}
-      {/* On a wide screen the welcome page carries Sign in; on a phone the rail is the whole screen, so it's here too. */}
-      {auth.status === "signed-out" && (
-        <div className={cx("shrink-0 p-3", !active && !auth.expired && "md:hidden")}>
-          {auth.expired && <p className="mb-2 px-1 text-ui leading-normal text-ink-2">Your sign-in expired. Sign in again to sync your channels and approve requests.</p>}
-          <Button className="w-full" onClick={auth.signIn}>
-            Sign in
-          </Button>
-        </div>
-      )}
     </aside>
   )
 }

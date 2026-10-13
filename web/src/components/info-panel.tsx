@@ -1,5 +1,5 @@
 import { relayUrl } from "../lib/relay"
-import { Add01Icon, ArrowRight01Icon, BookOpen01Icon, Cancel01Icon, ComputerTerminal01Icon, Link01Icon, PauseIcon, PencilEdit01Icon, PlayIcon, UserMultipleIcon } from "@hugeicons/core-free-icons"
+import { Add01Icon, ArrowRight01Icon, BookOpen01Icon, Cancel01Icon, Link01Icon, PauseIcon, PencilEdit01Icon, PlayIcon, UserMultipleIcon } from "@hugeicons/core-free-icons"
 import { useState, type ReactNode } from "react"
 
 import type { ChannelIcon } from "@mc/protocol.ts"
@@ -83,7 +83,6 @@ export function InfoPanel({
               onClick={() => (hold ? void p.onHold!(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error")) : onPause())}
             />
           )}
-          {p.pairing && <RoundAction icon={ComputerTerminal01Icon} label="Terminal" onClick={() => openDialog("terminal")} />}
         </div>
 
         {/* On a phone the list beside the conversation isn't there, so its conversations are here. */}
@@ -176,11 +175,6 @@ export function InfoPanel({
           {p.isOwner && (
             <Row icon={Link01Icon} onClick={() => void navigator.clipboard.writeText(`${relayUrl()}/#${p.code}`).then(() => toast("Invite link copied"))}>
               Copy invite link
-            </Row>
-          )}
-          {p.pairing && (
-            <Row icon={ComputerTerminal01Icon} onClick={() => openDialog("terminal")}>
-              Use in a terminal…
             </Row>
           )}
         </Section>

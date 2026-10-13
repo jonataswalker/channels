@@ -8,19 +8,16 @@ import {
   ChannelGone,
   RelayError,
   eachLive,
-  fx as relayFx,
   keepRecordsIn,
-  ownerStatement,
   type HumanSession,
   type Live,
   type Relay,
   type ModeSetting,
-  type MyChannel,
   type RoomsSetting,
   type SendOptions,
 } from "@mc/client.ts"
-import { decodeJoinCode, fromB64url, newRoomId, ownerFingerprint, type ChannelAccess } from "@mc/crypto.ts"
-import { generateIdentity, withExchangeKey, type Identity } from "@mc/identity.ts"
+import { decodeJoinCode, newRoomId, ownerFingerprint, type ChannelAccess } from "@mc/crypto.ts"
+import { generateIdentity, type Identity } from "@mc/identity.ts"
 import { handleFor, type JoinRequest, type Member } from "@mc/membership.ts"
 import type { Message } from "@mc/protocol.ts"
 import type { Signed, SigningBudget } from "@mc/sas.ts"
@@ -31,7 +28,6 @@ import { ICON_LIVE } from "./icon-event"
 import { addMarks, type Marks } from "./receipts"
 import { fork, run } from "./runtime"
 import { noteSignInGone } from "./session"
-import { Storage } from "./storage"
 
 /** How much history to load when the page opens. */
 const HISTORY = 2_000
@@ -89,24 +85,9 @@ export interface Online {
 
 // ---------- the URL fragment ----------
 
-/**
- * `#<join code>` or `#<join code>&id=<identity>`: the second form comes from
- * `kiwi web` on the owner's machine (or `--sign-in`) and carries a member key.
- * Fragments never reach the server.
- */
-export function parseHash(hash: string): { code: string; identity: Identity | null } {
-  const raw = hash.replace(/^#/, "")
-  if (raw.startsWith("link=") || raw.startsWith("device")) return { code: "", identity: null }
-  const [codePart, ...rest] = raw.split("&id=")
-  let identity: Identity | null = null
-  if (rest.length) {
-    try {
-      identity = JSON.parse(new TextDecoder().decode(fromB64url(rest.join("&id=")))) as Identity
-    } catch {
-      identity = null
-    }
-  }
-  return { code: decodeURIComponent(codePart ?? "").trim(), identity }
+/** `#<join code>`: the channel to open. Fragments never reach the server. */
+export function parseHash(hash: string): { code: string } {
+  return { code: decodeURIComponent(hash.replace(/^#/, "")).trim() }
 }
 
 export function isJoinCode(code: string): boolean {
@@ -317,42 +298,15 @@ export interface ChannelRow {
   head?: number
 }
 
-/** The signed-in listing, kept so a reload (or another tab) within LISTING_EVERY doesn't ask again. */
-const LISTING_KEY = "mc.listing"
-const LISTING_EVERY = 5 * 60_000
 /** Sent when the person leaves a channel: a moment to refresh the list (within LISTING_EVERY). */
 export const LEFT_CHANNEL = "mc:left-channel"
 
-function readListing(): { at: number; rows: MyChannel[] } | null {
-  const v = read<{ at: number; rows: MyChannel[] }>(LISTING_KEY)
-  return v && typeof v.at === "number" && Array.isArray(v.rows) && v.at <= Date.now() ? v : null
-}
-
-/** Ask the relay for the signed-in listing, and keep it for the next reload (or another tab). */
-const fetchListing = (token: string) =>
-  Effect.gen(function* () {
-    const rows = yield* relayFx.myChannels(relayUrl(), token)
-    const storage = yield* Storage
-    // A full disk asks again next time.
-    yield* Effect.ignore(storage.set(LISTING_KEY, JSON.stringify({ at: Date.now(), rows })))
-    return rows
-  })
-
 const untitled = (room: string) => `Channel ${room.slice(0, 4).toUpperCase()}`
 
-/**
- * Every channel to show in the list: the ones this browser is in or waiting
- * on, plus (when signed in) every channel the person owns, is in, or has
- * agents in, from any device.
- */
-export function useChannelList(signedIn: boolean, token: () => Promise<string | null>): ChannelRow[] {
+/** Every channel to show in the list: the ones this app is in or waiting on. */
+export function useChannelList(): ChannelRow[] {
   const local = useKnownChannels()
   const [pending, setPending] = useState(pendingChannels)
-  const [remote, setRemote] = useState<MyChannel[]>(() => (signedIn ? (readListing()?.rows ?? []) : []))
-  // Signed out: nothing remote is ours. Clearing as `signedIn` flips keeps the
-  // next sign-in from flashing the previous account's channels.
-  if (!signedIn && remote.length > 0) setRemote([])
-  const readToken = useEffectEvent(token)
 
   useEffect(() => {
     const update = () => setPending(pendingChannels())
@@ -360,54 +314,8 @@ export function useChannelList(signedIn: boolean, token: () => Promise<string | 
     return () => window.removeEventListener(CHANGED, update)
   }, [])
 
-  useEffect(() => {
-    if (!signedIn) {
-      localStorage.removeItem(LISTING_KEY)
-      return
-    }
-    let timer: number | undefined
-    let cancelled = false
-    // Each listing wakes every listed channel on the relay, so it's asked for on load, focus and
-    // leaving a channel, never on a timer, and at most once per LISTING_EVERY (other tabs included).
-    const load = async () => {
-      const last = readListing()
-      if (last && Date.now() - last.at < LISTING_EVERY) return
-      const t = await readToken()
-      if (!t || cancelled) return
-      try {
-        const rows = await run(fetchListing(t))
-        if (!cancelled) setRemote(rows)
-      } catch (err) {
-        // The relay didn't answer: keep the last list. (Unless the sign-in is gone: then say so.)
-        noteSignInGone(err)
-      }
-    }
-    const soon = () => {
-      clearTimeout(timer)
-      timer = window.setTimeout(load, 600)
-    }
-    // Another tab fetched it: use theirs.
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === LISTING_KEY) setRemote(readListing()?.rows ?? [])
-    }
-    void load()
-    window.addEventListener("focus", soon)
-    window.addEventListener(CHANGED, soon)
-    window.addEventListener(LEFT_CHANNEL, soon)
-    window.addEventListener("storage", onStorage)
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-      window.removeEventListener("focus", soon)
-      window.removeEventListener(CHANGED, soon)
-      window.removeEventListener(LEFT_CHANNEL, soon)
-      window.removeEventListener("storage", onStorage)
-    }
-  }, [signedIn])
-
   return useMemo(() => {
     const rows = new Map<string, ChannelRow>()
-    const theirs = new Map(remote.map((r) => [r.room, r]))
     for (const c of local) {
       const m = loadMember(c.code)
       if (!m) continue
@@ -421,8 +329,7 @@ export function useChannelList(signedIn: boolean, token: () => Promise<string | 
         ts: recent?.ts ?? c.at,
         state: "member",
         owner: m.identity.pk === m.access.ownerPk,
-        agents: theirs.get(room)?.agents ?? 0,
-        head: theirs.get(room)?.head,
+        agents: 0,
       })
     }
     for (const p of pending) {
@@ -435,22 +342,8 @@ export function useChannelList(signedIn: boolean, token: () => Promise<string | 
       if (rows.has(room)) continue
       rows.set(room, { code: p.code, room, title: untitled(room), recent: null, ts: clockNow(), state: "pending", owner: false, agents: 0 })
     }
-    for (const r of remote) {
-      if (rows.has(r.room)) continue
-      rows.set(r.room, {
-        code: r.code,
-        room: r.room,
-        title: untitled(r.room),
-        recent: null,
-        ts: r.at,
-        state: r.owner || r.member ? "elsewhere" : "agents",
-        owner: r.owner,
-        agents: r.agents,
-        head: r.head,
-      })
-    }
     return [...rows.values()].sort((a, b) => b.ts - a.ts)
-  }, [local, pending, remote])
+  }, [local, pending])
 }
 
 /** The channels this browser is in, kept current as they change. */
@@ -491,60 +384,15 @@ function rememberChannel(code: string): void {
 }
 
 /**
- * Become a member from a link that carries a member key (the owner's, from
- * `kiwi web`): fetch and unwrap this key's channel keys.
+ * Create a channel owned by this app's person. The owner key is generated here and never leaves;
+ * on relays that require sign-in, `token` (from the bridge, lib/auth.ts) proves who created it.
  */
-export async function memberFromLink(code: string, identity: Identity): Promise<StoredMember> {
-  const { roomId, ownerFp } = decodeJoinCode(code)
-  const prior = loadMember(code)
-  if (prior) {
-    if (prior.identity.pk === identity.pk) return prior
-    throw new Error(`This browser is already in this channel as ${prior.identity.name}. A link can’t replace that key.`)
-  }
-  const id = await withExchangeKey(identity)
-  const probe = new Channel({ roomId, ownerPk: "", ownerXpk: "", epoch: 0, keys: {} }, relayUrl(), id)
-  const info = await probe.info(ownerFp)
-  // The link's channel must be the one the code names: same owner, properly signed.
-  if ((await ownerFingerprint(info.ownerPk)) !== ownerFp) throw new Error("The relay is serving a different owner than this code names.")
-  const statement = await ownerStatement(roomId, info)
-  if (!statement) throw new Error("This channel’s owner keys aren’t signed.")
-  const ch = new Channel({ roomId, ownerPk: info.ownerPk, ownerXpk: info.ownerXpk, epoch: info.epoch, keys: {}, signedKeys: statement === "signed-keys" }, relayUrl(), id)
-  try {
-    await ch.refreshKeys()
-  } catch {
-    // Never let a bad link touch what this browser already holds.
-    throw new Error("The key in this link isn’t a member of this channel.")
-  }
-  const m: StoredMember = { code, identity: id, access: ch.access, at: Date.now() }
-  saveMember(m)
-  return m
-}
-
-/**
- * Create a channel owned by this browser's human. The owner key is generated
- * here and leaves only for the same person's other devices (lib/devices.ts);
- * on relays that require sign-in, `token` proves who the human is.
- */
-/** A signed-in person, as the browser knows them from AuthKit. */
-export interface Person {
-  id: string
-  email: string
-  firstName?: string | null
-  lastName?: string | null
-}
-
-export function personName(p: Person): string {
-  return [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email
-}
-
-export async function createChannel(name: string, token: string | null, me: Person | null): Promise<StoredMember> {
+export async function createChannel(name: string, token: string | null, me: { name: string } | null): Promise<StoredMember> {
   const roomId = newRoomId()
-  // The owner appears under their real name, not as "human".
-  const handle = me ? handleFor(personName(me), me.email) : "human"
+  // The owner appears under their own name, not as "human".
+  const handle = me ? handleFor(me.name) : "human"
   const owner = await generateIdentity(handle)
-  const info = me
-    ? { name: handle, role: "owner", kind: "human" as const, display: personName(me), sponsor: { user: me.id, name: personName(me), handle } }
-    : { name: "human", role: "owner" }
+  const info = me ? { name: handle, role: "owner", kind: "human" as const, display: me.name } : { name: "human", role: "owner" }
   const { code, access } = await Channel.create(relayUrl(), owner, info, [], roomId, token, name)
   const m: StoredMember = { code, identity: owner, access, at: Date.now(), name }
   saveMember(m)
@@ -576,11 +424,11 @@ export async function inviteInfo(code: string): Promise<{ ownerName: string | nu
   return { ownerName: info.ownerName ?? null }
 }
 
-/** Ask to join from this browser (as a signed-in person); resumes an earlier request for the same code. */
-export async function askToJoin(code: string, name: string, role?: string, token?: string | null): Promise<PendingJoin> {
+/** Ask to join from this app; resumes an earlier request for the same code. */
+export async function askToJoin(code: string, name: string, role?: string): Promise<PendingJoin> {
   const prior = loadPending(code)
   const identity = prior && prior.identity.name === name ? prior.identity : await generateIdentity(name)
-  const r = await Channel.requestJoin(relayUrl(), code, identity, { name, ...(role ? { role } : {}) }, token)
+  const r = await Channel.requestJoin(relayUrl(), code, identity, { name, ...(role ? { role } : {}) })
   const p: PendingJoin = { code, identity, requestId: r.requestId }
   savePending(p)
   return p

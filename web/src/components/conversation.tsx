@@ -6,10 +6,8 @@ import { droppedCount } from "@mc/format.ts"
 import { memberLoad } from "@mc/load.ts"
 import { ignored, type Color, type Message } from "@mc/protocol.ts"
 import { describeScopes, wireScopes } from "@mc/scopes.ts"
-import type { Member as RosterMember } from "@mc/membership.ts"
-import type { HumanSession } from "@mc/client.ts"
 import { colorOf, keptFromPeople, taskId, type ChannelState, type Task } from "@mc/state.ts"
-import { useAuth } from "@/lib/auth"
+import { secrets } from "@/lib/secrets"
 import { channelTitle, forgetChannel, LEFT_CHANNEL, loadMember, loadRecent, saveMember, saveRecent, useChannel, useClock, useKnownChannels, type StoredMember } from "@/lib/channel"
 import { markSeen, setOpenNews } from "@/lib/news"
 import { useIcons, useLiveIcon } from "@/lib/icons"
@@ -28,7 +26,7 @@ import { Icon } from "./icon"
 import { InfoPanel } from "./info-panel"
 import { Button, IconButton, Monogram, Spinner, TextField, errorText, toast } from "./kit"
 import { Bubble, EventGroup, EventRow, TimeMark, isAgent, standsAlone, type ThreadSummary } from "./message"
-import { NeedsYou, type JoinedVia } from "./needs-you"
+import { NeedsYou } from "./needs-you"
 import { TaskPage } from "./task-page"
 import { Notes, StateMark, TaskCard, Tasks } from "./tasks"
 import { ThreadPanel } from "./thread"
@@ -73,48 +71,6 @@ function useChannelNews(room: string, top: number, arrivals: number, inOtherRoom
   )
 }
 
-/**
- * Owner: keep this channel's computer seats in order whenever it opens. Seats with under 60 days left
- * are renewed; agents a computer let in get the owner's own signature on their record (keeping which
- * computer it was), so every client, older ones too, reads them as the owner's. It never seats a
- * computer here: that takes approving its first agent with "let agents from it in from now on".
- */
-function useTendSeats({ ch, isOwner, roster, human, refreshRoster, onJoined }: {
-  ch: ReturnType<typeof useChannel>["ch"]
-  isOwner: boolean
-  roster: RosterMember[]
-  human: HumanSession | null
-  refreshRoster: () => Promise<void>
-  /** "2 agents joined via mac-mini": one line per computer, for Needs you. */
-  onJoined: (via: JoinedVia) => void
-}) {
-  const seated = useRef(false)
-  const busy = useRef(false)
-  // Agents a computer let in, not yet re-signed: whenever one shows up, tend again.
-  const fresh = roster.filter((m) => m.active && m.signedBy).map((m) => m.pk).join(",")
-  useEffect(() => {
-    if (!isOwner || !human || busy.current) return
-    const first = !seated.current
-    if (!first && !fresh) return
-    busy.current = true
-    void (async () => {
-      try {
-        const done = await ch.tendSeats()
-        seated.current = true
-        // "2 agents joined via mac-mini", once per computer, rather than a line per agent.
-        const via = new Map<string, number>()
-        for (const m of roster) if (m.signedBy && done.resigned.includes(m.name)) via.set(m.viaName ?? "your computer", (via.get(m.viaName ?? "your computer") ?? 0) + 1)
-        if (via.size) onJoined(via)
-        if (done.resigned.length) await refreshRoster()
-      } catch {
-        // Tried again the next time the channel opens; nothing here is urgent.
-      } finally {
-        busy.current = false
-      }
-    })()
-  }, [ch, isOwner, human, fresh, roster, refreshRoster, onJoined])
-}
-
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
 /** A stamp goes between messages this far apart, as Messages does. */
 const STAMP_GAP = 15 * 60_000
@@ -124,22 +80,7 @@ const summarised = (m: Message) => m.ev?.op === "task.add" || (m.ev?.op === "tas
 
 export function Conversation({ member, onBack, onGone }: { member: StoredMember; onBack: () => void; onGone: () => void }) {
   const me = member.identity.name
-  const auth = useAuth()
-  const { ch, connection, gone, messages, roster, state, online, isOwner, requests, send, refreshRequests, refreshRoster, head, marks, pkOf } = useChannel(
-    member,
-    auth.status === "loading" ? null : auth.token,
-  )
-  const [joinedVia, setJoinedVia] = useState<JoinedVia>(() => new Map())
-  const onJoined = useCallback(
-    (via: JoinedVia) =>
-      setJoinedVia((was) => {
-        const next = new Map(was)
-        for (const [name, n] of via) next.set(name, (next.get(name) ?? 0) + n)
-        return next
-      }),
-    []
-  )
-  useTendSeats({ ch, isOwner, roster, human: auth.status === "loading" ? null : auth.token, refreshRoster, onJoined })
+  const { ch, connection, gone, messages, roster, state, online, isOwner, requests, send, refreshRequests, refreshRoster, head, marks, pkOf } = useChannel(member)
   useLiveIcon(member)
   const roomId = member.access.roomId
   const icon = useIcons().get(roomId) ?? null
@@ -600,8 +541,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       online={online}
       state={state}
       now={now}
-      onApprove={async (r, scopes, seat) => {
-        await ch.approve(r, wireScopes(scopes) ? { scopes } : undefined, { seat: !!seat })
+      onApprove={async (r, scopes) => {
+        await ch.approve(r, wireScopes(scopes) ? { scopes } : undefined, { person: secrets().person?.pk })
         await Promise.all([refreshRequests(), refreshRoster()])
       }}
       onScopes={async (m, scopes) => {
@@ -671,7 +612,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
         forgetChannel(member.code)
         onGone()
       }}
-      pairing={{ code: member.code, slot: () => ch.pairSlot(), list: (slot) => ch.pairs(slot), open: (id, nonce, slot) => ch.pairOpen(id, nonce, slot), answer: (p, slot) => ch.pairAnswer(p, member.identity, slot) }}
     >
       {/* The channel's conversations, under its row in the list (on a phone, in its details). */}
       <PlaceSlot>{placeList()}</PlaceSlot>
@@ -769,8 +709,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                       roomId={roomId}
                       escalations={escalations}
                       reviews={reviews}
-                      joinedVia={joinedVia}
-                      onDismissJoined={() => setJoinedVia(new Map())}
                       nameOf={nameOf}
                       onReply={async (m, text) => void (await send(text, { to: [m.from], re: [m.seq], kind: "msg" }))}
                       onApproveTask={async (t: Task) => void (await send(`${taskId(t.id)} done`, { kind: "event", ev: { op: "task.update", task: t.id, state: "done", note: "approved" }, ...(t.owner ? { to: [t.owner] } : {}) }))}
