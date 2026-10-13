@@ -180,7 +180,7 @@ export interface ThreadSummary {
 }
 
 /**
- * One message as a bubble: yours on the right in kiwi green, everyone else's on the left in the field
+ * One message as a bubble: yours on the right in kiwi blue, everyone else's on the left in the field
  * tone, with their face at the foot of the run. A run reads as one stack: the corners where its
  * bubbles meet, on the sender's side, are tighter. An escalation is a plain bubble with an amber
  * "Decision for you" over it; a forged one (shown only when the owner asks) is struck through.

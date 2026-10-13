@@ -5,7 +5,7 @@
  * Kiwi's look. The conversation is the product and everything else stays out of its way: flat,
  * opaque surfaces in three neutral levels, one type family set with care, and one colour of our own.
  *
- * The accent is kiwi green, a deep, slightly cool green (not the lime of an SMS bubble): it marks
+ * The accent is kiwi blue, a deep, slightly cool blue of our own (not a default link blue): it marks
  * what's yours and what's new, and nothing else. Your bubbles, the send button, unread counts, and
  * the one primary action on a page. Never more than three on a screen. Red is for alerts, amber for
  * a decision someone is waiting on; neither decorates.
@@ -30,13 +30,13 @@
   --line: light-dark(rgba(24, 24, 27, 0.07), rgba(255, 255, 255, 0.07));
   --wash: light-dark(rgba(24, 24, 27, 0.04), rgba(255, 255, 255, 0.05));
   --wash-2: light-dark(rgba(24, 24, 27, 0.07), rgba(255, 255, 255, 0.08));
-  /* Kiwi green. White text on it clears 4.5:1; as text on the dark canvas it lightens to stay legible. */
-  --accent: #13854a;
+  /* Kiwi blue. White text on it clears 4.5:1 in either theme (7.8:1); as text on the dark canvas it lightens to stay legible. */
+  --accent: #174ea6;
   --accent-ink: #ffffff;
-  --accent-text: light-dark(#13854a, #3ccf7f);
-  --accent-wash: light-dark(rgba(19, 133, 74, 0.1), rgba(60, 207, 127, 0.14));
-  --link: light-dark(#0f7a43, #4fd68c);
-  --ring: light-dark(rgba(19, 133, 74, 0.55), rgba(60, 207, 127, 0.55));
+  --accent-text: light-dark(#174ea6, #7aa9ff);
+  --accent-wash: light-dark(rgba(23, 78, 166, 0.1), rgba(122, 169, 255, 0.16));
+  --link: light-dark(#1558b0, #7aa9ff);
+  --ring: light-dark(rgba(23, 78, 166, 0.55), rgba(122, 169, 255, 0.55));
   --alert: light-dark(#d1342a, #ff6259);
   --decide: light-dark(#a35a00, #f5b041);
   --decide-wash: light-dark(rgba(214, 125, 0, 0.12), rgba(245, 176, 65, 0.14));
@@ -56,13 +56,13 @@
   /* The open channel in the list: a neutral step, not a block of colour. */
   --pick: light-dark(rgba(24, 24, 27, 0.065), rgba(255, 255, 255, 0.075));
   --pick-edge: transparent;
-  /* The coordinator's head: a kiwi-green shell, its screen a pale tint, the trim a quiet steel. */
-  --head-shell: light-dark(#13854a, #1f9a55);
-  --head-screen: light-dark(#e9f7ef, #dcf5e7);
-  --head-trim: light-dark(#cfd6d2, #9aa39e);
-  /* Behind the head in a round avatar: a soft green field, like a contact photo's backdrop. */
-  --head-bg-top: light-dark(#e3f3ea, #24372c);
-  --head-bg-bottom: light-dark(#c7e6d4, #1a2a21);
+  /* The coordinator's head: a kiwi-blue shell, its screen a pale tint, the trim a quiet steel. */
+  --head-shell: light-dark(#174ea6, #2f6fe4);
+  --head-screen: light-dark(#e9f0fc, #d9e7fa);
+  --head-trim: light-dark(#cfd4d6, #9aa0a3);
+  /* Behind the head in a round avatar: a soft blue field, like a contact photo's backdrop. */
+  --head-bg-top: light-dark(#e1ebf8, #222e3d);
+  --head-bg-bottom: light-dark(#c6daf2, #17222e);
   /* A contact without a picture: a soft neutral gradient. Agents get a hue of their own (kit.tsx). */
   --avatar-top: light-dark(#a3a3ab, #6f6f78);
   --avatar-bottom: light-dark(#86868e, #55555d);
