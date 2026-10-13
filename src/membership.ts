@@ -360,8 +360,10 @@ export interface JoinRequest extends MemberInfo {
   /**
    * The computer this agent runs on, when the request offers it and its signatures check out, and it
    * has no seat here yet: approving with `seat` seats it, so its later agents come in on their own.
+   * `own`: the sign-in relay says it's linked to the owner. Its name is the requester's to choose, so
+   * only then is "let agents from it in" ticked to begin with.
    */
-  computer?: { pk: string; xpk: string; label: string };
+  computer?: { pk: string; xpk: string; label: string; own?: boolean };
 }
 
 /** How a member reads in lists: "win · key QRskRn4Z · agent of @jonatas" / "Jonatas Walker (@jonatas)". */

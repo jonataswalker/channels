@@ -216,7 +216,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
       // Approving starts from what this browser picked for new members when inviting.
       if (c?.kind === "approve") {
         setScopeDraft(p.roomId ? defaultScopes(p.roomId) : [...SCOPES])
-        setSeatDraft(true)
+        setSeatDraft(!!c.req.computer?.own)
       }
       setConfirm(c)
     },

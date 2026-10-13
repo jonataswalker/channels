@@ -1048,7 +1048,7 @@ export class Channel {
           ...check,
           sponsoredBy: r.sponsorUser ? { user: r.sponsorUser, name: inlineText(r.sponsorName, 80) || r.sponsorUser, email: r.sponsorEmail ?? null } : null,
           ...(auto ? { askedAs: auto } : {}),
-          ...(computer ? { vouchedBy: computer.pk, computer } : {}),
+          ...(computer ? { vouchedBy: computer.pk, computer: { ...computer, ...(r.ownersOwn ? { own: true } : {}) } } : {}),
         });
       }
       return out;

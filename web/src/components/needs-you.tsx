@@ -137,7 +137,8 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
   const taken = r.kind !== "human" && p.roster.some((m) => m.active && nameKey(m.name) === nameKey(r.name))
   const [rename, setRename] = useState(() => (taken ? freeAgentName(r.name, p.roster) : ""))
   // Its computer's first agent here: one tap lets that computer's later ones in too (owner's pick, #1340).
-  const [seat, setSeat] = useState(true)
+  // Ticked to begin with only for a computer the relay says is the owner's: anyone can name theirs anything.
+  const [seat, setSeat] = useState(!!r.computer?.own)
   const from = r.computer ? `from ${r.computer.label}` : "from their computer"
   const who = r.kind === "human" ? `Signed in as ${r.sponsoredBy?.name ?? "someone"}` : r.sponsoredBy ? `Agent for ${r.sponsoredBy.name}, ${from}` : r.computer ? `An agent ${from}` : "An agent"
   const lead = <Monogram name={r.name} agent={r.kind !== "human"} size={24} />

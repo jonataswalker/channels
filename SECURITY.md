@@ -54,8 +54,9 @@ agent                          relay                         owner's human
 - **Your own computers' agents skip the code: a seat, given on first
   approval.** A computer gets a *seat* in a channel only when you approve
   its first agent there with "let agents from <computer> in from now on"
-  (the default on the approve card; `kiwi approve CODE --seat`; `/approve
-  CODE seat`). That agent's join request offers its computer in the info
+  (`kiwi approve CODE --seat`; `/approve CODE seat`; on the approve card,
+  ticked to begin with only when a sign-in relay says the computer is linked
+  to you, since the requester names its computer whatever it likes). That agent's join request offers its computer in the info
   sealed to you: the computer's key, its exchange key, its name, and two
   signatures by the computer's key, one over its exchange key
   (`kiwi-machine-xpk`) and one over this channel and this agent's key

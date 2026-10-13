@@ -494,6 +494,7 @@ describe("seat on first approval (#1340)", () => {
   test("approving with seat seats the computer, and its next agent lets itself in", async () => {
     const { ownerCh, code, roomId, computer } = await unseated();
     const first = await ask(ownerCh, code, roomId, "claude", (pk) => computerOffer(computer, roomId, pk));
+    // No sign-in here, so nothing says it's the owner's: offered, but not ticked to begin with (no `own`).
     expect(first.req.computer).toEqual({ pk: computer.identity.pk, xpk: computer.identity.xpk!, label: "Mac mini" });
     expect(first.req.vouchedBy).toBe(computer.identity.pk);
 
@@ -574,6 +575,7 @@ describe("seat on first approval (#1340)", () => {
     const mine = await linkedTo("dev:alice");
     const alices = await askFrom(mine, "alicebot");
     expect(alices.computer?.pk).toBe(mine.identity.pk);
+    expect(alices.computer?.own).toBe(true);
     await ownerCh.approve(alices, undefined, { seat: true });
     const seat = new Channel(await Channel.resume(at, made.code, mine.identity), at, mine.identity);
     expect((await seat.admit((await agent("next")).ask)).name).toBe("next");
