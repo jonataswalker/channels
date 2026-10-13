@@ -100,7 +100,7 @@ export function CoordinatorHead({
 }
 
 /**
- * The coordinator as a contact: its head inside a round avatar, on a soft green field. At the sizes a
+ * The coordinator as a contact: its head inside a round avatar, on a soft blue field. At the sizes a
  * face is in a list, a bubble's foot or a header, a head on its own reads as a blob; in a circle it
  * reads as someone. Still unless `live`.
  */
