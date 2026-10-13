@@ -1,5 +1,5 @@
 import { Add01Icon, ArrowRight01Icon, BookOpen01Icon, Cancel01Icon, ComputerTerminal01Icon, Link01Icon, PauseIcon, PencilEdit01Icon, PlayIcon, UserMultipleIcon } from "@hugeicons/core-free-icons"
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 
 import type { ChannelIcon } from "@mc/protocol.ts"
 import { colorOf } from "@mc/state.ts"
@@ -11,7 +11,7 @@ import { ChannelIconTile } from "./channel-icon"
 import { CoordinatorAvatar, CoordinatorHead } from "./coordinator-head"
 import { MemberActions, loadDetail, memberDetail, useControls } from "./controls"
 import { Icon, type IconSvgElement } from "./icon"
-import { IconButton, Monogram, errorText, toast } from "./kit"
+import { IconButton, Button, Modal, Monogram, errorText, toast } from "./kit"
 
 // The channel's details, as Messages shows a conversation's Info: the channel's face and name, a few
 // round actions, everyone in it as faces, then grouped rows for what the channel is (its charter, its
@@ -156,28 +156,9 @@ export function InfoPanel({
           )}
         </Section>
 
-        {/* Who people talk with: it follows the coordinator role, so there's nothing to switch. */}
-        <Section>
-          <p className="px-3 py-2.5 text-ui leading-snug text-ink-2">
-            {coordinator ? (
-              p.state.mode.coordinatorOnly ? (
-                <>
-                  People talk with <span className="font-semibold text-ink">{memberName(p.state.members.get(coordinator))}</span>, the coordinator. Other agents work in their tasks’ conversations.
-                </>
-              ) : (
-                <>
-                  <span className="font-semibold text-ink">{memberName(p.state.members.get(coordinator))}</span> is the coordinator, but people still talk with everyone.
-                  {p.isOwner && p.onMode && (
-                    <button type="button" onClick={() => void p.onMode!(true, true).then(() => toast("People talk with the coordinator now"), (err) => toast(errorText(err), "error"))} className="ml-1 font-medium text-accent-text hover:underline">
-                      Route through them
-                    </button>
-                  )}
-                </>
-              )
-            ) : (
-              <>No coordinator yet. {p.isOwner ? "Choose an agent above and make it the coordinator: people then talk with it, and it passes things on." : "The owner can make one agent the coordinator."}</>
-            )}
-          </p>
+        {/* Coordinator mode: on or off, who relays, and the owner's switch — where they'd look for it. */}
+        <Section label="Coordinator mode">
+          <CoordinatorMode />
         </Section>
 
         <Section>
@@ -214,6 +195,93 @@ export function InfoPanel({
         <p className="mt-3 px-3 text-stamp leading-[15px] text-ink-3">Everything here is end-to-end encrypted: the relay sees only ciphertext, and only members hold the keys.</p>
       </div>
     </aside>
+  )
+}
+
+/**
+ * Coordinator mode: on (someone relays people's words) or off, with the owner's switch where they'd
+ * look for it. The mode follows the coordinator role, so turning off takes the role away and turning
+ * on picks who holds it.
+ */
+function CoordinatorMode() {
+  const { p, busy, run, setCoordinator } = useControls()
+  const [picking, setPicking] = useState(false)
+  const coordinator = p.state.coordinator
+  const on = p.state.mode.coordinatorOnly
+  const entry = coordinator ? p.roster.find((m) => m.active && m.name === coordinator) : undefined
+  const agents = p.roster.filter((m) => m.active && m.kind !== "human")
+
+  const turnOff = () => {
+    if (entry) void setCoordinator(entry, false)
+    else if (p.onMode) void run(() => p.onMode!(false, true), "Coordinator mode off")
+  }
+
+  return (
+    <>
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <p className="min-w-0 flex-1 text-ui leading-snug text-ink-2">
+          {on ? (
+            <>
+              Coordinator mode: <span className="font-semibold text-ink">on</span>
+              {coordinator && (
+                <>
+                  {" "}
+                  (<span className="font-medium text-ink">{memberName(p.state.members.get(coordinator), coordinator)}</span> relays)
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              Coordinator mode: <span className="font-semibold text-ink">off</span>
+              <span className="text-ink-3"> — people talk with everyone</span>
+            </>
+          )}
+        </p>
+        {p.isOwner &&
+          (on ? (
+            <Button size="sm" variant="secondary" disabled={busy} onClick={turnOff}>
+              Turn off
+            </Button>
+          ) : (
+            <Button size="sm" variant="secondary" disabled={busy || agents.length === 0} onClick={() => setPicking(true)}>
+              Turn on
+            </Button>
+          ))}
+      </div>
+
+      <Modal open={picking} onClose={() => setPicking(false)}>
+        <div className="p-5">
+          <h2 className="text-title font-semibold tracking-[-0.01em]">Who coordinates?</h2>
+          <p className="mt-1 text-ui leading-normal text-ink-2">People will talk with them, and they pass things on to the other agents.</p>
+          <div className="mt-4 grid gap-1">
+            {agents.map((m) => (
+              <button
+                key={m.pk}
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setPicking(false)
+                  void setCoordinator(m, true)
+                }}
+                className="flex items-center gap-3 rounded-ctl px-2 py-2 text-left transition-colors hover:bg-wash disabled:opacity-40"
+              >
+                <Monogram name={m.name} agent size={32} online={p.online.has(m.name)} color={colorOf(p.state, m.name)} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-ui font-medium">{memberName(m)}</span>
+                  <span className="block truncate text-meta text-ink-3">{coordinator === m.name ? "Coordinating now" : memberDetail(p, m)}</span>
+                </span>
+              </button>
+            ))}
+            {agents.length === 0 && <p className="text-ui text-ink-3">No agents to coordinate yet.</p>}
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button variant="secondary" onClick={() => setPicking(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </>
   )
 }
 

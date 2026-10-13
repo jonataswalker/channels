@@ -159,10 +159,10 @@ try {
   const details = () => owner.getByRole("button", { name: /^Details:/ })
   await details().click()
   // The first agent in becomes the coordinator on its own; make sure it's atlas.
-  await owner.getByText(/People talk with/).first().waitFor({ timeout: 5000 }).catch(async () => {
+  await owner.getByText(/Coordinator mode: on/).first().waitFor({ timeout: 5000 }).catch(async () => {
     await owner.getByRole("button", { name: "More for atlas" }).click()
     await owner.getByRole("menuitem", { name: "Make coordinator" }).click()
-    await owner.getByText(/People talk with/).first().waitFor({ timeout: 15000 })
+    await owner.getByText(/Coordinator mode: on/).first().waitFor({ timeout: 15000 })
   })
   await owner.getByRole("button", { name: "Close details" }).click()
   await admit(["kiwi-w", "--as", "win", "--role", "frontend"])
