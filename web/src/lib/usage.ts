@@ -1,3 +1,4 @@
+import { relayUrl } from "./relay"
 import { useEffect, useRef, useState } from "react"
 
 import { myUsage, type MyUsage } from "@mc/client.ts"
@@ -26,7 +27,7 @@ export function useUsage(signedIn: boolean, token: () => Promise<string | null>)
       const t = await tokenRef.current()
       if (!t || stopped) return
       try {
-        const u = await myUsage(location.origin, t)
+        const u = await myUsage(relayUrl(), t)
         if (!stopped) setUsage(u)
       } catch (err) {
         noteSignInGone(err)

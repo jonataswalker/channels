@@ -1,3 +1,4 @@
+import { relayUrl } from "./relay"
 import { LoginRequiredError, NoSessionError, createClient, type User } from "@workos-inc/authkit-js"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -60,8 +61,8 @@ function safeReturn(state: unknown): string {
   const raw = (state as { returnTo?: unknown } | undefined)?.returnTo
   if (typeof raw !== "string") return "/"
   try {
-    const url = new URL(raw, location.origin)
-    return url.origin === location.origin ? url.pathname + url.hash : "/"
+    const url = new URL(raw, relayUrl())
+    return url.origin === relayUrl() ? url.pathname + url.hash : "/"
   } catch {
     return "/"
   }
@@ -85,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const config = await run(signInConfig(location.origin))
+      const config = await run(signInConfig(relayUrl()))
       const { workosClientId } = config
       if (config.dev) {
         if (cancelled) return
@@ -100,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
       const c = await createClient(workosClientId, {
-        redirectUri: `${location.origin}/auth/callback`,
+        redirectUri: `${relayUrl()}/auth/callback`,
         // No custom auth domain on workers.dev, so the refresh token lives in this browser's storage.
         devMode: true,
         // Back from sign-in: restore the page the person was on (say, an agent's vouch link). Changing the
@@ -175,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               // Clear the cache before the redirect, so the next account on this browser does not inherit it.
               void forgetAllHistory()
                 .catch(() => {})
-                .finally(() => client?.signOut({ returnTo: location.origin + "/" }))
+                .finally(() => client?.signOut({ returnTo: relayUrl() + "/" }))
             },
             token: async () => {
               if (!client || !client.getUser()) return null

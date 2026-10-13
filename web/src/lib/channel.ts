@@ -1,3 +1,4 @@
+import { relayUrl } from "./relay"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from "react"
@@ -330,7 +331,7 @@ function readListing(): { at: number; rows: MyChannel[] } | null {
 /** Ask the relay for the signed-in listing, and keep it for the next reload (or another tab). */
 const fetchListing = (token: string) =>
   Effect.gen(function* () {
-    const rows = yield* relayFx.myChannels(location.origin, token)
+    const rows = yield* relayFx.myChannels(relayUrl(), token)
     const storage = yield* Storage
     // A full disk asks again next time.
     yield* Effect.ignore(storage.set(LISTING_KEY, JSON.stringify({ at: Date.now(), rows })))
@@ -501,13 +502,13 @@ export async function memberFromLink(code: string, identity: Identity): Promise<
     throw new Error(`This browser is already in this channel as ${prior.identity.name}. A link can’t replace that key.`)
   }
   const id = await withExchangeKey(identity)
-  const probe = new Channel({ roomId, ownerPk: "", ownerXpk: "", epoch: 0, keys: {} }, location.origin, id)
+  const probe = new Channel({ roomId, ownerPk: "", ownerXpk: "", epoch: 0, keys: {} }, relayUrl(), id)
   const info = await probe.info(ownerFp)
   // The link's channel must be the one the code names: same owner, properly signed.
   if ((await ownerFingerprint(info.ownerPk)) !== ownerFp) throw new Error("The relay is serving a different owner than this code names.")
   const statement = await ownerStatement(roomId, info)
   if (!statement) throw new Error("This channel’s owner keys aren’t signed.")
-  const ch = new Channel({ roomId, ownerPk: info.ownerPk, ownerXpk: info.ownerXpk, epoch: info.epoch, keys: {}, signedKeys: statement === "signed-keys" }, location.origin, id)
+  const ch = new Channel({ roomId, ownerPk: info.ownerPk, ownerXpk: info.ownerXpk, epoch: info.epoch, keys: {}, signedKeys: statement === "signed-keys" }, relayUrl(), id)
   try {
     await ch.refreshKeys()
   } catch {
@@ -544,12 +545,12 @@ export async function createChannel(name: string, token: string | null, me: Pers
   const info = me
     ? { name: handle, role: "owner", kind: "human" as const, display: personName(me), sponsor: { user: me.id, name: personName(me), handle } }
     : { name: "human", role: "owner" }
-  const { code, access } = await Channel.create(location.origin, owner, info, [], roomId, token, name)
+  const { code, access } = await Channel.create(relayUrl(), owner, info, [], roomId, token, name)
   const m: StoredMember = { code, identity: owner, access, at: Date.now(), name }
   saveMember(m)
   // A new channel starts in coordinator mode: people talk with the coordinator, agents in their tasks'
   // conversations. Best effort: the channel is made either way, and the owner can turn it on later.
-  await new Channel(access, location.origin, owner, (a) => saveMember({ ...m, access: a }))
+  await new Channel(access, relayUrl(), owner, (a) => saveMember({ ...m, access: a }))
     .startCoordinated()
     .catch(() => {})
   return m
@@ -561,7 +562,7 @@ export async function createChannel(name: string, token: string | null, me: Pers
  */
 export async function inviteInfo(code: string): Promise<{ ownerName: string | null } | null> {
   const { roomId, ownerFp } = decodeJoinCode(code)
-  const res = await fetch(`${location.origin}/v1/rooms/${roomId}/info?fp=${encodeURIComponent(ownerFp)}`)
+  const res = await fetch(`${relayUrl()}/v1/rooms/${roomId}/info?fp=${encodeURIComponent(ownerFp)}`)
   const body = (await res.json().catch(() => ({}))) as { ownerPk: string; ownerName?: string | null; error?: string; tag?: string }
   if (!res.ok) {
     const err = new RelayError(res.status, body.error ?? `the relay returned ${res.status}`, body.tag)
@@ -579,7 +580,7 @@ export async function inviteInfo(code: string): Promise<{ ownerName: string | nu
 export async function askToJoin(code: string, name: string, role?: string, token?: string | null): Promise<PendingJoin> {
   const prior = loadPending(code)
   const identity = prior && prior.identity.name === name ? prior.identity : await generateIdentity(name)
-  const r = await Channel.requestJoin(location.origin, code, identity, { name, ...(role ? { role } : {}) }, token)
+  const r = await Channel.requestJoin(relayUrl(), code, identity, { name, ...(role ? { role } : {}) }, token)
   const p: PendingJoin = { code, identity, requestId: r.requestId }
   savePending(p)
   return p
@@ -587,11 +588,11 @@ export async function askToJoin(code: string, name: string, role?: string, token
 
 /** Where a request stands: still pending (with its code once the owner has opened it), declined, or in. */
 export async function checkJoin(p: PendingJoin): Promise<{ code: string | null } | "denied" | StoredMember> {
-  const st = await Channel.joinStatus(location.origin, p.code, p.identity, p.requestId)
+  const st = await Channel.joinStatus(relayUrl(), p.code, p.identity, p.requestId)
   if (st.status === "denied") return "denied"
   if (st.status === "pending") return { code: st.code }
   // The owner may have admitted this person under a handle from their account: speak under that one.
-  const record = (await new Channel(st.access, location.origin, p.identity).members().catch(() => [])).find((x) => x.pk === p.identity.pk)
+  const record = (await new Channel(st.access, relayUrl(), p.identity).members().catch(() => [])).find((x) => x.pk === p.identity.pk)
   const identity = record && record.name !== p.identity.name ? { ...p.identity, name: record.name } : p.identity
   const m: StoredMember = { code: p.code, identity, access: st.access, at: Date.now() }
   saveMember(m)
@@ -694,7 +695,7 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
     () =>
       new Channel(
         member.access,
-        location.origin,
+        relayUrl(),
         member.identity,
         (access) => saveMember({ ...(loadMember(member.code) ?? member), access })
       ),

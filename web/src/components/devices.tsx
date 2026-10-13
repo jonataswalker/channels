@@ -1,3 +1,4 @@
+import { relayUrl } from "../lib/relay"
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { encode } from "uqr"
 
@@ -33,7 +34,7 @@ function takeBack(live: RefObject<DeviceOffer | null>, token: RefObject<() => Pr
   live.current = null
   if (!o) return
   void token.current().then((t) => {
-    if (t) void withdrawOffer(location.origin, t, o.id)
+    if (t) void withdrawOffer(relayUrl(), t, o.id)
   })
 }
 
@@ -71,7 +72,7 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
     const poll = window.setInterval(async () => {
       const t = await auth.token()
       if (!t || Date.now() > offer.expires) return
-      if (!(await offerWaiting(location.origin, t, offer.id).catch(() => true))) {
+      if (!(await offerWaiting(relayUrl(), t, offer.id).catch(() => true))) {
         live.current = null
         setStep((s) => (s.kind === "showing" && s.offer.id === offer.id ? { kind: "taken" } : s))
       }
@@ -137,14 +138,14 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
               Point its camera here, then sign in as <span className="font-medium text-ink">{auth.user?.email ?? displayName(auth.user)}</span>.
             </p>
             <div className="mt-5 flex justify-center">
-              <QrCode text={offerLink(location.origin, step.offer)} />
+              <QrCode text={offerLink(relayUrl(), step.offer)} />
             </div>
             <p className="mt-4 text-center text-meta text-ink-3 tabular-nums">Works once · expires in {countdown(step.offer.expires - now)}</p>
             <div className="mt-5 flex justify-between gap-2">
               <Button
                 variant="ghost"
                 className="-ml-3"
-                onClick={() => navigator.clipboard.writeText(offerLink(location.origin, step.offer)).then(() => toast("Copied. Open it only on your own device."))}
+                onClick={() => navigator.clipboard.writeText(offerLink(relayUrl(), step.offer)).then(() => toast("Copied. Open it only on your own device."))}
               >
                 Copy link
               </Button>

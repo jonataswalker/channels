@@ -1,3 +1,4 @@
+import { relayUrl } from "./relay"
 // Linking a computer to your account (kiwi setup prints a #link=<key> page),
 // the list of your linked computers, and their seats in the channels you own.
 
@@ -55,7 +56,7 @@ export const removeComputer = (pk: string, token: string) => call<unknown>(`/v1/
 function owned(): Channel[] {
   return allMembers()
     .filter((m) => m.identity.pk === m.access.ownerPk)
-    .map((m) => new Channel(m.access, location.origin, m.identity, (access) => saveMember({ ...m, access })))
+    .map((m) => new Channel(m.access, relayUrl(), m.identity, (access) => saveMember({ ...m, access })))
 }
 
 /** Take a computer's seat away in every channel this browser owns, and remove the agents it let in. */

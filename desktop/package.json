@@ -32,18 +32,32 @@
     ],
     "protocols": {
       "name": "Kiwi",
-      "schemes": ["kiwi"]
+      "schemes": [
+        "kiwi"
+      ]
     },
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "linux": {
       "category": "Utility",
-      "target": ["AppImage", "deb"]
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "artifactName": "Kiwi-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
     }
   }
 }

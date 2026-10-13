@@ -1,3 +1,4 @@
+import { relayUrl } from "./relay"
 import { RelayError, Unreachable, reason } from "@mc/client.ts"
 import { decodeJoinCode } from "@mc/crypto.ts"
 import {
@@ -176,7 +177,7 @@ const token = Effect.suspend(() => {
 }).pipe(Effect.flatMap((t) => (t ? Effect.succeed(t) : Effect.fail(new SignInAgain()))))
 
 /** The stored vault, or null when there's none. */
-const stored = Effect.flatMap(token, (t) => atRelay(() => fetchVault(location.origin, t)))
+const stored = Effect.flatMap(token, (t) => atRelay(() => fetchVault(relayUrl(), t)))
 
 const current = Effect.flatMap(stored, (got) => (got ? Effect.succeed(got) : Effect.fail(new NoVault())))
 
@@ -247,7 +248,7 @@ const opened = Effect.fn("vault.opened")(function* (got: { version: number; blob
   if (got.resetAt) {
     const t = yield* token
     const blob = yield* sealed(() => resealVault(got.blob, s.user, k, v, got.version + 1, v))
-    const r = yield* atRelay(() => putVault(location.origin, t, s.user, got.version, blob, v.writer))
+    const r = yield* atRelay(() => putVault(relayUrl(), t, s.user, got.version, blob, v.writer))
     if ("version" in r) {
       yield* saw(s.user, r.version)
       cancelled = got.resetAt
@@ -290,7 +291,7 @@ export async function startVault(next: Session | null): Promise<void> {
 /** Show the vault that's there as locked, and say so. */
 const alreadyThere = Effect.gen(function* () {
   const t = yield* token
-  const got = yield* atRelay(() => fetchVault(location.origin, t)).pipe(Effect.catchCause(() => Effect.succeed(null)))
+  const got = yield* atRelay(() => fetchVault(relayUrl(), t)).pipe(Effect.catchCause(() => Effect.succeed(null)))
   if (!got) return yield* new NotSaved()
   set(lockedOn(got))
   return yield* new VaultExists()
@@ -310,7 +311,7 @@ const setUp = Effect.fn("vault.setUp")(function* () {
   const blob = yield* sealed(() => addWrap(made.blob, s.user, made.key, first, 1, { kind: "recovery", label: "Recovery code", secret: recoverySecret(code)! }))
   // Another save got there first (409, or 403 from a relay that checks the signer before the version): there's a vault now.
   const t = yield* token
-  const r = yield* atRelay(() => putVault(location.origin, t, s.user, 0, blob, made.writer, made.writer.pk)).pipe(Effect.catchCause(() => alreadyThere))
+  const r = yield* atRelay(() => putVault(relayUrl(), t, s.user, 0, blob, made.writer, made.writer.pk)).pipe(Effect.catchCause(() => alreadyThere))
   if ("conflict" in r) return yield* alreadyThere
   yield* saw(s.user, r.version)
   // Saved. From here a hiccup in this browser must not leave the page offering setup again.
@@ -362,7 +363,7 @@ export const resetVault = (): Promise<number> =>
   run(
     Effect.gen(function* () {
       const t = yield* token
-      const { resetAt } = yield* atRelay(() => requestVaultReset(location.origin, t))
+      const { resetAt } = yield* atRelay(() => requestVaultReset(relayUrl(), t))
       if (state.kind === "locked") set({ ...state, resetAt })
       return resetAt
     })
@@ -403,7 +404,7 @@ const push = Effect.suspend(() => {
   return Effect.gen(function* () {
     const t = yield* token
     const highest = yield* seen(s.user)
-    const r = yield* atRelay(() => syncVault<StoredMember>(location.origin, t, s.user, k, change, highest))
+    const r = yield* atRelay(() => syncVault<StoredMember>(relayUrl(), t, s.user, k, change, highest))
     yield* saw(s.user, r.version)
     take(r.contents)
   })
@@ -458,7 +459,7 @@ export const addPasskey = (): Promise<void> =>
       const { got, v } = yield* openNow(raw)
       const blob = yield* sealed(() => addWrap(got.blob, s.user, raw, v, got.version + 1, { kind: "passkey", label: deviceLabel(), secret: pk.secret, credentialId: pk.credentialId }))
       const t = yield* token
-      const r = yield* atRelay(() => putVault(location.origin, t, s.user, got.version, blob, v.writer))
+      const r = yield* atRelay(() => putVault(relayUrl(), t, s.user, got.version, blob, v.writer))
       if ("conflict" in r) return yield* new VaultChanged()
       yield* saw(s.user, r.version)
       rawKey = raw
@@ -481,7 +482,7 @@ export const removePasskey = (w: Wrap): Promise<string> =>
       const { got, v } = yield* openNow(key!)
       const next = yield* sealed(() => rotateVault(s.user, v, got.version + 1, keep))
       const t = yield* token
-      const r = yield* atRelay(() => putVault(location.origin, t, s.user, got.version, next.blob, v.writer, next.writer.pk))
+      const r = yield* atRelay(() => putVault(relayUrl(), t, s.user, got.version, next.blob, v.writer, next.writer.pk))
       if ("conflict" in r) return yield* new VaultChanged()
       yield* saw(s.user, r.version)
       rawKey = next.key

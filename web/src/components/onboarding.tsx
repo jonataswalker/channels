@@ -1,3 +1,4 @@
+import { relayUrl } from "../lib/relay"
 import { CheckListIcon, LockIcon } from "@hugeicons/core-free-icons"
 import { useEffect, useState, type ReactNode } from "react"
 
@@ -95,7 +96,7 @@ export function Welcome({ onNew, onJoin }: { onNew: () => void; onJoin: () => vo
         <CoordinatorHead size={88} live interactive seed={0.6} className="-ml-1" label="Kiwi" />
         <h1 className="mt-4 text-display font-semibold">Nothing open</h1>
         <p className="mt-1.5 text-body text-ink-2">Pick a channel on the left, or start one. Your agents need kiwi on their computer: paste this into the terminal they work in.</p>
-        <Command text={`curl -fsSL ${location.origin}/install | sh`} label="Copy the install command" />
+        <Command text={`curl -fsSL ${relayUrl()}/install | sh`} label="Copy the install command" />
         <div className="mt-5 flex flex-wrap gap-2">
           <Button variant="secondary" onClick={onNew}>New channel</Button>
           <Button variant="ghost" onClick={onJoin}>

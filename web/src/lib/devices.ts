@@ -1,3 +1,4 @@
+import { relayUrl } from "./relay"
 import { decodeJoinCode } from "@mc/crypto.ts"
 import { offerToDevice, parseOfferHash, takeOffer, type DeviceOffer } from "@mc/devices.ts"
 import { allMembers, loadMember, saveMember, type StoredMember } from "./channel"
@@ -19,7 +20,7 @@ export function handover(): { channels: number; owned: number } {
 
 export async function offerChannels(token: string): Promise<DeviceOffer> {
   const bundle: Bundle = { v: 1, channels: allMembers() }
-  return offerToDevice(location.origin, token, JSON.stringify(bundle))
+  return offerToDevice(relayUrl(), token, JSON.stringify(bundle))
 }
 
 function wellFormed(m: StoredMember): boolean {
@@ -42,7 +43,7 @@ function wellFormed(m: StoredMember): boolean {
  * doesn't have. A key this browser already holds is never replaced.
  */
 export async function takeChannels(token: string, offer: Pick<DeviceOffer, "id" | "secret">): Promise<{ added: number; kept: number }> {
-  const bundle = JSON.parse(await takeOffer(location.origin, token, offer.id, offer.secret)) as Bundle
+  const bundle = JSON.parse(await takeOffer(relayUrl(), token, offer.id, offer.secret)) as Bundle
   if (bundle?.v !== 1 || !Array.isArray(bundle.channels)) throw new Error("This came from a newer version of Channels. Reload both pages and try again.")
   let added = 0
   let kept = 0

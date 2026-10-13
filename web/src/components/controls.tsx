@@ -1,3 +1,4 @@
+import { relayUrl } from "../lib/relay"
 import { Dialog } from "@base-ui/react/dialog"
 import { Add01Icon, Copy01Icon, PauseIcon } from "@hugeicons/core-free-icons"
 import { createContext, useContext, useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
@@ -138,7 +139,7 @@ function CopyBox({ text, label, done }: { text: string; label: string; done: str
   )
 }
 
-const inviteLink = (code: string) => `${location.origin}/#${code}`
+const inviteLink = (code: string) => `${relayUrl()}/#${code}`
 
 export function ChannelControls({ children, ...p }: ControlsProps & { children: ReactNode }) {
   const [confirm, setConfirm] = useState<Confirm>(null)
@@ -464,7 +465,7 @@ function Invite({ onDone }: { onDone: () => void }) {
   const command = [
     `kiwi join ${p.code}`,
     // On any other relay, the agent's CLI has to be told where to go.
-    location.origin !== PUBLIC_RELAY && `--relay ${location.origin}`,
+    relayUrl() !== PUBLIC_RELAY && `--relay ${relayUrl()}`,
     // No name: the agent is called by what it runs in (claude, codex…), made unique when you approve it.
     n && !badName && `--as ${n}`,
     role.trim() && `--role ${quoted(role.trim())}`,
@@ -779,7 +780,7 @@ function TerminalDialog({ pairing, onClose }: { pairing: NonNullable<ControlsPro
       gone = true
     }
   }, [])
-  const command = slot ? `kiwi tui ${pairing.code}${location.origin !== PUBLIC_RELAY ? ` --relay ${location.origin}` : ""} --pair ${slot}` : null
+  const command = slot ? `kiwi tui ${pairing.code}${relayUrl() !== PUBLIC_RELAY ? ` --relay ${relayUrl()}` : ""} --pair ${slot}` : null
 
   useEffect(() => {
     if (!slot) return

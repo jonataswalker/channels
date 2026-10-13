@@ -1,3 +1,4 @@
+import { relayUrl } from "../lib/relay"
 import { Add01Icon, ArrowRight01Icon, BookOpen01Icon, Cancel01Icon, ComputerTerminal01Icon, Link01Icon, PauseIcon, PencilEdit01Icon, PlayIcon, UserMultipleIcon } from "@hugeicons/core-free-icons"
 import { useState, type ReactNode } from "react"
 
@@ -173,7 +174,7 @@ export function InfoPanel({
             </Row>
           )}
           {p.isOwner && (
-            <Row icon={Link01Icon} onClick={() => void navigator.clipboard.writeText(`${location.origin}/#${p.code}`).then(() => toast("Invite link copied"))}>
+            <Row icon={Link01Icon} onClick={() => void navigator.clipboard.writeText(`${relayUrl()}/#${p.code}`).then(() => toast("Invite link copied"))}>
               Copy invite link
             </Row>
           )}
