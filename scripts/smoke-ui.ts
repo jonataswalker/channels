@@ -398,20 +398,26 @@ try {
       })
     )
 
-  // A new channel starts in coordinator mode; one click makes bot the coordinator, another takes it back.
-  at = "Make coordinator"
+  // Coordinator mode lives in the details panel: Turn off takes the role away, Turn on picks who holds it.
+  at = "Coordinator mode off and on"
   // An event line says it in a few words; its tooltip has the whole of it.
   await page.locator('[title*="turned on coordinator-only"]').first().waitFor({ state: "attached", timeout: 15000 })
+  // Whoever relays now (bot or helper): turning off takes it from them (nothing, if nobody does yet).
+  const relays = await panel.getByText(/relays/).innerText().catch(() => "")
+  const relaying = /on \((.*) relays\)/.exec(relays)?.[1]
   await inDetails(async () => {
-    await panel.getByRole("button", { name: "More for bot" }).click()
-    await page.getByRole("menuitem", { name: "Make coordinator" }).click()
+    await panel.getByRole("button", { name: "Turn off" }).click()
   })
-  await panel.getByText(/People talk with .*, the coordinator/).waitFor({ timeout: 15000 })
-  await panel.getByRole("button", { name: "More for bot" }).click()
-  await page.getByRole("menuitem", { name: "No longer coordinator" }).click()
-  // The mode goes off first (so nobody re-appoints in between), then the role: the role is the newest line.
-  await page.getByText("bot has no role now").first().waitFor({ timeout: 15000 })
-  await panel.getByText(/No coordinator yet/).waitFor({ timeout: 15000 })
+  if (relaying) {
+    // The mode goes off first (so nobody re-appoints in between), then the role: the role is the newest line.
+    await page.getByText(`${relaying} has no role now`).first().waitFor({ timeout: 15000 })
+  }
+  await panel.getByText(/Coordinator mode: off/).waitFor({ timeout: 15000 })
+  await inDetails(async () => {
+    await panel.getByRole("button", { name: "Turn on" }).click()
+    await page.getByRole("dialog").getByRole("button", { name: /bot/ }).click()
+  })
+  await panel.getByText(/Coordinator mode: on \(bot relays\)/).waitFor({ timeout: 15000 })
   // A direct conversation with a member, from their face.
   await panel.getByRole("button", { name: "More for bot" }).click()
   await page.getByRole("menuitem", { name: "Message privately" }).click()
