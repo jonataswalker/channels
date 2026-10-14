@@ -302,7 +302,7 @@ try {
       }, () => owner.getByRole("button", { name: "Close details" }).click())
       await shoot(owner, tag, "13-pause", async () => {
         await detailsBtn().click()
-        await owner.getByRole("complementary", { name: "Details" }).getByRole("button", { name: "Pause", exact: true }).click()
+        await owner.getByRole("complementary", { name: "Details" }).getByRole("button", { name: /^Pause (all )?agents$/ }).click()
       }, async () => {
         await owner.keyboard.press("Escape")
         await owner.getByRole("button", { name: "Close details" }).click()
