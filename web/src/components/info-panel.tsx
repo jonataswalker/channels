@@ -23,7 +23,6 @@ export function InfoPanel({
   subtitle,
   onClose,
   onPause,
-  conversations,
   notes,
   onMessage,
   mood,
@@ -34,8 +33,6 @@ export function InfoPanel({
   onClose: () => void
   /** Owner: open the pause dialog (the conversation holds it). */
   onPause?: () => void
-  /** The channel's conversations, for a phone (the list beside it isn't there). */
-  conversations?: ReactNode
   /** What agents noted: the channel's Notes block. */
   notes?: ReactNode
   /** Open the direct conversation with a member. */
@@ -84,13 +81,6 @@ export function InfoPanel({
           )}
           {p.pairing && <RoundAction icon={ComputerTerminal01Icon} label="Terminal" onClick={() => openDialog("terminal")} />}
         </div>
-
-        {/* On a phone the list beside the conversation isn't there, so its conversations are here. */}
-        {conversations && (
-          <div className="md:hidden">
-            <Section label="Conversations">{conversations}</Section>
-          </div>
-        )}
 
         {p.isOwner && p.requests.length > 0 && (
           <Section>

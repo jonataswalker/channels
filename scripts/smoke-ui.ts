@@ -371,10 +371,11 @@ try {
   console.log(`ok  ${at}`)
 
   await kiwi(["-c", "smoke", "--as", "bot", "task", "add", "Smoke task", "--owner", "bot"])
-  // A task has its own conversation, listed under the channel; it opens on the task's card, and the card on its page.
+  // A task has its own conversation, opened from the Tasks tab under the channel's header; it opens on the task's card, and the card on its page.
   at = "Task conversation and page"
-  const conversations = page.getByRole("navigation", { name: "Channels" }).getByRole("navigation", { name: "Conversations" })
-  await conversations.getByRole("button", { name: /Smoke task/ }).click({ timeout: 15000 })
+  const conversations = page.getByRole("main").getByRole("navigation", { name: "Conversations" })
+  await conversations.getByRole("button", { name: /^Tasks/ }).click({ timeout: 15000 })
+  await page.getByRole("main").getByRole("button", { name: /Smoke task/ }).first().click({ timeout: 15000 })
   await page.getByRole("main").getByRole("button", { name: /^(?!Details).*Smoke task T\d+/ }).first().click()
   await page.getByRole("region", { name: /^Task T\d+/ }).getByRole("heading", { name: "Activity" }).waitFor()
   await page.getByRole("button", { name: "Close task" }).click()
@@ -424,7 +425,7 @@ try {
   console.log(`ok  ${at} and a direct conversation`)
 
   at = "Tasks view"
-  await conversations.getByRole("button", { name: /^All tasks/ }).click()
+  await conversations.getByRole("button", { name: /^Tasks/ }).click()
   await page.getByRole("main").getByRole("button", { name: /Smoke task/ }).first().waitFor()
   await conversations.getByRole("button", { name: /^Main/ }).click()
   await page.getByRole("textbox", { name: "Message" }).waitFor()
