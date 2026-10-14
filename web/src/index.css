@@ -85,6 +85,8 @@
   --glass-shade: light-dark(rgba(15, 15, 17, 0.14), rgba(0, 0, 0, 0.55));
   /* The one header row every column shares, and what a Mac window's traffic lights take of the list's. */
   --chrome-h: 52px;
+  /* The list over the Mac's sidebar glass: a light tint, so the desktop blurs through it. */
+  --list-glass: light-dark(rgba(255, 255, 255, 0.28), rgba(18, 18, 20, 0.42));
   --lights-w: 84px;
 }
 
@@ -113,18 +115,18 @@
    * names, rows, menus and buttons; body for what people read, in bubbles too; title for headers and
    * dialogs; display for the info panel's name, empty states and welcomes.
    */
-  --text-stamp: 11px;
-  --text-stamp--line-height: 14px;
-  --text-meta: 12px;
-  --text-meta--line-height: 16px;
-  --text-ui: 13px;
-  --text-ui--line-height: 18px;
-  --text-body: 15px;
-  --text-body--line-height: 21px;
-  --text-title: 16px;
-  --text-title--line-height: 21px;
-  --text-display: 26px;
-  --text-display--line-height: 32px;
+  --text-stamp: calc(11px * var(--text-scale, 1));
+  --text-stamp--line-height: calc(14px * var(--text-scale, 1));
+  --text-meta: calc(12px * var(--text-scale, 1));
+  --text-meta--line-height: calc(16px * var(--text-scale, 1));
+  --text-ui: calc(13px * var(--text-scale, 1));
+  --text-ui--line-height: calc(18px * var(--text-scale, 1));
+  --text-body: calc(15px * var(--text-scale, 1));
+  --text-body--line-height: calc(21px * var(--text-scale, 1));
+  --text-title: calc(16px * var(--text-scale, 1));
+  --text-title--line-height: calc(21px * var(--text-scale, 1));
+  --text-display: calc(26px * var(--text-scale, 1));
+  --text-display--line-height: calc(32px * var(--text-scale, 1));
   --radius-row: 8px;
   --radius-ctl: 10px;
   --radius-card: 16px;
@@ -174,13 +176,39 @@ body,
   height: 100%;
 }
 
+/* Smooth, even type on a Mac (grayscale antialiasing, as Apple's apps draw it), everywhere: form
+   controls don't inherit the body's font settings, so they're named too. */
+html,
+button,
+input,
+textarea,
+select {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-feature-settings: inherit;
+}
+
+/* The desktop app on a Mac: the window is the system's sidebar glass (vibrancy, desktop/src/main.ts);
+   the page is see-through, so the list shows it, and everything else paints its own canvas. */
+[data-shell="mac"],
+[data-shell="mac"] body {
+  background: transparent;
+}
+
 body {
   margin: 0;
   background: var(--rail);
   color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 15px;
-  line-height: 21px;
+  font-size: calc(15px * var(--text-scale, 1));
+  line-height: calc(21px * var(--text-scale, 1));
   /* Inter's open digits and a tailed l: easier to tell 1, l and I apart in names and keys. */
   font-feature-settings: "calt", "kern", "cv05", "cv08";
   font-optical-sizing: auto;

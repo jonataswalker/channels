@@ -167,7 +167,7 @@ try {
   await settings.waitFor({ state: "hidden" })
   if ((await page.evaluate(() => document.documentElement.style.zoom)) !== "1.22") throw new Error("the text size didn't apply")
   console.log(`ok  ${at}`)
-  await opens("Go to… palette", () => page.getByRole("button", { name: /^Go to…/ }).click())
+  await opens("Search palette", () => page.getByRole("complementary").getByRole("button", { name: /^Search \(/ }).click())
   const plus = page.getByRole("button", { name: "New channel or join" })
   await eachItem("New channel or join", plus, () => true)
 
@@ -235,8 +235,8 @@ try {
   await page.getByRole("button", { name: "Close thread" }).waitFor()
   await page.getByRole("button", { name: "Close thread" }).click()
   console.log("ok  Thread panel")
-  // Once there's something going on, the owner's stop button is in the header.
-  await opens("Pause agents", () => page.getByRole("button", { name: /^Pause (all )?agents$/ }).first().click())
+  // Once there's something going on, the owner's stop button is in the details (the name opens them).
+  await opens("Pause agents", () => inDetails(() => panel.getByRole("button", { name: "Pause", exact: true }).click()))
 
   // The sent message is sealed in this browser. A reload paints it and the
   // socket asks only for seqs after that row. "smoke test" contains a space,

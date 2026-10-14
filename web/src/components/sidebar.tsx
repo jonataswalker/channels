@@ -1,5 +1,4 @@
-import { ComputerIcon, LockIcon, Search01Icon, Settings01Icon } from "@hugeicons/core-free-icons"
-import { useState } from "react"
+import { ComputerIcon, LockIcon, Settings01Icon } from "@hugeicons/core-free-icons"
 
 import type { ChannelRow } from "@/lib/channel"
 import type { RowNews } from "@/lib/news"
@@ -10,7 +9,7 @@ import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { CoordinatorAvatar } from "./coordinator-head"
 import { Icon } from "./icon"
-import { NewMenu, SidebarToggle } from "./chrome"
+import { NewMenu, SearchButton, SidebarToggle } from "./chrome"
 import { Monogram, Wordmark } from "./kit"
 import { Menu, MenuItem, MenuNote, MenuSeparator } from "./ui/menu"
 
@@ -48,53 +47,26 @@ export function Sidebar({
   className?: string
 }) {
   const person = useSecrets().person
-  const [query, setQuery] = useState("")
-  const q = query.trim().toLowerCase()
   const newsOf = new Map(rows.map((c, i) => [c.room, news[i]]))
-  const shown = q ? rows.filter((c) => c.title.toLowerCase().includes(q) || c.recent?.text.toLowerCase().includes(q)) : rows
   const icons = useIcons()
   useMemberIcons(rows.filter((c) => c.state === "member").map((c) => c.code))
 
-  const mac = /Mac|iPhone|iPad/.test(navigator.platform)
-
   return (
-    <aside className={cx("relative h-full w-full shrink-0 flex-col bg-rail md:w-[300px]", className)}>
-      {/* The list's part of the window's one header row: past a Mac's traffic lights, hide the list,
-          what it is, and new. The row moves the window in the desktop app. */}
-      <header className="drag flex h-(--chrome-h) shrink-0 items-center gap-1.5 pr-3 pl-3 shell-mac:pl-(--lights-w)">
+    <aside className={cx("relative h-full w-full shrink-0 flex-col bg-rail shell-mac:bg-(--list-glass) md:w-[300px]", className)}>
+      {/* The list's part of the window's one header row, as Grok lays it out: past a Mac's traffic
+          lights, hide the list; on the right, search (the ⌘K palette) and new. The row moves the
+          window in the desktop app. */}
+      <header className="drag flex h-(--chrome-h) shrink-0 items-center gap-2 pr-3 pl-3 shell-mac:pl-(--lights-w)">
         <SidebarToggle />
-        {!person && !rows.length ? <Wordmark className="pl-1 text-title" /> : <h1 className="pl-1.5 text-title font-bold tracking-[-0.02em]">Channels</h1>}
+        {!person && !rows.length && <Wordmark className="pl-1 text-title" />}
         <span className="flex-1" />
+        <SearchButton onPalette={onPalette} />
         <NewMenu onNew={onNew} onJoin={onJoin} />
       </header>
 
-      {/* Search, as in Messages: a pill at the top of the list. ⌘K goes anywhere. */}
-      <div className="shrink-0 px-3 pt-1 pb-2">
-        <label className="flex h-9 min-w-0 items-center gap-2 rounded-full bg-wash-2 pr-1 pl-3.5 text-ink-3 transition-shadow focus-within:shadow-[0_0_0_3px_var(--accent-wash)]">
-          <Icon icon={Search01Icon} size={16} className="shrink-0" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-            placeholder="Search"
-            aria-label="Search channels"
-            className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
-          />
-          <button
-            type="button"
-            aria-label={`Go to… (${mac ? "⌘" : "Ctrl+"}K)`}
-            title={`Go to… (${mac ? "⌘" : "Ctrl+"}K)`}
-            onClick={onPalette}
-            className="flex h-7 shrink-0 items-center rounded-full px-2.5 text-meta font-medium text-ink-3 transition-colors hover:bg-wash-2 hover:text-ink"
-          >
-            {mac ? "⌘K" : "Ctrl K"}
-          </button>
-        </label>
-      </div>
-
       {/* Channels only: a channel's tasks and direct conversations are tabs in the channel itself. */}
-      <nav aria-label="Channels" className={cx("flex-1 space-y-0.5 overflow-y-auto px-2 pt-1", person ? "pb-20" : "pb-3")}>
-        {shown.map((c) => {
+      <nav aria-label="Channels" className={cx("flex-1 space-y-0.5 overflow-y-auto px-2 pt-2", person ? "pb-20" : "pb-3")}>
+        {rows.map((c) => {
           const selected = c.code === active
           const reachable = c.state === "member"
           const n = newsOf.get(c.room)
@@ -134,7 +106,6 @@ export function Sidebar({
             </button>
           )
         })}
-        {rows.length > 0 && shown.length === 0 && <p className="px-3 py-6 text-ui text-ink-3">No channel matches “{query}”.</p>}
         {rows.length === 0 && (
           <p className="px-3 py-4 text-ui leading-normal text-ink-3">
             Channels you create or join show up here.
@@ -145,7 +116,7 @@ export function Sidebar({
       {/* Who you are, at the foot of the list as Grok keeps it: your face and name on a glass pill that
           floats over the list, the menu above it. */}
       {person && (
-        <div className="scrim-bottom absolute inset-x-0 bottom-0 px-3 pt-6 pb-3 [&>*]:pointer-events-auto">
+        <div className="scrim-bottom absolute inset-x-0 bottom-0 px-3 pt-6 pb-3 shell-mac:[background:none] shell-mac:[backdrop-filter:none] [&>*]:pointer-events-auto">
           <Menu
             side="top"
             className="w-60"

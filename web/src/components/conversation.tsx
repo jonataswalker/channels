@@ -1,4 +1,4 @@
-import { ArrowDown01Icon, ArrowLeft01Icon, CheckListIcon, PauseCircleIcon, PlayCircleIcon, Search01Icon, SidebarRightIcon } from "@hugeicons/core-free-icons"
+import { ArrowDown01Icon, ArrowLeft01Icon, BubbleChatIcon, CheckListIcon, Search01Icon } from "@hugeicons/core-free-icons"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 
 import { droppedCount } from "@mc/format.ts"
@@ -10,13 +10,12 @@ import { secrets } from "@/lib/secrets"
 import { channelTitle, forgetChannel, LEFT_CHANNEL, loadMember, loadRecent, saveMember, saveRecent, useChannel, useClock, useKnownChannels, type StoredMember } from "@/lib/channel"
 import { markSeen, setOpenNews } from "@/lib/news"
 import { useIcons, useLiveIcon } from "@/lib/icons"
-import { excerpt, formatTime, memberName, shortTitle } from "@/lib/format"
+import { excerpt, formatTime, memberName } from "@/lib/format"
 import { coordinatorMood, ERROR_MS, moodInputs, SPEAKING_MS, type Mood } from "@/lib/coordinator-mood"
 import { receipt } from "@/lib/receipts"
 import { dmPlace, markSeenIn, MAIN, placeFromKey, placeKey, seenIn, sendFrom, useSeen, threadMembers, type Place, type PlaceSummary } from "@/lib/threads"
 import { useSidebarOpen } from "@/lib/sidebar"
 import { cx } from "@/lib/utils"
-import { ChannelIconTile } from "./channel-icon"
 import { LEAD_WHEN_HIDDEN } from "./chrome"
 import { CoordinatorAvatar } from "./coordinator-head"
 import { Composer } from "./composer"
@@ -24,15 +23,12 @@ import { AddAgent } from "./add-agent"
 import { ChannelControls, HoldBanner, HoldDialog } from "./controls"
 import { Icon } from "./icon"
 import { InfoPanel } from "./info-panel"
-import { Button, IconButton, Monogram, Spinner, errorText, toast } from "./kit"
+import { Button, IconButton, Monogram, Spinner } from "./kit"
 import { Bubble, EventGroup, EventRow, TimeMark, isAgent, standsAlone, type ThreadSummary } from "./message"
 import { NeedsYou } from "./needs-you"
 import { TaskPage } from "./task-page"
 import { Notes, StateMark, TaskCard, Tasks } from "./tasks"
 import { ThreadPanel } from "./thread"
-
-/** Where a task stands, in words: on hover over its pill. */
-const STATE_WORD = { todo: "Up next", doing: "In progress", review: "Needs review", done: "Done" } as const
 
 /** Messages this close together from one sender read as one run. */
 const RUN_GAP = 5 * 60_000
@@ -495,22 +491,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       }
     : undefined
 
-  // The face beside the name: the coordinator for Main, the task's state for a task, the other one for a direct conversation.
-  const placeFace =
-    place.kind === "main" ? (
-      coord ? (
-        <CoordinatorAvatar size={32} mood={mood} live seed={0.7} />
-      ) : (
-        <ChannelIconTile icon={icon} title={title} size={32} />
-      )
-    ) : place.kind === "task" ? (
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-field">{task ? <StateMark state={task.state} /> : null}</span>
-    ) : (
-      (() => {
-        const other = place.with.find((n) => n !== me) ?? place.with[0]!
-        return other === coord ? <CoordinatorAvatar size={32} mood={mood} live seed={0.7} /> : <Monogram name={nameOf(other)} agent={isAgent(state.members.get(other))} color={colorOf(state, other)} size={32} />
-      })()
-    )
   // A direct conversation you're in is named for the other one, as Messages names a chat.
   const placeTitle = place.kind === "main" ? title : place.kind === "task" ? (task ? task.title : "Task") : place.with.includes(me) ? nameOf(place.with.find((n) => n !== me) ?? me) : place.with.map(nameOf).join(" & ")
   // A direct conversation is between its two; anyone else reads it.
@@ -518,8 +498,6 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   // A task's thread reaches whoever works it on its own (state.ts threadMembers); only an @ names anyone. A direct one goes to the other one.
   const extra = place.kind === "main" ? undefined : sendFrom(state, place, me)
 
-  // Just the main conversation (a new channel): nothing to choose between yet.
-  const several = places.size > 1 || place.kind !== "main" || state.tasks.size > 0
   return (
     <ChannelControls
       code={member.code}
@@ -607,65 +585,39 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
           className={cx("relative flex min-w-0 flex-1 flex-col bg-canvas", (root || info) && "hidden md:flex")}
           style={{ "--head": `${headH}px`, "--foot": `${footH}px` } as CSSProperties}
         >
-          {/* Who you're talking with, floating over the conversation on the window's one header row: a
-              glass chip with the face, the name and what's going on; the channel's conversations as
-              pills; round glass controls. Messages scroll under it. */}
+          {/* The conversation's part of the window's one header row, floating over it as Grok's does:
+              in the middle, one glass capsule (the chat, the name, the tasks); on the right, search.
+              Messages scroll under it. Pausing every agent is in the details (the name opens them). */}
           <header ref={headRef} className="absolute inset-x-0 top-0 z-20">
             <div aria-hidden className="scrim-top absolute inset-x-0 top-0 -bottom-6" />
-            <div className={cx("drag relative flex flex-wrap items-center gap-x-2 gap-y-2 px-3 py-2 md:h-(--chrome-h) md:flex-nowrap md:py-0", !listOpen && LEAD_WHEN_HIDDEN)}>
-              <IconButton label="Channels" round className="glass size-9 text-ink md:hidden" onClick={onBack}>
+            <div className={cx("drag relative flex h-(--chrome-h) items-center gap-2 px-3", !listOpen && LEAD_WHEN_HIDDEN)}>
+              <IconButton label="Channels" round className="glass size-10 text-ink md:hidden" onClick={onBack}>
                 <Icon icon={ArrowLeft01Icon} size={20} />
               </IconButton>
-              <button
-                type="button"
-                onClick={() => (setInfo((v) => !v), setThreadRoot(null))}
-                aria-expanded={info}
-                aria-label={`Details: ${placeTitle}, ${subtitle}`}
-                className="glass flex h-10 min-w-0 shrink items-center gap-2.5 rounded-full py-1 pr-4 pl-1 text-left transition-colors md:max-w-80"
-              >
-                {placeFace}
-                <span className="min-w-0">
-                  <span className="block truncate text-ui leading-tight font-semibold">{placeTitle}</span>
-                  <span className="block truncate text-stamp text-ink-3">{headline}</span>
-                </span>
-              </button>
-              {several && (
-                <PlaceBar
-                  className="order-last basis-full md:order-none md:min-w-0 md:flex-1 md:basis-auto"
-                  me={me}
-                  places={places}
-                  current={board ? "board" : hereKey}
-                  state={state}
-                  nameOf={nameOf}
-                  unreadIn={unreadIn}
-                  onPick={(p) => (go(p), setInfo(false))}
-                  onBoard={() => (setBoard(true), setOpenTask(null), setThreadRoot(null), setInfo(false))}
-                />
-              )}
-              <span className={cx("flex-1", several && "md:hidden")} />
-              <div className="flex shrink-0 items-center gap-1.5">
-                {/* The owner's stop button: every agent, at once. */}
-                {hold &&
-                  (!quiet || state.hold) &&
-                  (state.hold ? (
-                    // Paused: play, in amber, where the stop was.
-                    <IconButton label="Resume agents" round className="glass size-9 bg-decide-wash text-decide" onClick={() => void hold(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error"))}>
-                      <Icon icon={PlayCircleIcon} size={18} />
-                    </IconButton>
-                  ) : (
-                    // A circled pause reads as a media control; two bare bars read as "columns".
-                    <IconButton label="Pause all agents" round className="glass size-9 text-ink" onClick={() => setPausing(true)}>
-                      <Icon icon={PauseCircleIcon} size={18} />
-                    </IconButton>
-                  ))}
-                <IconButton label="Search" round className="glass size-9 text-ink" active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={board}>
-                  <Icon icon={Search01Icon} size={17} />
-                </IconButton>
-                <IconButton label={info ? "Hide details" : "Show details"} round className="glass size-9 text-ink" active={info} onClick={() => (setInfo((v) => !v), setThreadRoot(null))}>
-                  <Icon icon={SidebarRightIcon} size={17} />
-                </IconButton>
-              </div>
+              <span className="flex-1" />
+              <IconButton label="Search" round className="glass size-10 text-ink" active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={board}>
+                <Icon icon={Search01Icon} size={19} />
+              </IconButton>
             </div>
+            {/* After the row in the document and marked no-drag: the desktop app's drag region is worked
+                out in document order, so it would otherwise swallow these clicks. */}
+            <PlaceSwitch
+              className="absolute top-0 left-1/2 h-(--chrome-h) -translate-x-1/2"
+              me={me}
+              places={places}
+              current={board ? "board" : hereKey}
+              state={state}
+              nameOf={nameOf}
+              unreadIn={unreadIn}
+              title={placeTitle}
+              titleLabel={`Details: ${placeTitle}, ${subtitle}`}
+              titleHint={headline}
+              task={task}
+              info={info}
+              onTitle={() => (setInfo((v) => !v), setThreadRoot(null))}
+              onPick={(p) => (go(p), setInfo(false))}
+              onBoard={() => (setBoard(true), setOpenTask(null), setThreadRoot(null), setInfo(false))}
+            />
             {search !== null && !board && openTask === null && (
               <div className="relative mx-auto w-full max-w-[792px] px-3 pb-2 md:px-4">
                 <label className="glass flex h-10 items-center gap-2 rounded-full px-4 text-ink-3">
@@ -849,20 +801,26 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
 }
 
 /**
- * The channel's conversations, as Grok's pills under its header: Main (people and the coordinator),
- * the task board, the task you're in when you're in one, then direct conversations. Every task lives
- * on the board, with room for its whole title; the pills never list them.
+ * The channel's conversations, in the middle of the header row as one glass capsule: the chat (Main,
+ * people and the coordinator), the name (it opens the details), and the tasks (the board, which lists
+ * every task with room for its whole title). Direct conversations follow as faces.
  */
-function PlaceBar({
+function PlaceSwitch({
+  className,
+  me,
   places,
   current,
   state,
   nameOf,
   unreadIn,
+  title,
+  titleLabel,
+  titleHint,
+  task,
+  info,
+  onTitle,
   onPick,
   onBoard,
-  me,
-  className,
 }: {
   className?: string
   me: string
@@ -871,6 +829,13 @@ function PlaceBar({
   state: ChannelState
   nameOf: (n: string) => string
   unreadIn: (key: string) => { n: number; forMe: boolean }
+  title: string
+  titleLabel: string
+  titleHint: string
+  /** The task whose conversation is open, if one is. */
+  task: Task | undefined
+  info: boolean
+  onTitle: () => void
   onPick: (p: Place) => void
   onBoard: () => void
 }) {
@@ -886,50 +851,59 @@ function PlaceBar({
     if (u.forMe) forMe += u.n
     else if (u.n) news = true
   }
-  const here = placeFromKey(current)
-  const task = here?.kind === "task" ? state.tasks.get(here.task) : undefined
-  // The one you're in is filled in ink, as Grok marks its chips; the rest are soft.
-  const pill = (on: boolean) =>
-    cx("flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-ui font-medium transition-colors", on ? "bg-ink text-canvas shadow-[0_8px_24px_-12px_var(--glass-shade)]" : "glass text-ink-2 hover:text-ink")
+  const inTasks = current === "board" || !!task
+  const seg = (on: boolean) => cx("relative flex size-8 shrink-0 items-center justify-center rounded-full transition-colors", on ? "bg-ink text-canvas" : "text-ink-2 hover:bg-wash-2 hover:text-ink")
+  // On an icon: a count when it's for you, else a quiet dot.
   const badge = (u: { n: number; forMe: boolean }) =>
     u.n <= 0 ? null : u.forMe ? (
-      <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-stamp font-semibold text-accent-ink tabular-nums">{u.n}</span>
+      <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-stamp leading-none font-semibold text-accent-ink tabular-nums">{u.n}</span>
     ) : (
-      // News that isn't for you: a quiet dot, not a count that reads like mail.
-      <span aria-label="New messages" className="size-1.5 rounded-full bg-current opacity-60" />
+      <span aria-label="New messages" className="absolute top-0 right-0 size-2 rounded-full bg-accent" />
     )
   const face = (name: string) =>
-    name === state.coordinator ? <CoordinatorAvatar size={20} /> : <Monogram name={nameOf(name)} agent={isAgent(state.members.get(name))} color={colorOf(state, name)} size={20} />
+    name === state.coordinator ? <CoordinatorAvatar size={32} /> : <Monogram name={nameOf(name)} agent={isAgent(state.members.get(name))} color={colorOf(state, name)} size={32} />
+  const main = current === "main" ? { n: 0, forMe: false } : unreadIn("main")
   return (
-    // Room above and below inside the scroller, so the pills' glass shadows aren't clipped.
-    <nav aria-label="Conversations" className={cx("-my-2 flex items-center gap-1.5 overflow-x-auto py-2 [scrollbar-width:none]", className)}>
-      <button type="button" aria-current={current === "main" ? "page" : undefined} onClick={() => onPick(MAIN)} className={pill(current === "main")}>
-        Main
-        {current !== "main" && badge(unreadIn("main"))}
-      </button>
-      {state.tasks.size > 0 && (
-        <button type="button" aria-current={current === "board" ? "page" : undefined} onClick={onBoard} className={pill(current === "board")}>
-          <Icon icon={CheckListIcon} size={15} className="shrink-0" />
-          Tasks
-          <span className="tabular-nums opacity-60">{open}</span>
-          {badge(forMe ? { n: forMe, forMe: true } : { n: news ? 1 : 0, forMe: false })}
+    <nav aria-label="Conversations" className={cx("no-drag flex items-center gap-2", className)}>
+      <div className="glass flex h-10 items-center gap-0.5 rounded-full p-1">
+        <button type="button" aria-label="Main" title="Chat" aria-current={current === "main" ? "page" : undefined} onClick={() => onPick(MAIN)} className={seg(current === "main")}>
+          <Icon icon={BubbleChatIcon} size={18} />
+          {badge(main)}
         </button>
-      )}
-      {task && (
-        // The task you're in, named so you know where you are; the board is one pill back.
-        <span aria-current="page" title={`${taskId(task.id)} ${task.title} · ${STATE_WORD[task.state]}`} className={cx(pill(true), "max-w-72")}>
-          <StateMark state={task.state} />
-          <span className="truncate">{shortTitle(task.title)}</span>
-        </span>
-      )}
+        <button
+          type="button"
+          aria-label={titleLabel}
+          aria-expanded={info}
+          title={titleHint}
+          onClick={onTitle}
+          className="flex h-8 max-w-[min(46vw,360px)] min-w-0 items-center gap-1.5 rounded-full px-3 text-ui font-semibold transition-colors hover:bg-wash-2"
+        >
+          {task && <StateMark state={task.state} />}
+          <span className="truncate">{title}</span>
+        </button>
+        {state.tasks.size > 0 && (
+          <button type="button" aria-label={`Tasks, ${open} open`} title={`Tasks · ${open} open`} aria-current={inTasks ? "page" : undefined} onClick={onBoard} className={seg(inTasks)}>
+            <Icon icon={CheckListIcon} size={18} />
+            {badge(forMe ? { n: forMe, forMe: true } : { n: news ? 1 : 0, forMe: false })}
+          </button>
+        )}
+      </div>
       {dms.map(([k, i]) => {
         const p = i.place
         if (p.kind !== "dm") return null
         const other = p.with.includes(me) ? (p.with.find((n) => n !== me) ?? me) : null
+        const name = other ? nameOf(other) : p.with.map(nameOf).join(" ↔ ")
         return (
-          <button key={k} type="button" aria-current={k === current ? "page" : undefined} onClick={() => onPick(p)} className={cx(pill(k === current), "pl-1.5")}>
-            <span aria-hidden className="flex shrink-0">{face(other ?? p.with[0]!)}</span>
-            <span className="max-w-40 truncate">{other ? nameOf(other) : p.with.map(nameOf).join(" ↔ ")}</span>
+          <button
+            key={k}
+            type="button"
+            aria-label={name}
+            title={`${name}, privately`}
+            aria-current={k === current ? "page" : undefined}
+            onClick={() => onPick(p)}
+            className={cx("glass relative flex size-10 shrink-0 items-center justify-center rounded-full", k === current && "shadow-[0_0_0_2px_var(--ink)]")}
+          >
+            {face(other ?? p.with[0]!)}
             {k !== current && badge(unreadIn(k))}
           </button>
         )

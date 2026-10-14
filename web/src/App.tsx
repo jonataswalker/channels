@@ -126,7 +126,7 @@ export default function App() {
             )}
             {/* Last in the document, not just on top: the desktop app works out what drags the window
                 in document order, whatever the z-index, so a header after these would swallow their clicks. */}
-            <ListControls onNew={() => setSheet("new")} onJoin={() => setSheet("join")} />
+            <ListControls onNew={() => setSheet("new")} onJoin={() => setSheet("join")} onPalette={() => setPalette(true)} />
           </main>
         </div>
       )}

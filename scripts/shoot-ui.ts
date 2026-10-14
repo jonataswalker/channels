@@ -292,7 +292,7 @@ try {
       })
       await shoot(owner, tag, "11-palette", async () => {
         if (narrow) await owner.getByRole("button", { name: "Channels" }).click()
-        await owner.getByRole("button", { name: /^Go to…/ }).click()
+        await owner.getByRole("complementary").getByRole("button", { name: /^Search \(/ }).click()
       }, async () => {
         await owner.keyboard.press("Escape")
         if (narrow) await owner.goto(channel)
@@ -301,7 +301,13 @@ try {
         await detailsBtn().click()
         await owner.getByRole("button", { name: /^Notes/ }).click()
       }, () => owner.getByRole("button", { name: "Close details" }).click())
-      await shoot(owner, tag, "13-pause", () => owner.getByRole("button", { name: /^Pause (all )?agents$/ }).first().click())
+      await shoot(owner, tag, "13-pause", async () => {
+        await detailsBtn().click()
+        await owner.getByRole("complementary", { name: "Details" }).getByRole("button", { name: "Pause", exact: true }).click()
+      }, async () => {
+        await owner.keyboard.press("Escape")
+        await owner.getByRole("button", { name: "Close details" }).click()
+      })
       await shoot(owner, tag, "14-list", async () => {
         if (narrow) await owner.getByRole("button", { name: "Channels" }).click()
       }, async () => {

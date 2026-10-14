@@ -129,11 +129,13 @@ function createWindow(): void {
     minWidth: 720,
     minHeight: 480,
     autoHideMenuBar: true,
-    // No title bar on a Mac: the app's own header row (52px, web/src/index.css --chrome-h) carries
-    // the traffic lights, centred on it, and moves the window. Elsewhere the system frame stays.
-    ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 20, y: 20 } } : {}),
-    // The canvas, so the window never flashes white (or black) before the page paints.
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0d0d0e" : "#ffffff",
+    // On a Mac: no title bar (the app's own header row, 52px, web/src/index.css --chrome-h, carries
+    // the traffic lights, centred on it, and moves the window), and the window is the system's
+    // sidebar glass under a see-through page: the list shows it, everything else paints its canvas.
+    // Elsewhere the system frame stays, and the window is the canvas so it never flashes before the page paints.
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 20, y: 20 }, vibrancy: "sidebar" as const, visualEffectState: "followWindow" as const, backgroundColor: "#00000000" }
+      : { backgroundColor: nativeTheme.shouldUseDarkColors ? "#0d0d0e" : "#ffffff" }),
     webPreferences: { preload: preloadPath(), contextIsolation: true, sandbox: true },
   });
   void win.loadURL(entryUrl());
