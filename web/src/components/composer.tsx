@@ -1,5 +1,5 @@
 import { Add01Icon, ArrowUp02Icon, Cancel01Icon } from "@hugeicons/core-free-icons"
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import type { SendOptions } from "@mc/client.ts"
 import { MAX_IMAGE_BYTES, RASTER_MIMES, type Color, type Message } from "@mc/protocol.ts"
@@ -44,6 +44,8 @@ interface Props {
   extra?: Pick<SendOptions, "to" | "task" | "dm">
   /** Placeholder for this conversation ("Message T12", "Message win"). */
   placeholder?: string
+  /** Under the field, inside the composer: what the agents are doing (agent-strip.tsx). */
+  footer?: ReactNode
 }
 
 /** Who a message is for: the people @mentioned at its start. */
@@ -52,7 +54,7 @@ function recipients(body: string, names: Set<string>): string[] {
   return [...lead.matchAll(/@([\p{L}\p{N}_.-]+)/gu)].map((m) => m[1]!).filter((n) => names.has(n))
 }
 
-export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route, extra, placeholder }: Props) {
+export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, send, thread, route, extra, placeholder, footer }: Props) {
   const [body, setBody] = useState("")
   const [files, setFiles] = useState<{ name: string; mime: string; data: string }[]>([])
   const [dropping, setDropping] = useState(false)
@@ -223,7 +225,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
       <div>
         <div
           className={cx(
-            "glass relative min-w-0 rounded-dock transition-shadow focus-within:shadow-[inset_0_1px_0_var(--glass-rim),0_0_0_1px_var(--ring),0_0_0_4px_var(--accent-wash)]",
+            "glass relative min-w-0 overflow-hidden rounded-dock transition-shadow focus-within:shadow-[inset_0_1px_0_var(--glass-rim),0_0_0_1px_var(--ring),0_0_0_4px_var(--accent-wash)]",
             dropping && "shadow-[0_0_0_1.5px_var(--ring)]"
           )}
           onDragEnter={(e) => {
@@ -345,6 +347,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
               <Icon icon={ArrowUp02Icon} size={18} strokeWidth={2.2} />
             </button>
           </div>
+          {footer}
         </div>
       </div>
       {routeNote && <p className="mt-1.5 ml-4 truncate text-stamp text-ink-3">{routeNote}</p>}

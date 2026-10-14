@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react"
 
 import { clockNow } from "@/lib/channel"
-import { beginPairing, pairCommands, removeComputer, type ComputerView, type PairAskView, type Pairing } from "@/lib/computers"
+import { adoptThisComputer, beginPairing, pairCommands, removeComputer, type ComputerView, type PairAskView, type Pairing } from "@/lib/computers"
 import { formatAgo } from "@/lib/format"
-import { useSecrets } from "@/lib/secrets"
+import { bridge, useSecrets } from "@/lib/secrets"
 import { Command } from "./add-agent"
 import { Button, Modal, Spinner, errorText, toast } from "./kit"
 
@@ -103,6 +103,20 @@ export function ComputersModal({ open, onClose }: { open: boolean; onClose: () =
     if (!open) setAdding(false)
   }
 
+  const inApp = !!bridge()
+  const [adoptingHere, setAdoptingHere] = useState(false)
+  const addHere = async () => {
+    setAdoptingHere(true)
+    try {
+      const c = await adoptThisComputer()
+      if (c) toast(`Added ${c.label}`)
+    } catch (err) {
+      toast(`Not added: ${errorText(err)}`, "error")
+    } finally {
+      setAdoptingHere(false)
+    }
+  }
+
   const remove = async (c: ComputerView) => {
     setRemoving(c.machinePk)
     try {
@@ -127,7 +141,19 @@ export function ComputersModal({ open, onClose }: { open: boolean; onClose: () =
             <AddComputer onDone={() => setAdding(false)} />
           ) : (
             <>
-              {computers.length === 0 && <p className="text-ui text-ink-3">None yet.</p>}
+              {/* In the app, this computer belongs on the list: if adding it at start didn't work, say so and offer it. */}
+              {inApp && !computers.some((c) => c.own) && (
+                <div className="flex items-center gap-3 rounded-ctl py-1.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-ui font-medium">This computer</p>
+                    <p className="text-meta text-ink-3">Not added yet, so its agents ask to join like anyone else’s.</p>
+                  </div>
+                  <Button size="sm" variant="secondary" disabled={adoptingHere} onClick={() => void addHere()}>
+                    Add this computer
+                  </Button>
+                </div>
+              )}
+              {!inApp && computers.length === 0 && <p className="text-ui text-ink-3">None yet.</p>}
               {computers.map((c) => (
                 <div key={c.machinePk} className="flex items-center gap-3 rounded-ctl py-1.5">
                   <div className="min-w-0 flex-1">

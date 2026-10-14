@@ -165,16 +165,16 @@ try {
   await settings.getByRole("radio", { name: "Larger" }).click()
   await settings.getByRole("button", { name: "Done" }).click()
   await settings.waitFor({ state: "hidden" })
-  if ((await page.evaluate(() => document.documentElement.style.zoom)) !== "1.22") throw new Error("the text size didn't apply")
+  // Text size scales the type steps, not the page.
+  if ((await page.evaluate(() => document.documentElement.style.getPropertyValue("--text-scale"))) !== "1.22") throw new Error("the text size didn't apply")
   console.log(`ok  ${at}`)
-  await opens("Search palette", () => page.getByRole("complementary").getByRole("button", { name: /^Search \(/ }).click())
-  const plus = page.getByRole("button", { name: "New channel or join" })
-  await eachItem("New channel or join", plus, () => true)
+  await opens("Search palette", () => page.keyboard.press("ControlOrMeta+k"))
+  // New is the list's first row, joining beside it.
+  const newChannel = page.getByRole("complementary").getByRole("button", { name: "New channel", exact: true })
+  await opens("Join with a code", () => page.getByRole("complementary").getByRole("button", { name: "Join with a code" }).click())
 
   at = "create a channel"
-  await plus.click()
-  await page.getByRole("menu").waitFor()
-  await page.getByRole("menuitem", { name: "New channel" }).click()
+  await newChannel.click()
   await page.getByRole("dialog").getByRole("textbox").fill("smoke")
   await page.getByRole("button", { name: "Create channel" }).click()
   await page.waitForURL(/#mc2-/)
@@ -383,7 +383,7 @@ try {
   await page.getByRole("textbox", { name: "Message" }).fill("smoke in the task")
   await page.keyboard.press("Enter")
   await page.getByText("smoke in the task", { exact: true }).first().waitFor()
-  await conversations.getByRole("button", { name: /^Main/ }).click()
+  await conversations.getByRole("button", { name: /^Chat/ }).click()
   if (await page.getByText("smoke in the task", { exact: true }).count()) throw new Error("a message in a task's conversation showed in main")
   console.log(`ok  ${at}`)
   // What the owner can do to a member: each item behind their face in the details.
@@ -421,21 +421,20 @@ try {
   await page.getByRole("textbox", { name: "Message" }).fill("smoke, privately")
   await page.keyboard.press("Enter")
   await conversations.getByRole("button", { name: /^bot/ }).waitFor({ timeout: 15000 })
-  await conversations.getByRole("button", { name: /^Main/ }).click()
+  await conversations.getByRole("button", { name: /^Chat/ }).click()
   console.log(`ok  ${at} and a direct conversation`)
 
   at = "Tasks view"
   await conversations.getByRole("button", { name: /^Tasks/ }).click()
   await page.getByRole("main").getByRole("button", { name: /Smoke task/ }).first().waitFor()
-  await conversations.getByRole("button", { name: /^Main/ }).click()
+  await conversations.getByRole("button", { name: /^Chat/ }).click()
   await page.getByRole("textbox", { name: "Message" }).waitFor()
   console.log("ok  Tasks view")
 
   // What's new where (T1245): with another channel open, the agent writes in this one. The next
   // listing carries its head, the row gets a dot, the tab a total, and Alt+↓ goes there.
   at = "news in a closed channel"
-  await plus.click()
-  await page.getByRole("menuitem", { name: "New channel" }).click()
+  await newChannel.click()
   await page.getByRole("dialog").getByRole("textbox").fill("smoke-2")
   await page.getByRole("button", { name: "Create channel" }).click()
   await page.waitForURL((u) => u.href !== channel && /#mc2-/.test(u.href))

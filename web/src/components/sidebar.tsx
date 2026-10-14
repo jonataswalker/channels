@@ -1,4 +1,4 @@
-import { ComputerIcon, LockIcon, Settings01Icon } from "@hugeicons/core-free-icons"
+import { Add01Icon, ComputerIcon, LockIcon, Settings01Icon } from "@hugeicons/core-free-icons"
 
 import type { ChannelRow } from "@/lib/channel"
 import type { RowNews } from "@/lib/news"
@@ -9,7 +9,7 @@ import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { CoordinatorAvatar } from "./coordinator-head"
 import { Icon } from "./icon"
-import { NewMenu, SearchButton, SidebarToggle } from "./chrome"
+import { SidebarToggle } from "./chrome"
 import { Monogram, Wordmark } from "./kit"
 import { Menu, MenuItem, MenuNote, MenuSeparator } from "./ui/menu"
 
@@ -31,7 +31,6 @@ export function Sidebar({
   onJoin,
   onComputers,
   onSettings,
-  onPalette,
   className,
 }: {
   rows: ChannelRow[]
@@ -43,7 +42,6 @@ export function Sidebar({
   onJoin: () => void
   onComputers: () => void
   onSettings: () => void
-  onPalette: () => void
   className?: string
 }) {
   const person = useSecrets().person
@@ -53,16 +51,28 @@ export function Sidebar({
 
   return (
     <aside className={cx("relative h-full w-full shrink-0 flex-col bg-rail md:w-[300px]", className)}>
-      {/* The list's part of the window's one header row, as Grok lays it out: past a Mac's traffic
-          lights, hide the list; on the right, search (the ⌘K palette) and new. The row moves the
-          window in the desktop app. */}
+      {/* The list's part of the window's one header row: past a Mac's traffic lights, and the toggle
+          that hides the list at its far edge, by the conversation. The row moves the window in the
+          desktop app. (⌘K still searches everything.) */}
       <header className="drag flex h-(--chrome-h) shrink-0 items-center gap-2 px-3 shell-mac:pl-(--lights-w)">
-        <SidebarToggle />
         {!person && !rows.length && <Wordmark className="pl-1 text-title" />}
         <span className="flex-1" />
-        <SearchButton onPalette={onPalette} />
-        <NewMenu onNew={onNew} onJoin={onJoin} />
+        <SidebarToggle />
       </header>
+
+      {/* New, inline as the list's first row (as Grok has "New chat"): its + sits where a channel's
+          face does, its words where a channel's name does. Joining with a code is beside it. */}
+      <div className="flex shrink-0 items-center gap-1 px-3 pb-1">
+        <button type="button" onClick={onNew} className="flex h-11 min-w-0 flex-1 items-center gap-3 rounded-card px-3 text-left transition-colors hover:bg-wash">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-wash-2 text-ink">
+            <Icon icon={Add01Icon} size={19} />
+          </span>
+          <span className="truncate text-body font-semibold">New channel</span>
+        </button>
+        <button type="button" onClick={onJoin} className="h-8 shrink-0 rounded-full px-3 text-meta font-medium text-ink-2 transition-colors hover:bg-wash hover:text-ink">
+          Join with a code
+        </button>
+      </div>
 
       {/* Channels only: a channel's tasks and direct conversations are tabs in the channel itself. */}
       <nav aria-label="Channels" className={cx("flex-1 space-y-1 overflow-y-auto px-3 pt-1", person ? "pb-20" : "pb-3")}>

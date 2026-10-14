@@ -121,9 +121,9 @@ try {
   await signIn(owner, "Jonatas")
   await passkey(owner)
 
-  const plus = owner.getByRole("button", { name: "New channel or join" })
-  await plus.click()
-  await owner.getByRole("menuitem", { name: "New channel" }).click()
+  // New is the list's first row.
+  const newChannel = owner.getByRole("complementary").getByRole("button", { name: "New channel", exact: true })
+  await newChannel.click()
   await owner.getByRole("dialog").getByRole("textbox").fill("kiwi")
   await owner.getByRole("button", { name: "Create channel" }).click()
   await owner.waitForURL(/#mc2-/)
@@ -227,8 +227,7 @@ try {
   await owner.keyboard.press("Escape")
 
   // A second channel, still empty: it opens on how to add an agent.
-  await plus.click()
-  await owner.getByRole("menuitem", { name: "New channel" }).click()
+  await newChannel.click()
   await owner.getByRole("dialog").getByRole("textbox").fill("fresh")
   await owner.getByRole("button", { name: "Create channel" }).click()
   await owner.waitForURL((u) => u.toString() !== channel && /#mc2-/.test(u.toString()))
@@ -259,22 +258,22 @@ try {
         await owner.locator("button[aria-label='Reply']").last().dispatchEvent("click")
         await owner.getByRole("button", { name: "Close thread" }).waitFor()
       }, () => owner.getByRole("button", { name: "Close thread" }).click())
-      await shoot(owner, tag, "04-tasks", () => toPlace(/^Tasks/), () => toPlace(/^Main/))
+      await shoot(owner, tag, "04-tasks", () => toPlace(/^Tasks/), () => toPlace(/^Chat/))
       await shoot(owner, tag, "05-task-thread", () => toPlace(/Write fewer rows/), async () => {})
       await shoot(owner, tag, "06-task-page", async () => {
         await owner.getByRole("main").getByRole("button", { name: /^(?!Details).*Write fewer rows per message T\d+/ }).first().click()
         await owner.getByRole("heading", { name: "Activity" }).waitFor()
       }, async () => {
         await owner.getByRole("button", { name: "Close task" }).click()
-        await toPlace(/^Main/)
+        await toPlace(/^Chat/)
       })
       await shoot(owner, tag, "15-needs-you", async () => {
-        await toPlace(/^Main/)
+        await toPlace(/^Chat/)
         await owner.getByRole("region", { name: "Needs you" }).getByRole("button", { name: /needs? you/ }).first().click()
       })
       await shoot(owner, tag, "07-details", () => detailsBtn().click(), () => owner.getByRole("button", { name: "Close details" }).click())
       await shoot(owner, tag, "08-direct", () => toPlace(/atlas/), async () => {
-        await toPlace(/^Main/)
+        await toPlace(/^Chat/)
       })
       await shoot(owner, tag, "09-invite", async () => {
         await detailsBtn().click()
@@ -292,7 +291,7 @@ try {
       })
       await shoot(owner, tag, "11-palette", async () => {
         if (narrow) await owner.getByRole("button", { name: "Channels" }).click()
-        await owner.getByRole("complementary").getByRole("button", { name: /^Search \(/ }).click()
+        await owner.keyboard.press("ControlOrMeta+k")
       }, async () => {
         await owner.keyboard.press("Escape")
         if (narrow) await owner.goto(channel)

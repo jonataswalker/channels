@@ -13,6 +13,7 @@ import { Add01Icon, ComputerIcon, Login01Icon, Moon02Icon, Settings01Icon, Sideb
 import { Icon, type IconSvgElement } from "@/components/icon"
 import { SettingsModal } from "@/components/settings"
 import { useAutoApproval } from "@/lib/approval"
+import { adoptThisComputer } from "@/lib/computers"
 import { parseHash, useChannelList } from "@/lib/channel"
 import { newsTotal, rowNews, startMarks, useMarks, useNewsKeys, useOpenNews, useTabNews } from "@/lib/news"
 import { formatShort } from "@/lib/format"
@@ -38,6 +39,11 @@ export default function App() {
   const listOpen = useSidebarOpen()
   // Every owned channel, watched in the background: your computers' agents in, a notification otherwise.
   useAutoApproval(rows)
+  // The app's own computer joins the list once there's a person to certify it (lib/computers.ts).
+  const personPk = person?.pk
+  useEffect(() => {
+    if (personPk) void adoptThisComputer().catch(() => {})
+  }, [personPk])
 
   // What's new where: a dot per channel, the total in the tab, Alt+↑/↓ through the ones with news.
   const marks = useMarks()
@@ -109,7 +115,6 @@ export default function App() {
             onJoin={() => setSheet("join")}
             onComputers={() => setSheet("computers")}
             onSettings={() => setSheet("settings")}
-            onPalette={() => setPalette(true)}
             // A phone shows the list or a channel; a wide window shows both, unless the list is hidden.
             className={cx(code ? "hidden" : "flex", listOpen ? "md:flex" : "md:hidden")}
           />
@@ -126,7 +131,7 @@ export default function App() {
             )}
             {/* Last in the document, not just on top: the desktop app works out what drags the window
                 in document order, whatever the z-index, so a header after these would swallow their clicks. */}
-            <ListControls onNew={() => setSheet("new")} onJoin={() => setSheet("join")} onPalette={() => setPalette(true)} />
+            <ListControls onNew={() => setSheet("new")} onJoin={() => setSheet("join")} />
           </main>
         </div>
       )}

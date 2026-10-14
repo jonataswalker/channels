@@ -16,6 +16,17 @@ export function pairCommands(code: string): { install: string; pair: string } {
   return { install: `curl -fsSL ${relayUrl()}/install | sh -s -- pair ${code}`, pair: `kiwi pair ${code}` }
 }
 
+/**
+ * The app's own computer: the daemon it runs, certified by this person, so agents on this machine
+ * come in as theirs (and are let in on their own) like any paired computer's. Nothing else adds it:
+ * the app does this once a person exists, and again only while it's missing. Null outside the app.
+ */
+export async function adoptThisComputer(): Promise<ComputerView | null> {
+  const b = bridge()
+  if (!b || !secrets().person || secrets().computers.some((c) => c.own)) return null
+  return b.daemonAdopt()
+}
+
 /** Raised outside the desktop app: pairing runs in its main process. */
 export class PairingNeedsApp extends Error {
   constructor() {

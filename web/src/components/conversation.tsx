@@ -20,6 +20,7 @@ import { LEAD_WHEN_HIDDEN } from "./chrome"
 import { CoordinatorAvatar } from "./coordinator-head"
 import { Composer } from "./composer"
 import { AddAgent } from "./add-agent"
+import { AgentStrip, type AgentNow } from "./agent-strip"
 import { ChannelControls, HoldBanner, HoldDialog } from "./controls"
 import { Icon } from "./icon"
 import { InfoPanel } from "./info-panel"
@@ -462,6 +463,13 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
           (state.mode.coordinatorOnly ? (state.coordinator ? " · coordinator mode" : " · coordinator mode, no coordinator yet") : "")
   // What's going on, in one live line under the name: who coordinates, who's working, what needs you.
   const working = active.filter((m) => isAgent(m) && memberLoad(state, m.name, now).current.length > 0).length
+  // Every agent here, for the strip under the composer: what each is on, and when it last spoke.
+  // (Computed each render, after the early return above: one pass over the messages.)
+  const lastAt = new Map<string, number>()
+  for (const m of messages) if (m.kind !== "event") lastAt.set(m.from, m.ts)
+  const agentsNow: AgentNow[] = active
+    .filter((m) => isAgent(m))
+    .map((m) => ({ name: m.name, label: memberName(m), color: colorOf(state, m.name), online: online.has(m.name), coordinator: m.name === state.coordinator, load: memberLoad(state, m.name, now), lastAt: lastAt.get(m.name) }))
   const needsMe = escalations.length + reviews.length + (isOwner ? requests.length : 0)
   const headline =
     connection === "connecting" || connection === "reconnecting"
@@ -748,6 +756,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                     atBottom.current = true
                     return send(body, opts)
                   }}
+                  footer={<AgentStrip agents={agentsNow} now={now} onOpenTask={(id) => go({ kind: "task", task: id })} />}
                 />
               ) : (
                 <p className="shrink-0 px-6 pt-2 pb-4 text-center text-meta text-ink-3">
@@ -801,8 +810,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
 }
 
 /**
- * The channel's conversations, in the middle of the header row as one glass capsule: the chat (Main,
- * people and the coordinator), the name (it opens the details), and the tasks (the board, which lists
+ * The channel's conversations, in the middle of the header row as one glass capsule: Chat (main:
+ * people and the coordinator), the name (it opens the details), and Tasks (the board, which lists
  * every task with room for its whole title). Direct conversations follow as faces.
  */
 function PlaceSwitch({
@@ -852,7 +861,8 @@ function PlaceSwitch({
     else if (u.n) news = true
   }
   const inTasks = current === "board" || !!task
-  const seg = (on: boolean) => cx("relative flex size-8 shrink-0 items-center justify-center rounded-full transition-colors", on ? "bg-ink text-canvas" : "text-ink-2 hover:bg-wash-2 hover:text-ink")
+  // Each end of the capsule says what it is in words, not just an icon.
+  const seg = (on: boolean) => cx("relative flex h-8 shrink-0 items-center gap-1.5 rounded-full pr-3 pl-2.5 text-ui font-medium transition-colors", on ? "bg-ink text-canvas" : "text-ink-2 hover:bg-wash-2 hover:text-ink")
   // On an icon: a count when it's for you, else a quiet dot.
   const badge = (u: { n: number; forMe: boolean }) =>
     u.n <= 0 ? null : u.forMe ? (
@@ -866,8 +876,9 @@ function PlaceSwitch({
   return (
     <nav aria-label="Conversations" className={cx("no-drag flex items-center gap-2", className)}>
       <div className="glass flex h-9 items-center gap-0.5 rounded-full p-0.5">
-        <button type="button" aria-label="Main" title="Chat" aria-current={current === "main" ? "page" : undefined} onClick={() => onPick(MAIN)} className={seg(current === "main")}>
-          <Icon icon={BubbleChatIcon} size={18} />
+        <button type="button" title="The channel's chat: people and the coordinator" aria-current={current === "main" ? "page" : undefined} onClick={() => onPick(MAIN)} className={seg(current === "main")}>
+          <Icon icon={BubbleChatIcon} size={17} />
+          Chat
           {badge(main)}
         </button>
         <button
@@ -882,8 +893,10 @@ function PlaceSwitch({
           <span className="truncate">{title}</span>
         </button>
         {state.tasks.size > 0 && (
-          <button type="button" aria-label={`Tasks, ${open} open`} title={`Tasks · ${open} open`} aria-current={inTasks ? "page" : undefined} onClick={onBoard} className={seg(inTasks)}>
-            <Icon icon={CheckListIcon} size={18} />
+          <button type="button" title={`${open} open`} aria-current={inTasks ? "page" : undefined} onClick={onBoard} className={seg(inTasks)}>
+            <Icon icon={CheckListIcon} size={17} />
+            Tasks
+            <span className="tabular-nums opacity-60">{open}</span>
             {badge(forMe ? { n: forMe, forMe: true } : { n: news ? 1 : 0, forMe: false })}
           </button>
         )}
