@@ -35,7 +35,7 @@ web-side change to prefer that value is the renderer's step (4), not this shell'
 ```sh
 cd desktop && bunx tsc --noEmit   # main + preload + bridge
 bun run build                     # bun-built dist/main.js + dist/preload.js
-bun run dist                      # electron-builder (mac dmg/zip, win nsis, linux AppImage/deb; unsigned)
+bun run dist                      # electron-builder (mac dmg/zip, linux AppImage/deb; unsigned; no Windows app)
 ```
 
 Release workflows stay untouched (a later step); packaging itself runs in CI.

@@ -1,6 +1,6 @@
 {
   "name": "kiwi-desktop",
-  "version": "0.11.0-rc.4",
+  "version": "0.11.0-rc.5",
   "private": true,
   "description": "Kiwi desktop app: an Electron shell hosting web/ for people (auto-approval, pairing, admin).",
   "homepage": "https://github.com/ojowwalker77/channels",
@@ -50,17 +50,6 @@
         {
           "from": "../dist/kiwi",
           "to": "kiwi"
-        }
-      ]
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "extraResources": [
-        {
-          "from": "../dist/kiwi.exe",
-          "to": "kiwi.exe"
         }
       ]
     },

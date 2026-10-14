@@ -157,7 +157,7 @@ what the app does through `src/client.ts`.
   vault and passkeys, Add a device, the link-a-computer page, usage, the signed-in listing (a closed
   channel's "new" dot comes from its member-signed head instead), `#…&id=` links, the terminal
   pairing dialog, seat pickers and "joined via".
-- **Packaging**: electron-builder (macOS dmg/zip, Windows nsis, Linux AppImage/deb), unsigned for
+- **Packaging**: electron-builder (macOS dmg/zip, Linux AppImage/deb; no Windows app), unsigned for
   now, built by the release workflow on each tag alongside the CLI binaries.
 
 ## Order of work
