@@ -117,11 +117,12 @@ jobs:
           # The app bundles the kiwi binary through extraResources (`../dist/kiwi`);
           # build it for the platform (and architecture) being packaged.
           cli() { bun build ../src/cli/main.ts --compile --minify --external node-liblzma --external @mongodb-js/zstd --target="$1" --outfile "$2"; }
+          mkdir -p ../dist
           bun run build
           case "${{ runner.os }}" in
             macOS)
-              cli bun-darwin-arm64 ../dist/kiwi && bunx electron-builder --mac --arm64 --publish never
-              cli bun-darwin-x64 ../dist/kiwi && bunx electron-builder --mac --x64 --publish never
+              cli bun-darwin-arm64 ../dist/kiwi && codesign --force --sign - ../dist/kiwi && bunx electron-builder --mac --arm64 --publish never
+              cli bun-darwin-x64 ../dist/kiwi && codesign --force --sign - ../dist/kiwi && bunx electron-builder --mac --x64 --publish never
               ;;
             Windows)
               cli bun-windows-x64 ../dist/kiwi.exe && bunx electron-builder --win --publish never
@@ -130,6 +131,9 @@ jobs:
               cli bun-linux-x64 ../dist/kiwi && bunx electron-builder --linux --publish never
               ;;
           esac
+          # The app is useless without these: fail here, not on a user's machine.
+          find release -path '*resources/web/dist/index.html' | grep -q . || { echo "web/dist missing from the package"; exit 1; }
+          find release \( -path '*resources/kiwi' -o -path '*resources/kiwi.exe' \) | grep -q . || { echo "kiwi binary missing from the package"; exit 1; }
 
       - name: Collect
         shell: bash

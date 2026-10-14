@@ -26,13 +26,12 @@
     "appId": "com.kiwiinit.kiwi",
     "productName": "Kiwi",
     "files": [
-      "dist/**",
-      "../web/dist/**"
+      "dist/**"
     ],
     "extraResources": [
       {
-        "from": "../dist/kiwi${/*}",
-        "to": "kiwi${/*}"
+        "from": "../web/dist",
+        "to": "web/dist"
       }
     ],
     "protocols": {
@@ -46,11 +45,23 @@
       "target": [
         "dmg",
         "zip"
+      ],
+      "extraResources": [
+        {
+          "from": "../dist/kiwi",
+          "to": "kiwi"
+        }
       ]
     },
     "win": {
       "target": [
         "nsis"
+      ],
+      "extraResources": [
+        {
+          "from": "../dist/kiwi.exe",
+          "to": "kiwi.exe"
+        }
       ]
     },
     "linux": {
@@ -58,6 +69,12 @@
       "target": [
         "AppImage",
         "deb"
+      ],
+      "extraResources": [
+        {
+          "from": "../dist/kiwi",
+          "to": "kiwi"
+        }
       ]
     },
     "artifactName": "Kiwi-${version}-${os}-${arch}.${ext}",
