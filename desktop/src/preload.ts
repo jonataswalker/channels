@@ -4,7 +4,7 @@
 
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { ChannelIdentityView, ComputerView, DaemonStatus, KiwiBridge, PairAskView, PendingItem, PersonView, SignInResult, StoreSnapshot } from "./bridge.ts";
+import type { ChannelIdentityView, ComputerView, DaemonStatus, KiwiBridge, PairAskView, PendingItem, PersonView, SignInResult, StoreSnapshot, UpdateView } from "./bridge.ts";
 
 const relayFromEntry = (): string | null => {
   try {
@@ -17,7 +17,7 @@ const relayFromEntry = (): string | null => {
 
 const relayUrl = relayFromEntry() ?? (ipcRenderer.sendSync("kiwi:snapshot-sync") as StoreSnapshot).relayUrl;
 
-const on = (channel: "kiwi:store" | "kiwi:deep-link", cb: (v: never) => void): (() => void) => {
+const on = (channel: "kiwi:store" | "kiwi:deep-link" | "kiwi:update", cb: (v: never) => void): (() => void) => {
   const fn = (_e: unknown, v: never) => cb(v);
   ipcRenderer.on(channel, fn as (...args: unknown[]) => void);
   return () => ipcRenderer.removeListener(channel, fn as (...args: unknown[]) => void);
@@ -43,6 +43,9 @@ const kiwi: KiwiBridge = {
   daemonStatus: () => ipcRenderer.invoke("kiwi:daemon-status") as Promise<DaemonStatus>,
   daemonAdopt: () => ipcRenderer.invoke("kiwi:daemon-adopt") as Promise<ComputerView>,
   installCli: () => ipcRenderer.invoke("kiwi:install-cli") as Promise<{ path: string }>,
+  getUpdate: () => ipcRenderer.invoke("kiwi:update-state") as Promise<UpdateView | null>,
+  onUpdate: (cb) => on("kiwi:update", cb),
+  installUpdate: () => ipcRenderer.invoke("kiwi:update-install") as Promise<void>,
   notify: (title: string, body: string) => ipcRenderer.invoke("kiwi:notify", title, body) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke("kiwi:open-external", url) as Promise<void>,
   getDeepLink: () => ipcRenderer.invoke("kiwi:deep-link") as Promise<string | null>,

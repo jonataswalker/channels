@@ -112,7 +112,6 @@ export default function App() {
             active={code}
             onSelect={open}
             onNew={() => setSheet("new")}
-            onJoin={() => setSheet("join")}
             onComputers={() => setSheet("computers")}
             onSettings={() => setSheet("settings")}
             // A phone shows the list or a channel; a wide window shows both, unless the list is hidden.
@@ -137,6 +136,7 @@ export default function App() {
       )}
       <NewChannel
         open={sheet === "new"}
+        onJoin={() => setSheet("join")}
         onClose={() => setSheet(null)}
         onCreated={(c) => {
           setSheet(null)

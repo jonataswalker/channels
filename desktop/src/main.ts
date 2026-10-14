@@ -15,7 +15,9 @@ import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, Notificati
 import { generateIdentity, type Identity } from "../../src/identity.ts";
 import { answerPair, newSecret, openMailbox, pairCode, readPairAsk, type Mailbox, type PairAsk } from "../../src/mailbox.ts";
 import { certifyMachine } from "../../src/person.ts";
-import { daemonAdopt, daemonHello, daemonSocketPath, kiwiHome, type HelloResult } from "./daemon-client.ts";
+import { compareVersions, ensureOnPath, keepCli } from "./cli.ts";
+import { applyUpdate, startUpdates, updateState } from "./updater.ts";
+import { daemonAdopt, daemonHello, daemonSocketPath, daemonStop, kiwiHome, type HelloResult } from "./daemon-client.ts";
 import type { ChannelIdentityView, ComputerView, DaemonStatus, PairAskView, PendingItem, PersonView, SignInResult, StoreSnapshot } from "./bridge.ts";
 
 const PUBLIC_RELAY = "https://channels.kiwiinit.com";
@@ -147,15 +149,28 @@ function createWindow(): void {
   if (deepLink) win.webContents.send("kiwi:deep-link", deepLink);
 }
 
+/** Restart into a downloaded update: put it in place for when this quits, and quit. */
+function restartToUpdate(): void {
+  if (!applyUpdate(true)) return;
+  quitting = true;
+  app.quit();
+}
+
+function trayMenu(): Electron.Menu {
+  const u = updateState();
+  return Menu.buildFromTemplate([
+    { label: "Open Kiwi", click: showWindow },
+    ...(u?.state === "ready" ? [{ label: `Restart to update to ${u.version}`, click: restartToUpdate }] : []),
+    { type: "separator" },
+    { label: "Quit", click: () => (quitting = true, app.quit()) },
+  ]);
+}
+
 function createTray(): void {
   const icon = trayIcon();
   tray = new Tray(icon);
   tray.setToolTip("Kiwi");
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Open Kiwi", click: showWindow },
-    { type: "separator" },
-    { label: "Quit", click: () => (quitting = true, app.quit()) },
-  ]));
+  tray.setContextMenu(trayMenu());
   tray.on("click", () => (win && !win.isDestroyed() && win.isVisible() ? win.hide() : showWindow()));
 }
 
@@ -294,11 +309,21 @@ function bundledKiwi(): string {
   throw new Error("the bundled kiwi binary is missing (repo root `bun run build` makes dist/kiwi)");
 }
 
+/** The kiwi this app runs: the one it keeps in ~/.kiwi/bin (cli.ts) once packaged, else the repo's build. */
+let kiwiBin: { path: string; version: string } | null = null;
+
 async function ensureDaemon(): Promise<HelloResult | null> {
   const home = kiwiHome();
-  if (await daemonHello(home)) return daemonHello(home);
-  // Unless one is running (checked above), start the bundled binary as `kiwi daemon` for ~/.kiwi.
-  const bin = bundledKiwi();
+  const running = await daemonHello(home);
+  // One running an older kiwi than the app keeps here is stopped, so this computer's daemon is the
+  // same kiwi its agents run (an app update brings both along).
+  if (running && !(kiwiBin && compareVersions(running.version, kiwiBin.version) < 0)) return running;
+  if (running) {
+    await daemonStop(home);
+    for (let i = 0; i < 20 && (await daemonHello(home, 500)); i++) await new Promise((r) => setTimeout(r, 250));
+  }
+  // Start it as `kiwi daemon` for ~/.kiwi.
+  const bin = kiwiBin?.path ?? bundledKiwi();
   const child = spawn(bin, ["daemon"], { env: { ...process.env, KIWI_HOME: home }, detached: true, stdio: "ignore", windowsHide: true });
   child.unref();
   const until = Date.now() + 10_000;
@@ -323,14 +348,11 @@ async function adoptDaemon(): Promise<ComputerView> {
   return c;
 }
 
+/** The CLI here, current: the app does this on every start (cli.ts); this is the same, on request. */
 async function installCli(): Promise<{ path: string }> {
-  const bin = bundledKiwi();
-  const dir = process.platform === "win32" ? path.join(process.env["LOCALAPPDATA"] ?? path.join(os.homedir(), "AppData", "Local"), "kiwi") : path.join(os.homedir(), ".local", "bin");
-  const dest = path.join(dir, path.basename(bin));
-  fs.mkdirSync(dir, { recursive: true });
-  fs.copyFileSync(bin, dest);
-  if (process.platform !== "win32") fs.chmodSync(dest, 0o755);
-  return { path: dest };
+  kiwiBin = await keepCli(bundledKiwi(), app.getVersion());
+  ensureOnPath();
+  return { path: kiwiBin.path };
 }
 
 // ---------- ipc ----------
@@ -408,6 +430,8 @@ function wireIpc(): void {
   });
   ipcMain.handle("kiwi:daemon-adopt", () => adoptDaemon());
   ipcMain.handle("kiwi:install-cli", () => installCli());
+  ipcMain.handle("kiwi:update-state", () => updateState());
+  ipcMain.handle("kiwi:update-install", () => restartToUpdate());
   ipcMain.handle("kiwi:notify", (_e, title: string, body: string) => {
     const n = new Notification({ title, body });
     n.on("click", showWindow);
@@ -452,10 +476,26 @@ else {
     wireIpc();
     createWindow();
     createTray();
+    // The app's own updates, from proper releases (updater.ts): the window and the tray hear each step.
+    startUpdates((u) => {
+      win?.webContents.send("kiwi:update", u);
+      tray?.setContextMenu(trayMenu());
+    });
     app.on("activate", showWindow);
-    // Its daemon: start the bundled binary unless one is running; adopting (certify +
-    // hand back) is the renderer's call once a person key exists (daemonAdopt).
-    ensureDaemon().catch(() => {});
+    // Its own computer's kiwi, kept current by the app (cli.ts: nobody installs or updates it by
+    // hand), then its daemon on that kiwi; adopting (certify + hand back) is the renderer's call
+    // once a person key exists (daemonAdopt). A development run leaves the installed kiwi alone.
+    void (async () => {
+      if (app.isPackaged) {
+        try {
+          kiwiBin = await keepCli(bundledKiwi(), app.getVersion());
+          ensureOnPath();
+        } catch {
+          // The daemon still runs from the app's own copy below.
+        }
+      }
+      await ensureDaemon();
+    })().catch(() => {});
   });
 
   app.on("window-all-closed", () => {

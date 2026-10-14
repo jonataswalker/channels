@@ -7,9 +7,9 @@ import { useSyncExternalStore } from "react"
 
 import { generateIdentity } from "@mc/identity.ts"
 
-import type { ChannelIdentityView, ComputerView, KiwiBridge, PairAskView, PendingItem, PersonView, StoreSnapshot } from "../../../desktop/src/bridge.ts"
+import type { ChannelIdentityView, ComputerView, KiwiBridge, PairAskView, PendingItem, PersonView, StoreSnapshot, UpdateView } from "../../../desktop/src/bridge.ts"
 
-export type { ChannelIdentityView, ComputerView, KiwiBridge, PairAskView, PendingItem, PersonView, StoreSnapshot }
+export type { ChannelIdentityView, ComputerView, KiwiBridge, PairAskView, PendingItem, PersonView, StoreSnapshot, UpdateView }
 
 /** The desktop bridge, or null in a plain browser. */
 export function bridge(): KiwiBridge | null {

@@ -1,4 +1,4 @@
-import { relayUrl } from "../lib/relay"
+import { hasBridge, relayUrl } from "../lib/relay"
 import { CheckListIcon, LockIcon } from "@hugeicons/core-free-icons"
 import { useEffect, useState, type ReactNode } from "react"
 
@@ -90,7 +90,12 @@ export function Welcome({ onNew, onJoin }: { onNew: () => void; onJoin: () => vo
       <Stage width={460}>
         <CoordinatorHead size={88} live interactive seed={0.6} className="-ml-1" label="Kiwi" />
         <h1 className="mt-4 text-display font-semibold">Nothing open</h1>
-        <p className="mt-1.5 text-body text-ink-2">Pick a channel on the left, or start one. Your agents need kiwi on their computer: add it from Your computers, or paste this into the terminal they work in.</p>
+        <p className="mt-1.5 text-body text-ink-2">
+          {/* In the app, this computer's kiwi is the app's to keep (desktop/src/cli.ts). */}
+          {hasBridge()
+            ? "Pick a channel on the left, or start one. Agents on this computer already have kiwi: the app installs it and keeps it current. For another computer, add it from Your computers, or paste this into the terminal its agents work in."
+            : "Pick a channel on the left, or start one. Your agents need kiwi on their computer: add it from Your computers, or paste this into the terminal they work in."}
+        </p>
         <Command text={`curl -fsSL ${relayUrl()}/install | sh`} label="Copy the install command" />
         <div className="mt-5 flex flex-wrap gap-2">
           <Button variant="secondary" onClick={onNew}>New channel</Button>
@@ -125,7 +130,7 @@ export function Welcome({ onNew, onJoin }: { onNew: () => void; onJoin: () => vo
   )
 }
 
-export function NewChannel({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (code: string) => void }) {
+export function NewChannel({ open, onClose, onCreated, onJoin }: { open: boolean; onClose: () => void; onCreated: (code: string) => void; /** Have a code instead: join with it. */ onJoin?: () => void }) {
   const person = useSecrets().person
   const signIn = useSignInMode()
   const [name, setName] = useState("")
@@ -166,7 +171,12 @@ export function NewChannel({ open, onClose, onCreated }: { open: boolean; onClos
         <TextField className="mt-4" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="payments-refactor" maxLength={60} autoComplete="off" />
         {signIn === "workos" && <p className="mt-3 text-meta leading-normal text-ink-3">This relay asks you to sign in to create a channel. Your browser opens for it.</p>}
         {error && <p className="mt-3 rounded-ctl bg-wash px-3 py-2.5 text-ui leading-normal text-alert">{error}</p>}
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex items-center justify-end gap-2">
+          {onJoin && (
+            <button type="button" onClick={onJoin} className="mr-auto text-ui font-medium text-accent-text hover:underline">
+              Have a code? Join
+            </button>
+          )}
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>

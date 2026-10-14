@@ -104,13 +104,25 @@ export interface KiwiBridge {
   daemonStatus(): Promise<DaemonStatus>;
   /** Certify this machine's daemon key with the person key and hand the cert back. */
   daemonAdopt(): Promise<ComputerView>;
-  /** Put the bundled kiwi binary on the PATH. */
+  /** Put the bundled kiwi binary in ~/.kiwi/bin and on the PATH (the app also does this on every start). */
   installCli(): Promise<{ path: string }>;
+  /** A newer proper release: being downloaded, ready to restart into, or only available (a .deb). */
+  getUpdate(): Promise<UpdateView | null>;
+  onUpdate(cb: (u: UpdateView) => void): () => void;
+  /** Restart into the downloaded update. */
+  installUpdate(): Promise<void>;
   notify(title: string, body: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   /** The kiwi://join/<code> link that opened us, if any. */
   getDeepLink(): Promise<string | null>;
   onDeepLink(cb: (url: string) => void): () => void;
+}
+
+export interface UpdateView {
+  version: string;
+  state: "downloading" | "ready" | "available";
+  /** The release's page. */
+  url: string;
 }
 
 declare global {

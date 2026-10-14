@@ -1,10 +1,11 @@
-import { Add01Icon, ComputerIcon, LockIcon, Settings01Icon } from "@hugeicons/core-free-icons"
+import { Add01Icon, ComputerIcon, Download04Icon, LockIcon, Settings01Icon } from "@hugeicons/core-free-icons"
 
 import type { ChannelRow } from "@/lib/channel"
 import type { RowNews } from "@/lib/news"
 import { useIcons, useMemberIcons } from "@/lib/icons"
 import { formatShort } from "@/lib/format"
 import { useSecrets } from "@/lib/secrets"
+import { openRelease, restartToUpdate, useUpdate } from "@/lib/update"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { CoordinatorAvatar } from "./coordinator-head"
@@ -28,7 +29,6 @@ export function Sidebar({
   active,
   onSelect,
   onNew,
-  onJoin,
   onComputers,
   onSettings,
   className,
@@ -39,12 +39,12 @@ export function Sidebar({
   active: string
   onSelect: (code: string) => void
   onNew: () => void
-  onJoin: () => void
   onComputers: () => void
   onSettings: () => void
   className?: string
 }) {
   const person = useSecrets().person
+  const update = useUpdate()
   const newsOf = new Map(rows.map((c, i) => [c.room, news[i]]))
   const icons = useIcons()
   useMemberIcons(rows.filter((c) => c.state === "member").map((c) => c.code))
@@ -60,17 +60,14 @@ export function Sidebar({
         <SidebarToggle />
       </header>
 
-      {/* New, inline as the list's first row (as Grok has "New chat"): its + sits where a channel's
-          face does, its words where a channel's name does. Joining with a code is beside it. */}
-      <div className="flex shrink-0 items-center gap-1 px-3 pb-1">
-        <button type="button" onClick={onNew} className="flex h-11 min-w-0 flex-1 items-center gap-3 rounded-card px-3 text-left transition-colors hover:bg-wash">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-wash-2 text-ink">
-            <Icon icon={Add01Icon} size={19} />
+      {/* New, inline as the list's first row (as Grok has "New chat"), on the rows' grid: its + where a
+          channel's face is, its words where a name is. Joining with a code is in its dialog (and ⌘K). */}
+      <div className="shrink-0 px-3 pb-1">
+        <button type="button" onClick={onNew} className="flex h-12 w-full items-center gap-3 rounded-card px-3 text-left text-ink-2 transition-colors hover:bg-wash hover:text-ink">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full shadow-[inset_0_0_0_1.5px_var(--edge-strong)]">
+            <Icon icon={Add01Icon} size={18} />
           </span>
-          <span className="truncate text-body font-semibold">New channel</span>
-        </button>
-        <button type="button" onClick={onJoin} className="h-8 shrink-0 rounded-full px-3 text-meta font-medium text-ink-2 transition-colors hover:bg-wash hover:text-ink">
-          Join with a code
+          <span className="text-body font-medium">New channel</span>
         </button>
       </div>
 
@@ -124,9 +121,20 @@ export function Sidebar({
       </nav>
 
       {/* Who you are, at the foot of the list as Grok keeps it: your face and name on a glass pill that
-          floats over the list, the menu above it. */}
+          floats over the list, the menu above it; an update of the app, when there is one, above that. */}
       {person && (
-        <div className="scrim-bottom absolute inset-x-0 bottom-0 px-3 pt-6 pb-3 [&>*]:pointer-events-auto">
+        <div className="scrim-bottom absolute inset-x-0 bottom-0 flex flex-col items-start gap-2 px-3 pt-6 pb-3 [&>*]:pointer-events-auto">
+          {update && (
+            <button
+              type="button"
+              disabled={update.state === "downloading"}
+              onClick={() => (update.state === "ready" ? restartToUpdate() : openRelease(update))}
+              className={cx("glass flex h-9 items-center gap-2 rounded-full pr-4 pl-3 text-ui font-medium", update.state === "ready" ? "text-accent-text" : "text-ink-2")}
+            >
+              <Icon icon={Download04Icon} size={16} className="shrink-0" />
+              {update.state === "downloading" ? `Downloading Kiwi ${update.version}…` : update.state === "ready" ? `Restart to update to ${update.version}` : `Kiwi ${update.version} is out · Get it`}
+            </button>
+          )}
           <Menu
             side="top"
             className="w-60"

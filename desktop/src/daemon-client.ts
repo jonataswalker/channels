@@ -83,6 +83,16 @@ export async function daemonHello(home: string = kiwiHome(), timeoutMs = 5_000):
   }
 }
 
+/** Ask the daemon to stop (an older one, before a newer starts). True once it said it would. */
+export async function daemonStop(home: string = kiwiHome(), timeoutMs = 5_000): Promise<boolean> {
+  try {
+    await call(daemonSocketPath(home), "stop", {}, timeoutMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Hand the daemon its cert from the person. Throws when it refuses. */
 export async function daemonAdopt(home: string, params: AdoptParams, timeoutMs = 10_000): Promise<void> {
   await call(daemonSocketPath(home), "adopt", params, timeoutMs);
