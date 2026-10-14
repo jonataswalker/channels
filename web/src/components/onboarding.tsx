@@ -4,7 +4,8 @@ import { useEffect, useState, type ReactNode } from "react"
 
 import { handleFor, NAME_RE } from "@mc/membership.ts"
 import { tokenForCreate, useSignInMode } from "@/lib/auth"
-import { useSecrets } from "@/lib/secrets"
+import { bridge, useSecrets } from "@/lib/secrets"
+import { isSignInGone } from "@/lib/session"
 import {
   askToJoin,
   checkJoin,
@@ -130,18 +131,22 @@ export function NewChannel({ open, onClose, onCreated }: { open: boolean; onClos
   const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [needSignIn, setNeedSignIn] = useState(false)
 
-  const create = async () => {
+  const create = async (fresh = false) => {
     setBusy(true)
     setError(null)
     try {
       // The one place sign-in is asked for: a relay with sign-in lets signed-in people create channels.
-      const token = await tokenForCreate()
+      const token = await tokenForCreate(fresh)
       const m = await createChannel(name.trim() || "Untitled channel", token, person ? { name: person.name } : null)
       setName("")
+      setNeedSignIn(false)
       onCreated(m.code)
     } catch (err) {
-      setError(errorText(err))
+      const gone = isSignInGone(err)
+      setNeedSignIn(gone && !!bridge())
+      setError(gone ? (bridge() ? "You need to sign in to create a channel on this relay." : "Creating a channel on this relay needs sign-in, which the Kiwi desktop app does.") : errorText(err))
     } finally {
       setBusy(false)
     }
@@ -165,9 +170,15 @@ export function NewChannel({ open, onClose, onCreated }: { open: boolean; onClos
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy}>
-            {busy ? <Spinner className="border-white/30 border-t-white" /> : "Create channel"}
-          </Button>
+          {needSignIn ? (
+            <Button disabled={busy} onClick={() => void create(true)}>
+              {busy ? <Spinner className="border-white/30 border-t-white" /> : "Sign in"}
+            </Button>
+          ) : (
+            <Button type="submit" disabled={busy}>
+              {busy ? <Spinner className="border-white/30 border-t-white" /> : "Create channel"}
+            </Button>
+          )}
         </div>
       </form>
     </Modal>

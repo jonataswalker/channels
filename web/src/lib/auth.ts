@@ -47,12 +47,14 @@ export class SignInUnavailable extends Error {}
  * A token for creating a channel: null on a relay without sign-in. In the app, the bridge signs in
  * (or hands back the token it keeps); in a plain browser, a dev relay takes the person's name.
  */
-export async function tokenForCreate(): Promise<string | null> {
+export async function tokenForCreate(fresh = false): Promise<string | null> {
   const m = await signInMode()
   if (m === "off") return null
   const b = bridge()
   if (b) {
-    const kept = await b.getToken()
+    // fresh: the relay refused the kept token (expired, revoked, another relay's), so drop it and sign in again.
+    if (fresh) await b.signOut()
+    const kept = fresh ? null : await b.getToken()
     if (kept) return kept
     const r = await b.signIn()
     if ("token" in r) return r.token
