@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, protocol, safeStorage, shell, Tray } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, Notification, protocol, safeStorage, shell, Tray } from "electron";
 
 import { generateIdentity, type Identity } from "../../src/identity.ts";
 import { answerPair, newSecret, openMailbox, pairCode, readPairAsk, type Mailbox, type PairAsk } from "../../src/mailbox.ts";
@@ -126,7 +126,14 @@ function createWindow(): void {
   win = new BrowserWindow({
     width: 1200,
     height: 800,
+    minWidth: 720,
+    minHeight: 480,
     autoHideMenuBar: true,
+    // No title bar on a Mac: the app's own header row (52px, web/src/index.css --chrome-h) carries
+    // the traffic lights, centred on it, and moves the window. Elsewhere the system frame stays.
+    ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 20, y: 20 } } : {}),
+    // The canvas, so the window never flashes white (or black) before the page paints.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0d0d0e" : "#ffffff",
     webPreferences: { preload: preloadPath(), contextIsolation: true, sandbox: true },
   });
   void win.loadURL(entryUrl());
@@ -152,14 +159,19 @@ function createTray(): void {
   tray.on("click", () => (win && !win.isDestroyed() && win.isVisible() ? win.hide() : showWindow()));
 }
 
+/** desktop/assets: shipped beside the app (extraResources), read from the source tree in development. */
+const assetsDir = () => (app.isPackaged ? path.join(process.resourcesPath, "assets") : path.join(__dirname, "..", "assets"));
+
+/**
+ * The tray's icon: a Mac menu bar takes a template (black and alpha, which it tints for a light or
+ * dark bar); a Linux panel, colour. nativeImage picks up the @2x file beside each by itself. (It
+ * can't read SVG: the tray used to look for web/dist's favicon and showed nothing, on either.)
+ */
 function trayIcon(): Electron.NativeImage {
-  for (const p of [path.join(webDist(), "favicon.ico"), path.join(webDist(), "favicon.svg")]) {
-    try {
-      const img = nativeImage.createFromPath(p);
-      if (!img.isEmpty()) return img;
-    } catch { /* next */ }
-  }
-  return nativeImage.createEmpty();
+  const mac = process.platform === "darwin";
+  const img = nativeImage.createFromPath(path.join(assetsDir(), mac ? "trayTemplate.png" : "tray.png"));
+  if (mac) img.setTemplateImage(true);
+  return img;
 }
 
 // ---------- deep links (kiwi://join/<code>) ----------
@@ -449,4 +461,7 @@ else {
   app.on("window-all-closed", () => {
     // The tray keeps us alive for background auto-approval; Quit is in its menu.
   });
+  // Any real quit (⌘Q, the Dock's Quit, a logout, the tray's Quit) lets the window close: closing it
+  // otherwise only hides it, and would cancel the quit.
+  app.on("before-quit", () => (quitting = true));
 }

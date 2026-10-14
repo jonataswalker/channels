@@ -32,6 +32,10 @@
       {
         "from": "../web/dist",
         "to": "web/dist"
+      },
+      {
+        "from": "assets",
+        "to": "assets"
       }
     ],
     "protocols": {
