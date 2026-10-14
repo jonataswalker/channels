@@ -245,11 +245,12 @@ try {
 
       const narrow = vp === "narrow"
       const detailsBtn = () => owner.getByRole("button", { name: /^Details:/ })
-      const convs = () => (narrow ? owner.getByRole("complementary", { name: "Details" }) : owner.getByRole("navigation", { name: "Channels" })).getByRole("navigation", { name: "Conversations" })
-      /** On a phone the conversations live in the details; beside the list, under the channel. */
+      const convs = () => owner.getByRole("main").getByRole("navigation", { name: "Conversations" })
+      /** The channel's conversations are tabs under its header; a task is opened from the Tasks tab. */
       const toPlace = async (name: RegExp) => {
-        if (narrow) await detailsBtn().click()
-        await convs().getByRole("button", { name }).first().click()
+        if (await convs().getByRole("button", { name }).count()) return void (await convs().getByRole("button", { name }).first().click())
+        await convs().getByRole("button", { name: /^Tasks/ }).click()
+        await owner.getByRole("main").getByRole("button", { name }).first().click()
       }
       await shoot(owner, tag, "01-channel")
       await owner.mouse.wheel(0, -4000)
@@ -258,7 +259,7 @@ try {
         await owner.locator("button[aria-label='Reply']").last().dispatchEvent("click")
         await owner.getByRole("button", { name: "Close thread" }).waitFor()
       }, () => owner.getByRole("button", { name: "Close thread" }).click())
-      await shoot(owner, tag, "04-tasks", () => toPlace(/^All tasks/), () => toPlace(/^Main/))
+      await shoot(owner, tag, "04-tasks", () => toPlace(/^Tasks/), () => toPlace(/^Main/))
       await shoot(owner, tag, "05-task-thread", () => toPlace(/Write fewer rows/), async () => {})
       await shoot(owner, tag, "06-task-page", async () => {
         await owner.getByRole("main").getByRole("button", { name: /^(?!Details).*Write fewer rows per message T\d+/ }).first().click()
@@ -284,7 +285,7 @@ try {
       })
       await shoot(owner, tag, "10-account-menu", async () => {
         if (narrow) await owner.getByRole("button", { name: "Channels" }).click()
-        await owner.locator("aside header button").first().click()
+        await owner.getByRole("complementary").getByRole("button", { name: /Jonatas/ }).click()
       }, async () => {
         await owner.keyboard.press("Escape")
         if (narrow) await owner.goto(channel)

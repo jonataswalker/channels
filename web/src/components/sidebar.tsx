@@ -1,4 +1,4 @@
-import { ArrowDown01Icon, ComputerIcon, LockIcon, Login01Icon, PencilEdit02Icon, Search01Icon, Settings01Icon, Add01Icon } from "@hugeicons/core-free-icons"
+import { ComputerIcon, LockIcon, Login01Icon, PencilEdit02Icon, Search01Icon, Settings01Icon, Add01Icon } from "@hugeicons/core-free-icons"
 import { useState } from "react"
 
 import type { ChannelRow } from "@/lib/channel"
@@ -6,12 +6,11 @@ import type { RowNews } from "@/lib/news"
 import { useIcons, useMemberIcons } from "@/lib/icons"
 import { formatShort } from "@/lib/format"
 import { useSecrets } from "@/lib/secrets"
-import { setPlaceSlot } from "@/lib/place-slot"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { CoordinatorAvatar } from "./coordinator-head"
 import { Icon } from "./icon"
-import { IconButton, Wordmark } from "./kit"
+import { IconButton, Monogram, Wordmark } from "./kit"
 import { Menu, MenuItem, MenuNote, MenuSeparator } from "./ui/menu"
 
 /** What a row says on hover: what was said last, or why this browser can't open it yet. */
@@ -55,35 +54,19 @@ export function Sidebar({
   const icons = useIcons()
   useMemberIcons(rows.filter((c) => c.state === "member").map((c) => c.code))
 
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform)
+
   return (
-    <aside className={cx("h-full w-full shrink-0 flex-col bg-rail md:w-[300px]", className)}>
-      {/* Kiwi's mark, who you are, then new: the list's one row of chrome. */}
-      <header className="flex h-14 shrink-0 items-center gap-1.5 pr-2.5 pl-3.5">
-        <CoordinatorAvatar size={26} label="Kiwi" />
-        {person ? (
-          <Menu
-            className="w-60"
-            trigger={
-              <button type="button" className="flex min-w-0 items-center gap-1 rounded-ctl py-1 pr-1.5 pl-1.5 transition-colors hover:bg-wash data-popup-open:bg-wash">
-                <span className="truncate text-ui font-semibold">{person.name}</span>
-                <Icon icon={ArrowDown01Icon} size={14} className="shrink-0 text-ink-3" />
-              </button>
-            }
-          >
-            <MenuNote>Key {person.pk.slice(0, 12)}</MenuNote>
-            <MenuItem icon={ComputerIcon} onClick={onComputers}>Your computers</MenuItem>
-            <MenuSeparator />
-            <MenuItem icon={Settings01Icon} onClick={onSettings}>Settings…</MenuItem>
-          </Menu>
-        ) : (
-          <Wordmark className="pl-1 text-title" />
-        )}
+    <aside className={cx("h-full w-full shrink-0 flex-col bg-rail md:w-[320px]", className)}>
+      {/* A large title, as Messages opens on, and new beside it as one of Grok's round buttons. */}
+      <header className="flex h-16 shrink-0 items-center gap-2 pt-1 pr-3 pl-5">
+        {!person && !rows.length ? <Wordmark className="text-title" /> : <h1 className="text-display font-bold tracking-[-0.03em]">Channels</h1>}
         <span className="flex-1" />
         <Menu
           align="end"
           className="w-52"
           trigger={
-            <IconButton label="New channel or join" round className="size-8">
+            <IconButton label="New channel or join" round className="size-9 bg-wash-2 text-ink hover:bg-pick">
               <Icon icon={PencilEdit02Icon} size={17} />
             </IconButton>
           }
@@ -94,24 +77,31 @@ export function Sidebar({
       </header>
 
       {/* Search, as in Messages: a pill at the top of the list. ⌘K goes anywhere. */}
-      <div className="flex shrink-0 items-center gap-1.5 px-3 pt-1 pb-2">
-        <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-ctl bg-wash-2 px-2.5 text-ink-3 focus-within:shadow-[0_0_0_3px_var(--accent-wash)]">
-          <Icon icon={Search01Icon} size={14} className="shrink-0" />
+      <div className="shrink-0 px-3 pb-2">
+        <label className="flex h-9 min-w-0 items-center gap-2 rounded-full bg-wash-2 pr-1 pl-3.5 text-ink-3 transition-shadow focus-within:shadow-[0_0_0_3px_var(--accent-wash)]">
+          <Icon icon={Search01Icon} size={16} className="shrink-0" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Escape" && setQuery("")}
             placeholder="Search"
             aria-label="Search channels"
-            className="min-w-0 flex-1 bg-transparent text-ui text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
+            className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
           />
+          <button
+            type="button"
+            aria-label={`Go to… (${mac ? "⌘" : "Ctrl+"}K)`}
+            title={`Go to… (${mac ? "⌘" : "Ctrl+"}K)`}
+            onClick={onPalette}
+            className="flex h-7 shrink-0 items-center rounded-full px-2.5 text-meta font-medium text-ink-3 transition-colors hover:bg-wash-2 hover:text-ink"
+          >
+            {mac ? "⌘K" : "Ctrl K"}
+          </button>
         </label>
-        <IconButton label={`Go to… (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"}K)`} className="size-8" onClick={onPalette}>
-          <span className="text-meta font-medium text-ink-3">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "^K"}</span>
-        </IconButton>
       </div>
 
-      <nav aria-label="Channels" className="flex-1 overflow-y-auto px-2 pt-1 pb-3">
+      {/* Channels only: a channel's tasks and direct conversations are tabs in the channel itself. */}
+      <nav aria-label="Channels" className="flex-1 space-y-0.5 overflow-y-auto px-2 pt-1 pb-3">
         {shown.map((c) => {
           const selected = c.code === active
           const reachable = c.state === "member"
@@ -119,41 +109,37 @@ export function Sidebar({
           // The open channel shows its own news; its row says only what needs you.
           const fresh = !selected && !!n?.fresh
           return (
-            <div key={c.room}>
-              <button
-                type="button"
-                onClick={() => onSelect(c.code)}
-                aria-current={selected ? "page" : undefined}
-                title={rowNote(c)}
-                className={cx(
-                  "group relative flex w-full items-center gap-3 rounded-card px-2.5 py-2 text-left transition-colors",
-                  // The open channel is a step of tone; once its conversations show under it, the open one of those is.
-                  selected ? "bg-pick [&:has(+div>nav)]:bg-transparent" : "hover:bg-wash"
-                )}
-              >
-                {c.recent?.byCoordinator && reachable ? <CoordinatorAvatar size={40} label="The coordinator spoke last" /> : <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={40} />}
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline gap-2">
-                    <span className={cx("min-w-0 flex-1 truncate text-ui", selected || fresh || n?.needs ? "font-semibold text-ink" : "font-medium", !selected && !reachable && "text-ink-2")}>{c.title}</span>
-                    {n?.needs ? (
-                      <span aria-label={n.needs === 1 ? "A question for you" : `${n.needs} questions for you`} className="shrink-0 rounded-full bg-accent px-1.5 text-stamp font-semibold text-accent-ink tabular-nums">
-                        {n.needs}
-                      </span>
-                    ) : reachable ? (
-                      <span className="shrink-0 text-stamp text-ink-3 tabular-nums">{formatShort(c.ts)}</span>
-                    ) : c.state !== "pending" ? (
-                      <Icon icon={LockIcon} size={12} className="shrink-0 text-ink-3" />
-                    ) : null}
-                  </span>
-                  <span className={cx("mt-px block truncate text-meta", fresh ? "text-ink-2" : "text-ink-3")}>{rowNote(c)}</span>
+            <button
+              key={c.room}
+              type="button"
+              onClick={() => onSelect(c.code)}
+              aria-current={selected ? "page" : undefined}
+              title={rowNote(c)}
+              className={cx("flex w-full items-center gap-3 rounded-card px-2.5 py-2.5 text-left transition-colors", selected ? "bg-pick" : "hover:bg-wash")}
+            >
+              {c.recent?.byCoordinator && reachable ? <CoordinatorAvatar size={48} label="The coordinator spoke last" /> : <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={48} />}
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline gap-2">
+                  <span className={cx("min-w-0 flex-1 truncate text-body font-semibold", !reachable && "text-ink-2")}>{c.title}</span>
+                  {reachable ? (
+                    <span className={cx("shrink-0 text-meta tabular-nums", fresh || n?.needs ? "font-medium text-accent-text" : "text-ink-3")}>{formatShort(c.ts)}</span>
+                  ) : c.state !== "pending" ? (
+                    <Icon icon={LockIcon} size={12} className="shrink-0 text-ink-3" />
+                  ) : null}
                 </span>
-                {/* Unread: a dot at the row's edge (last in the row, so the row is still named for its channel). */}
-                {fresh && !n?.needs && !selected && <span aria-label="New messages" className="absolute top-1/2 left-0.5 size-1.5 -translate-y-1/2 rounded-full bg-accent" />}
-              </button>
-              {/* The open channel's conversations nest here (rendered by the conversation). */}
-              {selected && <div ref={setPlaceSlot} />}
-
-            </div>
+                <span className="mt-0.5 flex items-center gap-2">
+                  <span className={cx("min-w-0 flex-1 truncate text-ui", fresh ? "font-medium text-ink" : "text-ink-3")}>{rowNote(c)}</span>
+                  {n?.needs ? (
+                    <span aria-label={n.needs === 1 ? "A question for you" : `${n.needs} questions for you`} className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-accent px-1.5 text-stamp font-semibold text-accent-ink tabular-nums">
+                      {n.needs}
+                    </span>
+                  ) : fresh ? (
+                    // Unread: Messages' blue dot (last in the row, so the row is still named for its channel).
+                    <span aria-label="New messages" className="size-2.5 shrink-0 rounded-full bg-accent" />
+                  ) : null}
+                </span>
+              </span>
+            </button>
           )
         })}
         {rows.length > 0 && shown.length === 0 && <p className="px-3 py-6 text-ui text-ink-3">No channel matches “{query}”.</p>}
@@ -164,6 +150,26 @@ export function Sidebar({
         )}
       </nav>
 
+      {/* Who you are, at the foot of the list as Grok keeps it: your face and name in a pill, the menu above it. */}
+      {person && (
+        <div className="shrink-0 px-3 pt-1 pb-3">
+          <Menu
+            side="top"
+            className="w-60"
+            trigger={
+              <button type="button" className="flex h-11 max-w-full items-center gap-2.5 rounded-full bg-wash-2 pr-4 pl-1.5 transition-colors hover:bg-pick data-popup-open:bg-pick">
+                <Monogram name={person.name} size={32} />
+                <span className="truncate text-ui font-semibold">{person.name}</span>
+              </button>
+            }
+          >
+            <MenuNote>Key {person.pk.slice(0, 12)}</MenuNote>
+            <MenuItem icon={ComputerIcon} onClick={onComputers}>Your computers</MenuItem>
+            <MenuSeparator />
+            <MenuItem icon={Settings01Icon} onClick={onSettings}>Settings…</MenuItem>
+          </Menu>
+        </div>
+      )}
     </aside>
   )
 }
