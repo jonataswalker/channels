@@ -7,7 +7,7 @@ import { ArrowUp01Icon } from "@hugeicons/core-free-icons"
 import { useState } from "react"
 
 import type { Load } from "@mc/load.ts"
-import type { Color } from "@mc/protocol.ts"
+import type { Activity, Color } from "@mc/protocol.ts"
 import { taskId } from "@mc/state.ts"
 import { formatAgo, shortTitle } from "@/lib/format"
 import { cx } from "@/lib/utils"
@@ -21,9 +21,22 @@ export interface AgentNow {
   color: Color | null
   online: boolean
   coordinator: boolean
+  /** The model it says it runs on (its card, or what its harness says now). */
+  model?: string
+  /** What it's doing right now, live from its harness (presence). */
+  activity?: Activity
   load: Load
   /** When they last said something in the channel. */
   lastAt?: number
+}
+
+/** What it's doing now, in a few words: live from its harness when it says, else from its tasks. */
+export function doingNow(a: AgentNow): { text: string; busy: boolean } | null {
+  const act = a.online ? a.activity : undefined
+  if (act?.state === "working") return { text: act.tool ? `Running ${act.tool}` : "Thinking", busy: true }
+  if (act?.state === "waiting") return { text: "Waiting for a person", busy: false }
+  if (act?.state === "idle") return { text: "Idle", busy: false }
+  return null
 }
 
 const face = (a: AgentNow, size: number) =>
@@ -33,13 +46,15 @@ export function AgentStrip({ agents, now, onOpenTask }: { agents: AgentNow[]; no
   const [open, setOpen] = useState(false)
   if (!agents.length) return null
   // Working first, then whoever's here, then whoever's away.
-  const ordered = [...agents].sort((a, b) => Number(b.load.current.length > 0) - Number(a.load.current.length > 0) || Number(b.online) - Number(a.online))
-  const working = ordered.filter((a) => a.load.current.length > 0)
+  // Busy means its harness says it's working, or (when its harness doesn't say) a task it's on.
+  const busy = (a: AgentNow) => doingNow(a)?.busy ?? a.load.current.length > 0
+  const ordered = [...agents].sort((a, b) => Number(busy(b)) - Number(busy(a)) || Number(b.online) - Number(a.online))
+  const working = ordered.filter(busy)
   const here = agents.filter((a) => a.online).length
   const line = working.length
     ? working
         .slice(0, 2)
-        .map((a) => `${a.label} on ${shortTitle(a.load.current[0]!.title)}`)
+        .map((a) => (a.load.current[0] ? `${a.label} on ${shortTitle(a.load.current[0].title)}` : `${a.label}: ${doingNow(a)?.text ?? "working"}`))
         .join(" · ") + (working.length > 2 ? ` · ${working.length - 2} more` : "")
     : here
       ? "Nobody's working on a task right now"
@@ -56,16 +71,25 @@ export function AgentStrip({ agents, now, onOpenTask }: { agents: AgentNow[]; no
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
                     <span className="truncate text-ui font-semibold">{a.label}</span>
+                    {a.model && <span className="truncate text-stamp text-ink-3">{a.model}</span>}
                     {a.coordinator && <span className="shrink-0 text-stamp text-ink-3">coordinator</span>}
                     <span className="ml-auto shrink-0 text-stamp text-ink-3">{a.online ? "online" : a.lastAt ? `away · ${formatAgo(a.lastAt, now)}` : "away"}</span>
                   </span>
+                  {/* Live from its harness: what it's doing this moment. */}
+                  {doingNow(a) && (
+                    <span className="flex items-center gap-1.5 text-meta">
+                      <span className={cx("size-1.5 shrink-0 rounded-full", doingNow(a)!.busy ? "animate-pulse bg-doing" : "bg-ink-3")} />
+                      <span className={doingNow(a)!.busy ? "font-medium text-ink" : "text-ink-3"}>{doingNow(a)!.text}</span>
+                      {a.activity?.since && <span className="text-ink-3">· {formatAgo(a.activity.since, now)}</span>}
+                    </span>
+                  )}
                   {a.load.current.length ? (
                     a.load.current.map((t) => (
                       <button key={t.id} type="button" onClick={() => onOpenTask(t.id)} className="block max-w-full truncate text-left text-meta text-ink-2 hover:text-ink hover:underline">
                         <span className="font-medium text-doing">Working on</span> <span className="tabular-nums">{taskId(t.id)}</span> {t.title}
                       </button>
                     ))
-                  ) : (
+                  ) : doingNow(a) ? null : (
                     <span className="block text-meta text-ink-3">{a.online ? "Idle" : "Not running"}</span>
                   )}
                   {(a.load.queued.length > 0 || a.load.waiting.length > 0) && (

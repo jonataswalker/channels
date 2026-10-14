@@ -469,7 +469,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   for (const m of messages) if (m.kind !== "event") lastAt.set(m.from, m.ts)
   const agentsNow: AgentNow[] = active
     .filter((m) => isAgent(m))
-    .map((m) => ({ name: m.name, label: memberName(m), color: colorOf(state, m.name), online: online.has(m.name), coordinator: m.name === state.coordinator, load: memberLoad(state, m.name, now), lastAt: lastAt.get(m.name) }))
+    .map((m) => ({ name: m.name, label: memberName(m), color: colorOf(state, m.name), online: online.has(m.name), coordinator: m.name === state.coordinator, model: online.get(m.name)?.activity?.model ?? m.card?.model, activity: online.get(m.name)?.activity, load: memberLoad(state, m.name, now), lastAt: lastAt.get(m.name) }))
   const needsMe = escalations.length + reviews.length + (isOwner ? requests.length : 0)
   const headline =
     connection === "connecting" || connection === "reconnecting"

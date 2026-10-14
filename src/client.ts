@@ -53,6 +53,8 @@ import {
   rasterAttachment,
   wellFormedIcon,
   type ChannelIcon,
+  cleanActivity,
+  cleanCard,
   PING,
   PROTOCOL_VERSION,
   WS_PROTOCOL,
@@ -954,6 +956,7 @@ export class Channel {
           ...(auto ? { askedAs: auto } : {}),
           ...(computer ? { computer: { ...computer, own: opts.person === computer.person } } : {}),
           ...(person ? { person } : {}),
+          ...(cleanCard(info.card) ? { card: cleanCard(info.card)! } : {}),
         });
       }
       return out;
@@ -1495,7 +1498,10 @@ export class Channel {
           const sigOk = yield* Effect.promise(() => verify(rest));
           // role is self-reported. Flatten it before anyone renders status, so it can't invent a line.
           const role = typeof rest.role === "string" ? inlineText(rest.role, 80) || undefined : undefined;
-          return { _tag: "Presence", presence: { ...rest, ...(typeof rest.role === "string" ? { role } : {}), sigOk } } satisfies Live;
+          // So is what it says it's doing: only an activity's fields, each short.
+          const { activity: said, ...fields } = rest;
+          const activity = cleanActivity(said);
+          return { _tag: "Presence", presence: { ...fields, ...(typeof rest.role === "string" ? { role } : {}), ...(activity ? { activity } : {}), sigOk } } satisfies Live;
         }
       }
       return null;

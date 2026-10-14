@@ -15,6 +15,7 @@ import { defaultScopes, saveDefaultScopes, ScopePicker, scopesLine } from "./sco
 import { Icon } from "./icon"
 import { Alert, Button, IconButton, Modal, Monogram, Tabs, TextField, errorText, toast } from "./kit"
 import { Menu, MenuItem, MenuSeparator } from "./ui/menu"
+import { AgentFacts } from "./agent-facts"
 
 // Everything about a channel that isn't the conversation, each where you'd
 // look for it: people behind the faces in the header, Invite as a button,
@@ -282,6 +283,7 @@ export function ChannelControls({ children, ...p }: ControlsProps & { children: 
         message={
           confirm?.kind === "approve" && (
             <>
+              {confirm.req.kind !== "human" && <AgentFacts card={confirm.req.card} said className="mb-3" />}
               Approve only if {confirm.req.kind === "human" ? "they show" : "its terminal shows"} this exact code.
               <span className="mt-4 mb-4 block text-[34px] leading-none font-semibold tracking-[0.04em] text-ink tabular-nums">{confirm.req.code}</span>
               <span className="mb-2 block text-ui font-medium text-ink">What {confirm.req.kind === "human" ? "they" : "it"} can do</span>
@@ -570,6 +572,7 @@ function Requests({ onDone }: { onDone: () => void }) {
               <p className="text-meta leading-snug text-ink-2">
                 {r.kind === "human" ? "A person" : r.computer ? `Agent on ${r.computer.personName}’s ${r.computer.label}` : "Agent"} · asked {formatAgo(r.ts, p.now)}
               </p>
+              {r.kind !== "human" && <AgentFacts card={r.card} said className="mt-1" />}
               <div className="mt-2 flex gap-2">
                 <Button size="sm" variant="secondary" onClick={() => run(() => p.onDeny(r), `Declined ${r.name}`)}>
                   Decline

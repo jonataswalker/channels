@@ -37,8 +37,8 @@ for (const opener of ["open", "xdg-open"]) {
   chmodSync(join(cli, "bin", opener), 0o755)
 }
 /** A person's own terminal: none of the variables an agent's harness sets (the smoke may itself run inside one). */
-const PERSON = { CLAUDECODE: "", CODEX_THREAD_ID: "", GEMINI_CLI: "", CURSOR_AGENT: "", GROK_SESSION_ID: "" }
-const cliEnv = { ...process.env, KIWI_HOME: join(cli, "home"), CLAUDE_CONFIG_DIR: join(cli, "no-claude"), PATH: `${join(cli, "bin")}:${process.env.PATH}` }
+const PERSON = { CLAUDECODE: "", CODEX_THREAD_ID: "", GEMINI_CLI: "", CURSOR_AGENT: "", GROK_SESSION_ID: "", OPENCODE_SESSION_ID: "" }
+const cliEnv = { KIWI_MODEL: "claude-sonnet-5-5", ...process.env, KIWI_HOME: join(cli, "home"), CLAUDE_CONFIG_DIR: join(cli, "no-claude"), PATH: `${join(cli, "bin")}:${process.env.PATH}` }
 /** Run kiwi as that computer; resolves with its output once it exits, and lets you watch it meanwhile. */
 function kiwi(args: string[], watch?: (out: string) => void): Promise<string> {
   const p = spawn("bun", ["src/cli/main.ts", ...args], { cwd: ROOT, env: cliEnv })
@@ -171,7 +171,10 @@ try {
   await opens("Search palette", () => page.keyboard.press("ControlOrMeta+k"))
   // New is the list's first row, joining beside it.
   const newChannel = page.getByRole("complementary").getByRole("button", { name: "New channel", exact: true })
-  await opens("Join with a code", () => page.getByRole("complementary").getByRole("button", { name: "Join with a code" }).click())
+  await opens("Join with a code", async () => {
+    await newChannel.click()
+    await page.getByRole("dialog").getByRole("button", { name: "Have a code? Join" }).click()
+  })
 
   at = "create a channel"
   await newChannel.click()

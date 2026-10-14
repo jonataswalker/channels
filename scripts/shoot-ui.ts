@@ -40,7 +40,7 @@ for (const opener of ["open", "xdg-open"]) {
   writeFileSync(join(cli, "bin", opener), "#!/bin/sh\nexit 0\n")
   chmodSync(join(cli, "bin", opener), 0o755)
 }
-const cliEnv = { ...process.env, KIWI_HOME: join(cli, "home"), CLAUDE_CONFIG_DIR: join(cli, "no-claude"), PATH: `${join(cli, "bin")}:${process.env.PATH}` }
+const cliEnv = { KIWI_MODEL: "claude-sonnet-5-5", ...process.env, KIWI_HOME: join(cli, "home"), CLAUDE_CONFIG_DIR: join(cli, "no-claude"), PATH: `${join(cli, "bin")}:${process.env.PATH}` }
 const running: ChildProcess[] = []
 function kiwi(args: string[], watch?: (out: string) => void): Promise<string> {
   const p = spawn("bun", ["src/cli/main.ts", ...args], { cwd: ROOT, env: cliEnv })
@@ -158,7 +158,7 @@ try {
     await letIn.click()
     await joining
   }
-  await admit(["kiwi", "--as", "atlas", "--role", "backend"])
+  await admit(["kiwi", "--as", "atlas", "--role", "backend", "--model", "claude-opus-5-5"])
   // atlas coordinates: people talk with it, and the channel is in coordinator mode from the start.
   const details = () => owner.getByRole("button", { name: /^Details:/ })
   await details().click()
@@ -169,7 +169,7 @@ try {
     await owner.getByText(/Coordinator mode: on/).first().waitFor({ timeout: 15000 })
   })
   await owner.getByRole("button", { name: "Close details" }).click()
-  await admit(["kiwi-w", "--as", "win", "--role", "frontend"])
+  await admit(["kiwi-w", "--as", "win", "--role", "frontend", "--model", "gpt-5-codex"])
   // The passkey offer waits for an agent's first card; save the channels to it, so the list stays quiet.
   const offer = owner.getByRole("button", { name: "Save channels to a passkey" })
   if (await offer.isVisible({ timeout: 5000 }).catch(() => false)) {

@@ -22,6 +22,7 @@ import { handleFor, type JoinRequest, type Member } from "@mc/membership.ts"
 import type { Message } from "@mc/protocol.ts"
 import type { Signed, SigningBudget } from "@mc/sas.ts"
 import { fold, type ChannelState, type GuardFloor, type Roster } from "@mc/state.ts"
+import type { Activity } from "@mc/protocol.ts"
 import { forgetHistory, readCached, rememberMessage } from "./history"
 import { wholeLog } from "./history-plan"
 import { ICON_LIVE } from "./icon-event"
@@ -83,6 +84,8 @@ export interface Online {
   at: number
   /** The key that signed the announcement. */
   pk?: string
+  /** What the agent is doing right now, as its harness tells its listener (working, waiting, idle). */
+  activity?: Activity
 }
 
 // ---------- the URL fragment ----------
@@ -741,7 +744,7 @@ export function useChannel(member: StoredMember, human?: HumanSession | null): C
           case "Presence": {
             const p = ev.presence
             if (p.client === "probe" || !p.sigOk) return
-            setOnline((prev) => new Map(prev).set(p.from, { client: p.client, role: p.role, at: Date.now(), pk: p.pk }))
+            setOnline((prev) => new Map(prev).set(p.from, { client: p.client, role: p.role, at: Date.now(), pk: p.pk, ...(p.activity ? { activity: p.activity } : {}) }))
             return
           }
           case "Roster":

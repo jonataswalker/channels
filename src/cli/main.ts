@@ -36,7 +36,7 @@ import { computerClaimFor } from "../machine.ts";
 import { briefText, COMMANDS } from "../brief.ts";
 import { autoInstallExtraHooks, autoInstallHooks, bindDirectory, bindingFor, EXTRA_HARNESSES, extraInstalled, hooksInstalled, hooksListen, hooksStatus, installDetected, installExtra, installHooks, mcFor, runHook, uninstallDetected, uninstallExtra, uninstallHooks, type ExtraHarness } from "../hooks.ts";
 import { BadName } from "../refusals.ts";
-import { detectCard } from "../card.ts";
+import { detectCard, detectModel, mergeCard } from "../card.ts";
 
 const CLAIMS_GONE = "claims are gone: say what you're working on in the task, or post it";
 
@@ -45,6 +45,8 @@ const HELP = `kiwi ${VERSION} — Channels by Kiwi Init: real-time coordination 
 Agents
   kiwi join <code>                               ask to join (named after what you run in: claude, codex…; --as NAME
                                                  picks one); waits for the owner, then says what to do
+     --model ID                                  the model you run on (read from Claude Code, Codex, OpenCode or
+                                                 Grok when it can be; required when it can't, or set KIWI_MODEL)
   kiwi listen                                    messages for you as they come, one per line (for a Monitor)
      --once [--timeout 10m]                      wait for the next message(s), then exit (2 and "no messages yet" on timeout)
      --now                                       unread messages, without waiting
@@ -316,7 +318,7 @@ const commands: Record<string, Command> = {
     Effect.gen(function* () {
       const keys = yield* Keystore;
       const cursor = yield* Cursor;
-      const code = (args[1] ?? (yield* die("usage: kiwi join <code> [alias] [--as NAME] [--role ROLE]"))).trim();
+      const code = (args[1] ?? (yield* die("usage: kiwi join <code> [alias] --model MODEL [--as NAME] [--role ROLE]"))).trim();
       try {
         decodeJoinCode(code);
       } catch {
@@ -353,6 +355,22 @@ const commands: Record<string, Command> = {
       const hadKey = local.includes(name);
       let id = yield* keys.identity(name, roomId);
       const info = { name, ...(opt.role ? { role: opt.role } : {}), ...(opt.about ? { about: opt.about } : {}), ...(auto ? { auto: true } : {}) };
+      // What it runs on goes with the request, so the owner sees it before letting it in and the
+      // coordinator can plan with it: the model (said, or told by the harness), the harness, the machine.
+      const model = opt.model?.trim() || (yield* Effect.promise(() => detectModel()));
+      if (!model) {
+        yield* doneAsking;
+        return yield* die(
+          [
+            "kiwi join needs your model: the owner sees it on your request, and the coordinator plans work with it.",
+            "Run the same command again with --model and the id of the model you run on, for example:",
+            `  kiwi join ${code} --model claude-opus-4-1`,
+            "(or gpt-5-codex, grok-4, gemini-2.5-pro: the exact name your harness uses for your model. Setting KIWI_MODEL works too.)",
+          ].join("\n"),
+          2,
+        );
+      }
+      const card = mergeCard(detectCard(), undefined, { model });
 
       /**
        * This agent's key goes by `to` from now on. Only ever this key's own files are removed: another
@@ -414,7 +432,7 @@ const commands: Record<string, Command> = {
           }
           settleIn(alias, name);
           // Say what this agent runs on, so work that needs it finds it. Never worth failing a join over.
-          if (canPost(scopes)) yield* Effect.ignoreCause(s.refreshCard(detectCard()));
+          if (canPost(scopes)) yield* Effect.ignoreCause(s.refreshCard(detectCard(), { model }));
           process.stderr.write(`${how === "resumed" ? "back in" : "joined"} "${alias}" as ${name} (key ${fingerprint(id.pk)})\n`);
           if (how === "resumed") out("this key is already a member: resumed, nothing new was granted.");
           const { state } = yield* s.state();
@@ -431,7 +449,7 @@ const commands: Record<string, Command> = {
       }
       // On a computer paired with its person's app, the request carries the computer's claim: the
       // app lets its own computers' agents in at once, and the owner sees whose computer it is.
-      const claims = () => Effect.promise(() => computerClaimFor(roomId, id.pk));
+      const claims = () => Effect.promise(async () => ({ ...(await computerClaimFor(roomId, id.pk)), card }));
       // Asking again with the same key resumes the same request, so re-running this is always safe.
       // A key that was removed or declined can never come back; ask again with a fresh one.
       const req = yield* Channel.fx.requestJoin(relay, code, id, info, yield* claims()).pipe(
@@ -443,9 +461,18 @@ const commands: Record<string, Command> = {
           }),
         ),
       );
-      out(`asked to join as ${name}.`);
-      out(`waiting for the owner to open your request…`);
-      const deadline = Date.now() + parseDuration(opt.timeout ?? "30m") * 1000;
+      const wait = opt.timeout ?? "30m";
+      // Weaker models stumble here (they stop the command, or guess a code): say exactly what to do,
+      // in one line, so the join text stays short (the first line stays as it was: scripts read the name).
+      out(
+        [
+          `asked to join as ${name}.`,
+          `your request says you run on: ${cardLine(card)}`,
+          // Starts as it always did ("waiting for the owner to open your request…"): scripts wait for it.
+          `waiting for the owner to open your request… Leave this running until it prints "joined" (up to ${wait}). If your shell stops it first, run the exact same command again (same request; with a short tool timeout, add --timeout 2m and repeat). Never type or guess the code it shows.`,
+        ].join("\n"),
+      );
+      const deadline = Date.now() + parseDuration(wait) * 1000;
       let shown: string | null = null;
       for (;;) {
         const st = yield* Channel.fx.joinStatus(relay, code, id, req.requestId);
@@ -456,14 +483,14 @@ const commands: Record<string, Command> = {
         if (st.status === "denied") {
           yield* doneAsking;
           yield* keys.forgetIdentity(name, decodeJoinCode(code).roomId);
-          return yield* die("the owner denied this request");
+          return yield* die("the owner denied this request. Don't ask again unless your person tells you to.");
         }
         if (st.status === "approved") return yield* settle(st.access, "approved");
         if (Date.now() > deadline) {
           return yield* die(
             shown
-              ? `still waiting for approval (code ${shown}); run the same command again to keep waiting (same request, same code)`
-              : "the owner hasn't opened your request yet; run the same command again to keep waiting (same request)",
+              ? `still waiting for approval (code ${shown}). This isn't an error: run exactly the same command again to keep waiting (same request, same code).`
+              : "the owner hasn't opened your request yet. This isn't an error: run exactly the same command again to keep waiting (same request).",
             3,
           );
         }
@@ -1127,7 +1154,8 @@ function listenLine(mc: string): string {
   if (hooksListen()) return "Messages for you arrive on their own: Kiwi's hooks wake you when one comes. Don't run listen.";
   const h = here().harness;
   if (h === "claude") return `Start a Monitor on \`${COMMANDS.listen(mc)}\` with the longest timeout allowed, and start it again whenever it ends: that's how messages reach you.`;
-  if (h && extraInstalled(h)) return "Kiwi's hooks hand you new messages as your turns start and end. Don't run listen.";
+  // OpenCode has no hooks kiwi installs (yet): it keeps a listener running like any other harness.
+  if (h && h !== "opencode" && extraInstalled(h)) return "Kiwi's hooks hand you new messages as your turns start and end. Don't run listen.";
   return `Run \`${COMMANDS.listenOnce(mc)}\`, and run it again every time it returns: it returns when messages for you arrive.`;
 }
 

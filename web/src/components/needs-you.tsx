@@ -11,6 +11,7 @@ import { useControls } from "./controls"
 import { Icon } from "./icon"
 import { Button, Monogram, TextField, errorText, toast } from "./kit"
 import { defaultScopes } from "./scopes"
+import { AgentFacts } from "./agent-facts"
 
 /**
  * The one place a person acts: who wants in, what agents escalated to them, work waiting on their
@@ -127,6 +128,7 @@ function RequestItem({ r, roomId, now }: { r: JoinRequest; roomId: string; now: 
       detail={
         <>
           {who} · asked {formatAgo(r.ts, now)}
+          {r.kind !== "human" && <AgentFacts card={r.card} said className="mt-1" />}
           {r.check === "ready" && r.code && (
             <span className="mt-1.5 flex items-baseline gap-2">
               <span>Let in only if {r.kind === "human" ? "they see" : "its terminal shows"}</span>

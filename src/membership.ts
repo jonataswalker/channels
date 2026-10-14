@@ -9,7 +9,7 @@
 import { openWith, sealWith } from "./crypto.ts";
 import { sign, verify, type Identity } from "./identity.ts";
 import { checkComputer, checkPerson, type ComputerClaim, type PersonClaim } from "./person.ts";
-import { isColor, type Color } from "./protocol.ts";
+import { isColor, type Card, type Color } from "./protocol.ts";
 import { readScopes, SCOPES, wireScopes, type Scope } from "./scopes.ts";
 
 /** The signed-in person an agent acts for, as the relay verified them with WorkOS. */
@@ -235,6 +235,11 @@ export interface ReadEntry {
 export interface JoinClaims {
   computer?: ComputerClaim;
   person?: PersonClaim;
+  /**
+   * What the asker says it runs on (its model, harness, machine), shown to the owner as its word:
+   * unlike the two claims above, nothing here is checked. Read through cleanCard.
+   */
+  card?: Card;
 }
 
 /** A verified computer claim, as the owner shows the computer: whose it is, and what it's called. */
@@ -315,6 +320,8 @@ export interface JoinRequest extends MemberInfo {
    * channel and this member key). Approving signs it into their member record.
    */
   person?: string;
+  /** What the agent says it runs on (model, harness, machine), unchecked: its word, shown as such. */
+  card?: Card;
 }
 
 /** How a member reads in lists: "win · key QRskRn4Z · agent of @jonatas" / "Jonatas Walker (@jonatas)". */
