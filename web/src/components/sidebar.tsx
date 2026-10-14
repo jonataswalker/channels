@@ -1,4 +1,4 @@
-import { ComputerIcon, LockIcon, Login01Icon, PencilEdit02Icon, Search01Icon, Settings01Icon, Add01Icon } from "@hugeicons/core-free-icons"
+import { ComputerIcon, LockIcon, Search01Icon, Settings01Icon } from "@hugeicons/core-free-icons"
 import { useState } from "react"
 
 import type { ChannelRow } from "@/lib/channel"
@@ -10,7 +10,8 @@ import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
 import { CoordinatorAvatar } from "./coordinator-head"
 import { Icon } from "./icon"
-import { IconButton, Monogram, Wordmark } from "./kit"
+import { NewMenu, SidebarToggle } from "./chrome"
+import { Monogram, Wordmark } from "./kit"
 import { Menu, MenuItem, MenuNote, MenuSeparator } from "./ui/menu"
 
 /** What a row says on hover: what was said last, or why this browser can't open it yet. */
@@ -57,27 +58,18 @@ export function Sidebar({
   const mac = /Mac|iPhone|iPad/.test(navigator.platform)
 
   return (
-    <aside className={cx("h-full w-full shrink-0 flex-col bg-rail md:w-[320px]", className)}>
-      {/* A large title, as Messages opens on, and new beside it as one of Grok's round buttons. */}
-      <header className="flex h-16 shrink-0 items-center gap-2 pt-1 pr-3 pl-5">
-        {!person && !rows.length ? <Wordmark className="text-title" /> : <h1 className="text-display font-bold tracking-[-0.03em]">Channels</h1>}
+    <aside className={cx("relative h-full w-full shrink-0 flex-col bg-rail md:w-[300px]", className)}>
+      {/* The list's part of the window's one header row: past a Mac's traffic lights, hide the list,
+          what it is, and new. The row moves the window in the desktop app. */}
+      <header className="drag flex h-(--chrome-h) shrink-0 items-center gap-1.5 pr-3 pl-3 shell-mac:pl-(--lights-w)">
+        <SidebarToggle />
+        {!person && !rows.length ? <Wordmark className="pl-1 text-title" /> : <h1 className="pl-1.5 text-title font-bold tracking-[-0.02em]">Channels</h1>}
         <span className="flex-1" />
-        <Menu
-          align="end"
-          className="w-52"
-          trigger={
-            <IconButton label="New channel or join" round className="size-9 bg-wash-2 text-ink hover:bg-pick">
-              <Icon icon={PencilEdit02Icon} size={17} />
-            </IconButton>
-          }
-        >
-          <MenuItem icon={Add01Icon} onClick={onNew}>New channel</MenuItem>
-          <MenuItem icon={Login01Icon} onClick={onJoin}>Join with a code</MenuItem>
-        </Menu>
+        <NewMenu onNew={onNew} onJoin={onJoin} />
       </header>
 
       {/* Search, as in Messages: a pill at the top of the list. ⌘K goes anywhere. */}
-      <div className="shrink-0 px-3 pb-2">
+      <div className="shrink-0 px-3 pt-1 pb-2">
         <label className="flex h-9 min-w-0 items-center gap-2 rounded-full bg-wash-2 pr-1 pl-3.5 text-ink-3 transition-shadow focus-within:shadow-[0_0_0_3px_var(--accent-wash)]">
           <Icon icon={Search01Icon} size={16} className="shrink-0" />
           <input
@@ -101,7 +93,7 @@ export function Sidebar({
       </div>
 
       {/* Channels only: a channel's tasks and direct conversations are tabs in the channel itself. */}
-      <nav aria-label="Channels" className="flex-1 space-y-0.5 overflow-y-auto px-2 pt-1 pb-3">
+      <nav aria-label="Channels" className={cx("flex-1 space-y-0.5 overflow-y-auto px-2 pt-1", person ? "pb-20" : "pb-3")}>
         {shown.map((c) => {
           const selected = c.code === active
           const reachable = c.state === "member"
@@ -150,14 +142,15 @@ export function Sidebar({
         )}
       </nav>
 
-      {/* Who you are, at the foot of the list as Grok keeps it: your face and name in a pill, the menu above it. */}
+      {/* Who you are, at the foot of the list as Grok keeps it: your face and name on a glass pill that
+          floats over the list, the menu above it. */}
       {person && (
-        <div className="shrink-0 px-3 pt-1 pb-3">
+        <div className="scrim-bottom absolute inset-x-0 bottom-0 px-3 pt-6 pb-3 [&>*]:pointer-events-auto">
           <Menu
             side="top"
             className="w-60"
             trigger={
-              <button type="button" className="flex h-11 max-w-full items-center gap-2.5 rounded-full bg-wash-2 pr-4 pl-1.5 transition-colors hover:bg-pick data-popup-open:bg-pick">
+              <button type="button" className="glass flex h-11 max-w-full items-center gap-2.5 rounded-full pr-4 pl-1.5 transition-colors">
                 <Monogram name={person.name} size={32} />
                 <span className="truncate text-ui font-semibold">{person.name}</span>
               </button>

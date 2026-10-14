@@ -203,9 +203,9 @@ export function Tasks({ state, now, nameOf, unreadIn, onOpen }: { state: Channel
     )
 
   return (
-    <div className="fade-top flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-[792px] px-3 pt-3 pb-8 md:px-4">
-        <label className="mb-5 flex h-9 items-center gap-2 rounded-full bg-wash-2 px-3.5 text-ink-3 transition-shadow focus-within:shadow-[0_0_0_3px_var(--accent-wash)]">
+    <div className="flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-[792px] px-3 pt-[calc(var(--head)+12px)] pb-8 md:px-4">
+        <label className="glass mb-5 flex h-10 items-center gap-2 rounded-full px-4 text-ink-3 transition-shadow focus-within:shadow-[0_0_0_3px_var(--accent-wash)]">
           <Icon icon={Search01Icon} size={16} className="shrink-0" />
           <input
             value={query}

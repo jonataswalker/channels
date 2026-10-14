@@ -52,11 +52,11 @@ export function InfoPanel({
   return (
     <aside
       aria-label="Details"
-      className="animate-slide-in flex h-full w-full flex-col bg-rail md:w-[340px]"
+      className="animate-slide-in flex h-full w-full flex-col border-l border-line bg-rail md:w-[340px]"
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
-      <header className="flex h-14 shrink-0 items-center px-3">
-        <IconButton label="Close details" round className="size-8" onClick={onClose}>
+      <header className="drag flex h-(--chrome-h) shrink-0 items-center px-3">
+        <IconButton label="Close details" round className="glass size-9 text-ink" onClick={onClose}>
           <Icon icon={Cancel01Icon} size={16} />
         </IconButton>
       </header>

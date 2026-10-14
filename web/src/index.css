@@ -12,8 +12,10 @@
  * under AA 4.5 for small text; the owner asked to mirror Apple, so it stays. Red is for alerts, amber for
  * a decision someone is waiting on; neither decorates.
  *
- * Surfaces: canvas (the conversation), rail (the list and the details beside it), raised (cards,
- * popovers, grouped lists). A step in tone separates them. Others' bubbles are Messages grey, a step
+ * One chrome colour: the list, the conversation and the panels beside it are all the canvas (rail
+ * is the canvas), and share one header row. Raised is for cards, popovers and grouped lists. What
+ * floats over the conversation (its header, the composer) is liquid glass: the canvas blurred and
+ * saturated through a translucent fill, a bright rim on top. Others' bubbles are Messages grey, a step
  * from the canvas, so their words read as bubbles and yours as the blue answer.
  *
  * Each token is written once as light-dark(day, night). The system picks the side, unless
@@ -22,7 +24,7 @@
 :root {
   color-scheme: light dark;
   --canvas: light-dark(#ffffff, #0d0d0e);
-  --rail: light-dark(#f4f4f6, #141415);
+  --rail: var(--canvas);
   --raised: light-dark(#ffffff, #1c1c1e);
   --field: light-dark(#f0f0f3, #1a1a1c);
   --ink: light-dark(#0f0f11, #f3f3f5);
@@ -75,6 +77,15 @@
   --shadow-pop: 0 0 0 1px var(--pop-edge), 0 16px 40px -12px var(--pop-shade);
   /* The composer: a hairline round it, lifted a touch off the canvas. */
   --shadow-dock: 0 0 0 1px var(--line), 0 6px 20px -12px var(--pop-shade);
+  /* Liquid glass: a translucent fill over a blur, a bright rim on its top edge, a hairline round it, a soft drop. */
+  --glass-fill: light-dark(rgba(255, 255, 255, 0.64), rgba(40, 40, 44, 0.52));
+  --glass-fill-hover: light-dark(rgba(255, 255, 255, 0.8), rgba(52, 52, 57, 0.62));
+  --glass-rim: light-dark(rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.11));
+  --glass-edge: light-dark(rgba(15, 15, 17, 0.07), rgba(255, 255, 255, 0.07));
+  --glass-shade: light-dark(rgba(15, 15, 17, 0.14), rgba(0, 0, 0, 0.55));
+  /* The one header row every column shares, and what a Mac window's traffic lights take of the list's. */
+  --chrome-h: 52px;
+  --lights-w: 84px;
 }
 
 :root[data-theme="light"] {
@@ -84,6 +95,9 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 }
+
+/* In the desktop app on a Mac (main.tsx sets data-shell): the traffic lights sit on the list's header. */
+@custom-variant shell-mac (&:where([data-shell="mac"], [data-shell="mac"] *));
 
 @theme inline {
   /*
@@ -290,7 +304,52 @@ html.reduce-motion ::after {
   transition-duration: 0.01ms !important;
 }
 
-/* The top of the conversation fades out under its header, so messages read as scrolling beneath it. */
-.fade-top {
-  mask-image: linear-gradient(to bottom, transparent, #000 20px);
+
+/* Liquid glass, for what floats: the header's controls, the place pills, the composer. In the
+   components layer, so a utility (a state's colour, a focus ring) still wins over it. */
+@layer components {
+  .glass {
+    background: var(--glass-fill);
+    -webkit-backdrop-filter: blur(20px) saturate(1.8);
+    backdrop-filter: blur(20px) saturate(1.8);
+    box-shadow:
+      inset 0 1px 0 var(--glass-rim),
+      inset 0 0 0 1px var(--glass-edge),
+      0 8px 24px -12px var(--glass-shade);
+  }
+  button.glass:hover,
+  .glass-hover:hover {
+    background: var(--glass-fill-hover);
+  }
+}
+
+/*
+ * Behind what floats: the canvas fading out (and blurring a little) toward the content, so text that
+ * scrolls under the header or the composer never fights with it.
+ */
+.scrim-top,
+.scrim-bottom {
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.scrim-top {
+  background: linear-gradient(to bottom, var(--canvas) 30%, transparent);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.scrim-bottom {
+  background: linear-gradient(to top, var(--canvas) 35%, transparent);
+  mask-image: linear-gradient(to top, #000 55%, transparent);
+}
+
+/* The desktop app draws no title bar: the header row moves the window, and what's on it still clicks. */
+.drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.drag :is(button, a, input, textarea, select, [role="button"], [role="tab"], [role="separator"]),
+.no-drag,
+.no-drag * {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }

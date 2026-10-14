@@ -223,7 +223,7 @@ export function Composer({ me, people, replyTo, nameOf, onClearReply, disabled, 
       <div>
         <div
           className={cx(
-            "relative min-w-0 rounded-dock bg-field shadow-dock transition-shadow focus-within:shadow-[0_0_0_1px_var(--ring),0_0_0_4px_var(--accent-wash)]",
+            "glass relative min-w-0 rounded-dock transition-shadow focus-within:shadow-[inset_0_1px_0_var(--glass-rim),0_0_0_1px_var(--ring),0_0_0_4px_var(--accent-wash)]",
             dropping && "shadow-[0_0_0_1.5px_var(--ring)]"
           )}
           onDragEnter={(e) => {

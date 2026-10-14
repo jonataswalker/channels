@@ -1,5 +1,5 @@
 import { ArrowDown01Icon, ArrowLeft01Icon, CheckListIcon, PauseCircleIcon, PlayCircleIcon, Search01Icon, SidebarRightIcon } from "@hugeicons/core-free-icons"
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 
 import { droppedCount } from "@mc/format.ts"
 import { memberLoad } from "@mc/load.ts"
@@ -14,15 +14,17 @@ import { excerpt, formatTime, memberName, shortTitle } from "@/lib/format"
 import { coordinatorMood, ERROR_MS, moodInputs, SPEAKING_MS, type Mood } from "@/lib/coordinator-mood"
 import { receipt } from "@/lib/receipts"
 import { dmPlace, markSeenIn, MAIN, placeFromKey, placeKey, seenIn, sendFrom, useSeen, threadMembers, type Place, type PlaceSummary } from "@/lib/threads"
+import { useSidebarOpen } from "@/lib/sidebar"
 import { cx } from "@/lib/utils"
 import { ChannelIconTile } from "./channel-icon"
+import { LEAD_WHEN_HIDDEN } from "./chrome"
 import { CoordinatorAvatar } from "./coordinator-head"
 import { Composer } from "./composer"
 import { AddAgent } from "./add-agent"
 import { ChannelControls, HoldBanner, HoldDialog } from "./controls"
 import { Icon } from "./icon"
 import { InfoPanel } from "./info-panel"
-import { Button, IconButton, Monogram, Spinner, TextField, errorText, toast } from "./kit"
+import { Button, IconButton, Monogram, Spinner, errorText, toast } from "./kit"
 import { Bubble, EventGroup, EventRow, TimeMark, isAgent, standsAlone, type ThreadSummary } from "./message"
 import { NeedsYou } from "./needs-you"
 import { TaskPage } from "./task-page"
@@ -96,6 +98,10 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
   const [highlight, setHighlight] = useState<number | null>(null)
   /** New messages below while scrolled up. */
   const [behind, setBehind] = useState(0)
+  // The floating header and composer: their heights pad the conversation, so its ends clear them.
+  const [headRef, headH] = useHeight()
+  const [footRef, footH] = useHeight()
+  const listOpen = useSidebarOpen()
 
   const nameOf = useCallback((name: string) => memberName(state.members.get(name), name), [state.members])
   // Members by key: names are what people type, keys are who they are.
@@ -597,12 +603,17 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
       }}
     >
       <div className="flex h-full min-w-0 flex-1">
-        <div className={cx("relative flex min-w-0 flex-1 flex-col bg-canvas", (root || info) && "hidden md:flex")}>
-          {/* Who you're talking with, on the conversation's column: a face, the name, what's going on, and
-              round controls; then the channel's conversations as pills. No bar: the canvas runs under it. */}
-          <header className="shrink-0 bg-canvas">
-            <div className="mx-auto flex h-16 w-full max-w-[792px] items-center gap-1.5 px-2 md:px-4">
-              <IconButton label="Channels" round className="size-9 md:hidden" onClick={onBack}>
+        <div
+          className={cx("relative flex min-w-0 flex-1 flex-col bg-canvas", (root || info) && "hidden md:flex")}
+          style={{ "--head": `${headH}px`, "--foot": `${footH}px` } as CSSProperties}
+        >
+          {/* Who you're talking with, floating over the conversation on the window's one header row: a
+              glass chip with the face, the name and what's going on; the channel's conversations as
+              pills; round glass controls. Messages scroll under it. */}
+          <header ref={headRef} className="absolute inset-x-0 top-0 z-20">
+            <div aria-hidden className="scrim-top absolute inset-x-0 top-0 -bottom-6" />
+            <div className={cx("drag relative flex flex-wrap items-center gap-x-2 gap-y-2 px-3 py-2 md:h-(--chrome-h) md:flex-nowrap md:py-0", !listOpen && LEAD_WHEN_HIDDEN)}>
+              <IconButton label="Channels" round className="glass size-9 text-ink md:hidden" onClick={onBack}>
                 <Icon icon={ArrowLeft01Icon} size={20} />
               </IconButton>
               <button
@@ -610,54 +621,76 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 onClick={() => (setInfo((v) => !v), setThreadRoot(null))}
                 aria-expanded={info}
                 aria-label={`Details: ${placeTitle}, ${subtitle}`}
-                className="-ml-1.5 flex min-w-0 items-center gap-3 rounded-full py-1 pr-3 pl-1 text-left transition-colors hover:bg-wash"
+                className="glass flex h-10 min-w-0 shrink items-center gap-2.5 rounded-full py-1 pr-4 pl-1 text-left transition-colors md:max-w-80"
               >
                 {placeFace}
                 <span className="min-w-0">
-                  <span className="block truncate text-title font-semibold">{placeTitle}</span>
-                  <span className="block truncate text-meta text-ink-3">{headline}</span>
+                  <span className="block truncate text-ui leading-tight font-semibold">{placeTitle}</span>
+                  <span className="block truncate text-stamp text-ink-3">{headline}</span>
                 </span>
               </button>
-              <span className="flex-1" />
-              {/* The owner's stop button: every agent, at once. */}
-              {hold &&
-                (!quiet || state.hold) &&
-                (state.hold ? (
-                  // Paused: play, in amber, where the stop was.
-                  <IconButton label="Resume agents" round className="size-9 bg-decide-wash text-decide hover:bg-decide-wash hover:text-decide" onClick={() => void hold(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error"))}>
-                    <Icon icon={PlayCircleIcon} size={18} />
-                  </IconButton>
-                ) : (
-                  // A circled pause reads as a media control; two bare bars read as "columns".
-                  <IconButton label="Pause all agents" round className="size-9 bg-wash" onClick={() => setPausing(true)}>
-                    <Icon icon={PauseCircleIcon} size={18} />
-                  </IconButton>
-                ))}
-              <IconButton label="Search" round className="size-9 bg-wash" active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={board}>
-                <Icon icon={Search01Icon} size={17} />
-              </IconButton>
-              <IconButton label={info ? "Hide details" : "Show details"} round className="size-9 bg-wash" active={info} onClick={() => (setInfo((v) => !v), setThreadRoot(null))}>
-                <Icon icon={SidebarRightIcon} size={17} />
-              </IconButton>
+              {several && (
+                <PlaceBar
+                  className="order-last basis-full md:order-none md:min-w-0 md:flex-1 md:basis-auto"
+                  me={me}
+                  places={places}
+                  current={board ? "board" : hereKey}
+                  state={state}
+                  nameOf={nameOf}
+                  unreadIn={unreadIn}
+                  onPick={(p) => (go(p), setInfo(false))}
+                  onBoard={() => (setBoard(true), setOpenTask(null), setThreadRoot(null), setInfo(false))}
+                />
+              )}
+              <span className={cx("flex-1", several && "md:hidden")} />
+              <div className="flex shrink-0 items-center gap-1.5">
+                {/* The owner's stop button: every agent, at once. */}
+                {hold &&
+                  (!quiet || state.hold) &&
+                  (state.hold ? (
+                    // Paused: play, in amber, where the stop was.
+                    <IconButton label="Resume agents" round className="glass size-9 bg-decide-wash text-decide" onClick={() => void hold(false).then(() => toast("Agents may carry on"), (err) => toast(errorText(err), "error"))}>
+                      <Icon icon={PlayCircleIcon} size={18} />
+                    </IconButton>
+                  ) : (
+                    // A circled pause reads as a media control; two bare bars read as "columns".
+                    <IconButton label="Pause all agents" round className="glass size-9 text-ink" onClick={() => setPausing(true)}>
+                      <Icon icon={PauseCircleIcon} size={18} />
+                    </IconButton>
+                  ))}
+                <IconButton label="Search" round className="glass size-9 text-ink" active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={board}>
+                  <Icon icon={Search01Icon} size={17} />
+                </IconButton>
+                <IconButton label={info ? "Hide details" : "Show details"} round className="glass size-9 text-ink" active={info} onClick={() => (setInfo((v) => !v), setThreadRoot(null))}>
+                  <Icon icon={SidebarRightIcon} size={17} />
+                </IconButton>
+              </div>
             </div>
-            {several && (
-              <PlaceBar
-                me={me}
-                places={places}
-                current={board ? "board" : hereKey}
-                state={state}
-                nameOf={nameOf}
-                unreadIn={unreadIn}
-                onPick={(p) => (go(p), setInfo(false))}
-                onBoard={() => (setBoard(true), setOpenTask(null), setThreadRoot(null), setInfo(false))}
-              />
+            {search !== null && !board && openTask === null && (
+              <div className="relative mx-auto w-full max-w-[792px] px-3 pb-2 md:px-4">
+                <label className="glass flex h-10 items-center gap-2 rounded-full px-4 text-ink-3">
+                  <Icon icon={Search01Icon} size={16} className="shrink-0" />
+                  <input
+                    autoFocus
+                    value={search}
+                    aria-label="Search messages"
+                    placeholder={place.kind === "main" ? "Search this channel" : `Search ${placeTitle}`}
+                    onChange={(e) => setSearch(e.target.value)}
+                    onKeyDown={(e) => e.key === "Escape" && setSearch(null)}
+                    className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none"
+                  />
+                </label>
+              </div>
             )}
+            <div className="relative">
+              <HoldBanner />
+            </div>
           </header>
 
-          <HoldBanner />
           {pausing && hold && <HoldDialog onClose={() => setPausing(false)} onSave={(note) => hold(true, note)} />}
 
           {openTask !== null ? (
+            <div className="flex min-h-0 flex-1 flex-col pt-(--head)">
             <TaskPage
               id={openTask}
               state={state}
@@ -669,33 +702,21 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
               noteBlocked={state.members.get(me)?.scopes.includes("tasks") === false ? "The owner hasn’t let you change tasks here, so you can’t comment on one." : null}
               onNote={async (note) => void (await send(`noted on ${taskId(openTask)}`, { kind: "event", ev: { op: "task.update", task: openTask, note } }))}
             />
+            </div>
           ) : board ? (
             <Tasks state={state} now={now} nameOf={nameOf} unreadIn={(id) => unreadIn(placeKey({ kind: "task", task: id }))} onOpen={(id) => go({ kind: "task", task: id })} />
           ) : (
             <>
-              {search !== null && (
-                <div className="mx-auto w-full max-w-[792px] shrink-0 px-4 pt-1">
-                  <TextField
-                    autoFocus
-                    value={search}
-                    placeholder={place.kind === "main" ? "Search this channel" : `Search ${placeTitle}`}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onKeyDown={(e) => e.key === "Escape" && setSearch(null)}
-                    className="rounded-full"
-                  />
-                </div>
-              )}
-
               <div
                 ref={scroller}
-                className="fade-top flex-1 overflow-y-auto"
+                className="absolute inset-0 overflow-y-auto"
                 onScroll={(e) => {
                   const el = e.currentTarget
                   atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
                   if (atBottom.current && behind) setBehind(0)
                 }}
               >
-                <div className="relative mx-auto w-full max-w-[792px] px-4 pb-6">
+                <div className="relative mx-auto w-full max-w-[792px] px-4 pt-[calc(var(--head)+8px)] pb-[calc(var(--foot)+16px)]">
                   {/* What needs a person: at the top of the main conversation, as system cards. */}
                   {hereKey === "main" && (
                     <NeedsYou
@@ -738,13 +759,17 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                 <button
                   type="button"
                   onClick={toBottom}
-                  className="animate-rise absolute bottom-20 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-raised py-1.5 pr-3.5 pl-2.5 text-ui font-medium text-accent-text shadow-pop"
+                  className="glass animate-rise absolute bottom-[calc(var(--foot)+10px)] left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full py-1.5 pr-3.5 pl-2.5 text-ui font-medium text-accent-text"
                 >
                   <Icon icon={ArrowDown01Icon} size={15} />
                   {behind === 1 ? "1 new message" : `${behind} new messages`}
                 </button>
               )}
 
+              {/* The composer floats on glass at the foot; messages scroll under it too. */}
+              <div ref={footRef} className="absolute inset-x-0 bottom-0 z-20">
+                <div aria-hidden className="scrim-bottom absolute inset-x-0 -top-6 bottom-0" />
+                <div className="relative">
               {mayWrite ? (
                 <Composer
                   key={hereKey}
@@ -777,6 +802,8 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
                   Between {place.kind === "dm" ? place.with.map(nameOf).join(" and ") : ""}. You can read along; talk with them in the main conversation.
                 </p>
               )}
+                </div>
+              </div>
             </>
           )}
         </div>
@@ -835,7 +862,9 @@ function PlaceBar({
   onPick,
   onBoard,
   me,
+  className,
 }: {
+  className?: string
   me: string
   places: Map<string, PlaceSummary>
   current: string
@@ -861,7 +890,7 @@ function PlaceBar({
   const task = here?.kind === "task" ? state.tasks.get(here.task) : undefined
   // The one you're in is filled in ink, as Grok marks its chips; the rest are soft.
   const pill = (on: boolean) =>
-    cx("flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-ui font-medium transition-colors", on ? "bg-ink text-canvas" : "bg-wash-2 text-ink-2 hover:bg-pick hover:text-ink")
+    cx("flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-ui font-medium transition-colors", on ? "bg-ink text-canvas shadow-[0_8px_24px_-12px_var(--glass-shade)]" : "glass text-ink-2 hover:text-ink")
   const badge = (u: { n: number; forMe: boolean }) =>
     u.n <= 0 ? null : u.forMe ? (
       <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-stamp font-semibold text-accent-ink tabular-nums">{u.n}</span>
@@ -872,7 +901,8 @@ function PlaceBar({
   const face = (name: string) =>
     name === state.coordinator ? <CoordinatorAvatar size={20} /> : <Monogram name={nameOf(name)} agent={isAgent(state.members.get(name))} color={colorOf(state, name)} size={20} />
   return (
-    <nav aria-label="Conversations" className="mx-auto flex w-full max-w-[792px] items-center gap-1.5 overflow-x-auto px-3 pb-2.5 [scrollbar-width:none] md:px-4">
+    // Room above and below inside the scroller, so the pills' glass shadows aren't clipped.
+    <nav aria-label="Conversations" className={cx("-my-2 flex items-center gap-1.5 overflow-x-auto py-2 [scrollbar-width:none]", className)}>
       <button type="button" aria-current={current === "main" ? "page" : undefined} onClick={() => onPick(MAIN)} className={pill(current === "main")}>
         Main
         {current !== "main" && badge(unreadIn("main"))}
@@ -906,6 +936,20 @@ function PlaceBar({
       })}
     </nav>
   )
+}
+
+/** An element's height, kept current as it changes (a header that wraps, a composer that grows). */
+function useHeight(): [(el: HTMLElement | null) => void, number] {
+  const [height, setHeight] = useState(0)
+  const [el, setEl] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (!el) return
+    // An observer reports once as soon as it starts watching, then on every change.
+    const watch = new ResizeObserver(() => setHeight(el.offsetHeight))
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [el])
+  return [setEl, height]
 }
 
 function Centered({ children }: { children: ReactNode }) {
