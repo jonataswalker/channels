@@ -116,19 +116,22 @@ jobs:
         run: |
           # The app bundles the kiwi binary through extraResources (`../dist/kiwi`);
           # build it for the platform (and architecture) being packaged.
-          cli() { bun build ../src/cli/main.ts --compile --minify --external node-liblzma --external @mongodb-js/zstd --target="$1" --outfile "$2"; }
           mkdir -p ../dist
+          # Bun on Windows can't open a relative output directory ("../dist"): give it the absolute,
+          # native path (pwd -W in Git Bash; plain pwd elsewhere).
+          dist=$(cd ../dist && (pwd -W 2>/dev/null || pwd))
+          cli() { bun build ../src/cli/main.ts --compile --minify --external node-liblzma --external @mongodb-js/zstd --target="$1" --outfile "$dist/$2"; }
           bun run build
           case "${{ runner.os }}" in
             macOS)
-              cli bun-darwin-arm64 ../dist/kiwi && codesign --force --sign - ../dist/kiwi && bunx electron-builder --mac --arm64 --publish never
-              cli bun-darwin-x64 ../dist/kiwi && codesign --force --sign - ../dist/kiwi && bunx electron-builder --mac --x64 --publish never
+              cli bun-darwin-arm64 kiwi && codesign --force --sign - ../dist/kiwi && bunx electron-builder --mac --arm64 --publish never
+              cli bun-darwin-x64 kiwi && codesign --force --sign - ../dist/kiwi && bunx electron-builder --mac --x64 --publish never
               ;;
             Windows)
-              cli bun-windows-x64 ../dist/kiwi.exe && bunx electron-builder --win --publish never
+              cli bun-windows-x64 kiwi.exe && bunx electron-builder --win --publish never
               ;;
             *)
-              cli bun-linux-x64 ../dist/kiwi && bunx electron-builder --linux --publish never
+              cli bun-linux-x64 kiwi && bunx electron-builder --linux --publish never
               ;;
           esac
           # The app is useless without these: fail here, not on a user's machine.
@@ -181,7 +184,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mapfile -t files < <(find artifacts -maxdepth 1 -type f | sort)
-          gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+          # A release candidate (v0.11.0-rc.3) is a prerelease: the install scripts fetch
+          # releases/latest, which must stay on the last real release.
+          pre=(); [[ "$GITHUB_REF_NAME" == *-* ]] && pre=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" "${pre[@]}" \
             --repo "$GITHUB_REPOSITORY" \
             --title "kiwi $GITHUB_REF_NAME" \
             --notes "Kiwi desktop app (macOS dmg/zip, Windows nsis, Linux AppImage/deb) and the kiwi CLI. Download the app at https://channels.kiwiinit.com/; install the CLI with: curl -fsSL https://channels.kiwiinit.com/install | sh (macOS, Linux) or irm https://channels.kiwiinit.com/install.ps1 | iex (Windows). Every file is checksummed in SHA256SUMS and has a build-provenance attestation: gh attestation verify <file> --repo $GITHUB_REPOSITORY"
