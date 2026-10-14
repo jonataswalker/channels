@@ -52,6 +52,9 @@ export function corsPreflight(): Response {
 
 /** A response with the origin header set. */
 export function withCors(res: Response): Response {
+  // A WebSocket upgrade (101, carrying the socket) can't be rebuilt: new Response() refuses
+  // status 101 and would drop the socket. CORS doesn't apply to it anyway.
+  if (res.status === 101 || (res as Response & { webSocket?: unknown }).webSocket) return res;
   const headers = new Headers(res.headers);
   headers.set("access-control-allow-origin", "*");
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
