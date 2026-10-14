@@ -143,11 +143,11 @@ function createTray(): void {
   tray = new Tray(icon);
   tray.setToolTip("Kiwi");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Open Kiwi", click: () => (win ? (win.show(), win.focus()) : createWindow()) },
+    { label: "Open Kiwi", click: showWindow },
     { type: "separator" },
     { label: "Quit", click: () => (quitting = true, app.quit()) },
   ]));
-  tray.on("click", () => (win ? (win.isVisible() ? win.hide() : (win.show(), win.focus())) : createWindow()));
+  tray.on("click", () => (win && !win.isDestroyed() && win.isVisible() ? win.hide() : showWindow()));
 }
 
 function trayIcon(): Electron.NativeImage {
@@ -396,7 +396,7 @@ function wireIpc(): void {
   ipcMain.handle("kiwi:install-cli", () => installCli());
   ipcMain.handle("kiwi:notify", (_e, title: string, body: string) => {
     const n = new Notification({ title, body });
-    n.on("click", () => win?.show());
+    n.on("click", showWindow);
     n.show();
   });
   ipcMain.handle("kiwi:open-external", (_e, url: string) => {
@@ -406,6 +406,14 @@ function wireIpc(): void {
   ipcMain.handle("kiwi:deep-link", () => deepLink);
 }
 
+// Bring the window back: recreate it if it was destroyed, restore, show and focus.
+function showWindow(): void {
+  if (!win || win.isDestroyed()) createWindow();
+  if (win?.isMinimized()) win.restore();
+  win?.show();
+  win?.focus();
+}
+
 // ---------- startup ----------
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -413,7 +421,7 @@ else {
   app.on("second-instance", (_e, argv) => {
     const link = argv.find((a) => a.startsWith(`${JOIN_SCHEME}://`));
     if (link) handleDeepLink(link);
-    else win?.show();
+    else showWindow();
   });
   app.on("open-url", (e, url) => (e.preventDefault(), handleDeepLink(url)));
   if (process.platform !== "darwin") {
@@ -422,14 +430,15 @@ else {
   }
   if (process.defaultApp && process.argv.length >= 2) app.setAsDefaultProtocolClient(JOIN_SCHEME, process.execPath, [path.resolve(process.argv[1] as string)]);
 
+  // Privileged schemes must be registered before the ready event (Electron ignores them after).
+  protocol.registerSchemesAsPrivileged([{ scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
   void app.whenReady().then(async () => {
     loadStore();
-    protocol.registerSchemesAsPrivileged([{ scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
     serveWeb();
     wireIpc();
     createWindow();
     createTray();
-    app.on("activate", () => win?.show());
+    app.on("activate", showWindow);
     // Its daemon: start the bundled binary unless one is running; adopting (certify +
     // hand back) is the renderer's call once a person key exists (daemonAdopt).
     ensureDaemon().catch(() => {});
