@@ -3,6 +3,11 @@
   "version": "0.11.0-rc.1",
   "private": true,
   "description": "Kiwi desktop app: an Electron shell hosting web/ for people (auto-approval, pairing, admin).",
+  "homepage": "https://github.com/ojowwalker77/channels",
+  "author": {
+    "name": "Jow",
+    "email": "ojowwalker77@users.noreply.github.com"
+  },
   "main": "dist/main.js",
   "scripts": {
     "build:main": "bun build src/main.ts --outfile dist/main.js --target node --format cjs --external electron",

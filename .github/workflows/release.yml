@@ -97,6 +97,8 @@ jobs:
           bun-version: 1.4.2
 
       - name: Install
+        # bash on every runner: Windows' default PowerShell doesn't scope `cd` to the ( ) subshell.
+        shell: bash
         run: |
           bun install --frozen-lockfile
           (cd web && bun install --frozen-lockfile)
