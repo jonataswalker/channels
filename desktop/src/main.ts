@@ -84,6 +84,8 @@ function normalizeRelay(url: string): string | null {
 
 // ---------- renderer hosting ----------
 
+// Bun inlines __dirname at build time (desktop/src), so a packaged app finds dist/ through the app path.
+const preloadPath = () => (app.isPackaged ? path.join(app.getAppPath(), "dist", "preload.js") : path.join(__dirname, "..", "dist", "preload.js"));
 const webDist = () => path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, ".."), app.isPackaged ? "web/dist" : "../web/dist");
 
 const MIME: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".map": "application/json" };
@@ -125,7 +127,7 @@ function createWindow(): void {
     width: 1200,
     height: 800,
     autoHideMenuBar: true,
-    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true },
+    webPreferences: { preload: preloadPath(), contextIsolation: true, sandbox: true },
   });
   void win.loadURL(entryUrl());
   // Closing keeps the app running (background auto-approval + notifications); Quit lives in the tray.
