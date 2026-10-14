@@ -53,17 +53,6 @@
         }
       ]
     },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "extraResources": [
-        {
-          "from": "../dist/kiwi.exe",
-          "to": "kiwi.exe"
-        }
-      ]
-    },
     "linux": {
       "category": "Utility",
       "target": [

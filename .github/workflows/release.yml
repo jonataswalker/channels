@@ -74,8 +74,8 @@ jobs:
           name: cli
           path: dist/kiwi-*
 
-  # The Electron app builds on each OS for that OS: dmg/zip on macOS, nsis on
-  # Windows, AppImage/deb on Linux. Unsigned for now.
+  # The Electron app builds on each OS for that OS: dmg/zip on macOS, AppImage/deb
+  # on Linux. Unsigned for now. No Windows app (the kiwi CLI still ships for Windows).
   desktop:
     needs: version
     strategy:
@@ -84,8 +84,6 @@ jobs:
         include:
           - os: macos-latest
             target: macos
-          - os: windows-latest
-            target: windows
           - os: ubuntu-latest
             target: linux
     runs-on: ${{ matrix.os }}
@@ -97,7 +95,6 @@ jobs:
           bun-version: 1.4.2
 
       - name: Install
-        # bash on every runner: Windows' default PowerShell doesn't scope `cd` to the ( ) subshell.
         shell: bash
         run: |
           bun install --frozen-lockfile
@@ -116,24 +113,28 @@ jobs:
         run: |
           # The app bundles the kiwi binary through extraResources (`../dist/kiwi`);
           # build it for the platform (and architecture) being packaged.
-          cli() { bun build ../src/cli/main.ts --compile --minify --external node-liblzma --external @mongodb-js/zstd --target="$1" --outfile "$2"; }
+          cli() { bun build ../src/cli/main.ts --compile --minify --external node-liblzma --external @mongodb-js/zstd --target="$1" --outfile ../dist/kiwi; }
           mkdir -p ../dist
           bun run build
           case "${{ runner.os }}" in
             macOS)
-              cli bun-darwin-arm64 ../dist/kiwi && codesign --force --sign - ../dist/kiwi && bunx electron-builder --mac --arm64 --publish never
-              cli bun-darwin-x64 ../dist/kiwi && codesign --force --sign - ../dist/kiwi && bunx electron-builder --mac --x64 --publish never
-              ;;
-            Windows)
-              cli bun-windows-x64 ../dist/kiwi.exe && bunx electron-builder --win --publish never
+              cli bun-darwin-arm64 && codesign --force --sign - ../dist/kiwi && bunx electron-builder --mac --arm64 --publish never
+              cli bun-darwin-x64 && codesign --force --sign - ../dist/kiwi && bunx electron-builder --mac --x64 --publish never
               ;;
             *)
-              cli bun-linux-x64 ../dist/kiwi && bunx electron-builder --linux --publish never
+              cli bun-linux-x64 && bunx electron-builder --linux --publish never
               ;;
           esac
-          # The app is useless without these: fail here, not on a user's machine.
-          find release -path '*resources/web/dist/index.html' | grep -q . || { echo "web/dist missing from the package"; exit 1; }
-          find release \( -path '*resources/kiwi' -o -path '*resources/kiwi.exe' \) | grep -q . || { echo "kiwi binary missing from the package"; exit 1; }
+          # The app is useless without these: fail here, not on a user's machine. Every app built
+          # (two on macOS) must carry both: a Mac app keeps them in Contents/Resources, Linux's
+          # unpacked app in resources. No `find | grep -q`: under pipefail, grep quitting early fails it.
+          apps=$(find release -maxdepth 4 -type d \( -path 'release/*-unpacked/resources' -o -path 'release/*/*.app/Contents/Resources' \))
+          [ -n "$apps" ] || { echo "no packaged app found under release/"; exit 1; }
+          for r in $apps; do
+            [ -f "$r/web/dist/index.html" ] || { echo "web/dist missing from $r"; exit 1; }
+            [ -f "$r/kiwi" ] || { echo "kiwi binary missing from $r"; exit 1; }
+          done
+          echo "checked: $apps"
 
       - name: Collect
         shell: bash
@@ -141,7 +142,7 @@ jobs:
           bun -e '
             const fs = require("fs");
             fs.mkdirSync("out", { recursive: true });
-            const exts = [".dmg", ".zip", ".exe", ".appimage", ".deb"];
+            const exts = [".dmg", ".zip", ".appimage", ".deb"];
             const dir = "desktop/release";
             const names = fs.readdirSync(dir).filter((f) => exts.some((e) => f.toLowerCase().endsWith(e)));
             for (const n of names) fs.copyFileSync(`${dir}/${n}`, `out/${n}`);
@@ -181,7 +182,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mapfile -t files < <(find artifacts -maxdepth 1 -type f | sort)
-          gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+          # A release candidate (v0.11.0-rc.3) is a prerelease: the install scripts fetch
+          # releases/latest, which must stay on the last real release.
+          pre=(); [[ "$GITHUB_REF_NAME" == *-* ]] && pre=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" "${pre[@]}" \
             --repo "$GITHUB_REPOSITORY" \
             --title "kiwi $GITHUB_REF_NAME" \
-            --notes "Kiwi desktop app (macOS dmg/zip, Windows nsis, Linux AppImage/deb) and the kiwi CLI. Download the app at https://channels.kiwiinit.com/; install the CLI with: curl -fsSL https://channels.kiwiinit.com/install | sh (macOS, Linux) or irm https://channels.kiwiinit.com/install.ps1 | iex (Windows). Every file is checksummed in SHA256SUMS and has a build-provenance attestation: gh attestation verify <file> --repo $GITHUB_REPOSITORY"
+            --notes "Kiwi desktop app (macOS dmg/zip, Linux AppImage/deb) and the kiwi CLI. Download the app at https://channels.kiwiinit.com/; install the CLI with: curl -fsSL https://channels.kiwiinit.com/install | sh (macOS, Linux) or irm https://channels.kiwiinit.com/install.ps1 | iex (Windows). Every file is checksummed in SHA256SUMS and has a build-provenance attestation: gh attestation verify <file> --repo $GITHUB_REPOSITORY"
