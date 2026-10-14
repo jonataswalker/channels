@@ -134,9 +134,10 @@ jobs:
               cli bun-linux-x64 kiwi && bunx electron-builder --linux --publish never
               ;;
           esac
-          # The app is useless without these: fail here, not on a user's machine.
-          find release -path '*resources/web/dist/index.html' | grep -q . || { echo "web/dist missing from the package"; exit 1; }
-          find release \( -path '*resources/kiwi' -o -path '*resources/kiwi.exe' \) | grep -q . || { echo "kiwi binary missing from the package"; exit 1; }
+          # The app is useless without these: fail here, not on a user's machine. No `find | grep -q`:
+          # grep quits at the first match, find dies of SIGPIPE, and pipefail calls that a failure.
+          [ -n "$(find release -path '*resources/web/dist/index.html' -print -quit)" ] || { echo "web/dist missing from the package"; exit 1; }
+          [ -n "$(find release \( -path '*resources/kiwi' -o -path '*resources/kiwi.exe' \) -print -quit)" ] || { echo "kiwi binary missing from the package"; exit 1; }
 
       - name: Collect
         shell: bash
