@@ -591,12 +591,12 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
           <header ref={headRef} className="absolute inset-x-0 top-0 z-20">
             <div aria-hidden className="scrim-top absolute inset-x-0 top-0 -bottom-6" />
             <div className={cx("drag relative flex h-(--chrome-h) items-center gap-2 px-3", !listOpen && LEAD_WHEN_HIDDEN)}>
-              <IconButton label="Channels" round className="glass size-10 text-ink md:hidden" onClick={onBack}>
+              <IconButton label="Channels" round className="glass size-9 text-ink md:hidden" onClick={onBack}>
                 <Icon icon={ArrowLeft01Icon} size={20} />
               </IconButton>
               <span className="flex-1" />
-              <IconButton label="Search" round className="glass size-10 text-ink" active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={board}>
-                <Icon icon={Search01Icon} size={19} />
+              <IconButton label="Search" round className="glass size-9 text-ink" active={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))} disabled={board}>
+                <Icon icon={Search01Icon} size={18} />
               </IconButton>
             </div>
             {/* After the row in the document and marked no-drag: the desktop app's drag region is worked
@@ -620,7 +620,7 @@ export function Conversation({ member, onBack, onGone }: { member: StoredMember;
             />
             {search !== null && !board && openTask === null && (
               <div className="relative mx-auto w-full max-w-[792px] px-3 pb-2 md:px-4">
-                <label className="glass flex h-10 items-center gap-2 rounded-full px-4 text-ink-3">
+                <label className="glass flex h-9 items-center gap-2 rounded-full px-3.5 text-ink-3">
                   <Icon icon={Search01Icon} size={16} className="shrink-0" />
                   <input
                     autoFocus
@@ -861,11 +861,11 @@ function PlaceSwitch({
       <span aria-label="New messages" className="absolute top-0 right-0 size-2 rounded-full bg-accent" />
     )
   const face = (name: string) =>
-    name === state.coordinator ? <CoordinatorAvatar size={32} /> : <Monogram name={nameOf(name)} agent={isAgent(state.members.get(name))} color={colorOf(state, name)} size={32} />
+    name === state.coordinator ? <CoordinatorAvatar size={28} /> : <Monogram name={nameOf(name)} agent={isAgent(state.members.get(name))} color={colorOf(state, name)} size={28} />
   const main = current === "main" ? { n: 0, forMe: false } : unreadIn("main")
   return (
     <nav aria-label="Conversations" className={cx("no-drag flex items-center gap-2", className)}>
-      <div className="glass flex h-10 items-center gap-0.5 rounded-full p-1">
+      <div className="glass flex h-9 items-center gap-0.5 rounded-full p-0.5">
         <button type="button" aria-label="Main" title="Chat" aria-current={current === "main" ? "page" : undefined} onClick={() => onPick(MAIN)} className={seg(current === "main")}>
           <Icon icon={BubbleChatIcon} size={18} />
           {badge(main)}
@@ -901,7 +901,7 @@ function PlaceSwitch({
             title={`${name}, privately`}
             aria-current={k === current ? "page" : undefined}
             onClick={() => onPick(p)}
-            className={cx("glass relative flex size-10 shrink-0 items-center justify-center rounded-full", k === current && "shadow-[0_0_0_2px_var(--ink)]")}
+            className={cx("glass relative flex size-9 shrink-0 items-center justify-center rounded-full", k === current && "shadow-[0_0_0_2px_var(--ink)]")}
           >
             {face(other ?? p.with[0]!)}
             {k !== current && badge(unreadIn(k))}

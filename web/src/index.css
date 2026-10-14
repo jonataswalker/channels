@@ -83,11 +83,14 @@
   --glass-rim: light-dark(rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.11));
   --glass-edge: light-dark(rgba(15, 15, 17, 0.07), rgba(255, 255, 255, 0.07));
   --glass-shade: light-dark(rgba(15, 15, 17, 0.14), rgba(0, 0, 0, 0.55));
-  /* The one header row every column shares, and what a Mac window's traffic lights take of the list's. */
+  /*
+   * The chrome's grid, on 4px: one header row every column shares (52px), every round control on it
+   * 36px (8px above and below), 8px between controls, a 12px gutter from every edge (header, rows,
+   * the account pill), and what a Mac window's traffic lights take of the list's header: they end
+   * about 80px in, so 92px leaves the gutter after them.
+   */
   --chrome-h: 52px;
-  /* The list over the Mac's sidebar glass: a light tint, so the desktop blurs through it. */
-  --list-glass: light-dark(rgba(255, 255, 255, 0.28), rgba(18, 18, 20, 0.42));
-  --lights-w: 84px;
+  --lights-w: 92px;
 }
 
 :root[data-theme="light"] {
@@ -193,13 +196,6 @@ textarea,
 select {
   font-family: inherit;
   font-feature-settings: inherit;
-}
-
-/* The desktop app on a Mac: the window is the system's sidebar glass (vibrancy, desktop/src/main.ts);
-   the page is see-through, so the list shows it, and everything else paints its own canvas. */
-[data-shell="mac"],
-[data-shell="mac"] body {
-  background: transparent;
 }
 
 body {

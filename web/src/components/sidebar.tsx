@@ -52,11 +52,11 @@ export function Sidebar({
   useMemberIcons(rows.filter((c) => c.state === "member").map((c) => c.code))
 
   return (
-    <aside className={cx("relative h-full w-full shrink-0 flex-col bg-rail shell-mac:bg-(--list-glass) md:w-[300px]", className)}>
+    <aside className={cx("relative h-full w-full shrink-0 flex-col bg-rail md:w-[300px]", className)}>
       {/* The list's part of the window's one header row, as Grok lays it out: past a Mac's traffic
           lights, hide the list; on the right, search (the ⌘K palette) and new. The row moves the
           window in the desktop app. */}
-      <header className="drag flex h-(--chrome-h) shrink-0 items-center gap-2 pr-3 pl-3 shell-mac:pl-(--lights-w)">
+      <header className="drag flex h-(--chrome-h) shrink-0 items-center gap-2 px-3 shell-mac:pl-(--lights-w)">
         <SidebarToggle />
         {!person && !rows.length && <Wordmark className="pl-1 text-title" />}
         <span className="flex-1" />
@@ -65,7 +65,7 @@ export function Sidebar({
       </header>
 
       {/* Channels only: a channel's tasks and direct conversations are tabs in the channel itself. */}
-      <nav aria-label="Channels" className={cx("flex-1 space-y-0.5 overflow-y-auto px-2 pt-2", person ? "pb-20" : "pb-3")}>
+      <nav aria-label="Channels" className={cx("flex-1 space-y-1 overflow-y-auto px-3 pt-1", person ? "pb-20" : "pb-3")}>
         {rows.map((c) => {
           const selected = c.code === active
           const reachable = c.state === "member"
@@ -79,9 +79,9 @@ export function Sidebar({
               onClick={() => onSelect(c.code)}
               aria-current={selected ? "page" : undefined}
               title={rowNote(c)}
-              className={cx("flex w-full items-center gap-3 rounded-card px-2.5 py-2.5 text-left transition-colors", selected ? "bg-pick" : "hover:bg-wash")}
+              className={cx("flex h-16 w-full items-center gap-3 rounded-card px-3 text-left transition-colors", selected ? "bg-pick" : "hover:bg-wash")}
             >
-              {c.recent?.byCoordinator && reachable ? <CoordinatorAvatar size={48} label="The coordinator spoke last" /> : <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={48} />}
+              {c.recent?.byCoordinator && reachable ? <CoordinatorAvatar size={40} label="The coordinator spoke last" /> : <ChannelIconTile icon={icons.get(c.room) ?? null} title={c.title} size={40} />}
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">
                   <span className={cx("min-w-0 flex-1 truncate text-body font-semibold", !reachable && "text-ink-2")}>{c.title}</span>
@@ -116,12 +116,12 @@ export function Sidebar({
       {/* Who you are, at the foot of the list as Grok keeps it: your face and name on a glass pill that
           floats over the list, the menu above it. */}
       {person && (
-        <div className="scrim-bottom absolute inset-x-0 bottom-0 px-3 pt-6 pb-3 shell-mac:[background:none] shell-mac:[backdrop-filter:none] [&>*]:pointer-events-auto">
+        <div className="scrim-bottom absolute inset-x-0 bottom-0 px-3 pt-6 pb-3 [&>*]:pointer-events-auto">
           <Menu
             side="top"
             className="w-60"
             trigger={
-              <button type="button" className="glass flex h-11 max-w-full items-center gap-2.5 rounded-full pr-4 pl-1.5 transition-colors">
+              <button type="button" className="glass flex h-10 max-w-full items-center gap-2 rounded-full pr-4 pl-1 transition-colors">
                 <Monogram name={person.name} size={32} />
                 <span className="truncate text-ui font-semibold">{person.name}</span>
               </button>

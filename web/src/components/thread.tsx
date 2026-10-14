@@ -40,7 +40,7 @@ export function ThreadPanel({ count, children, composer, onClose }: { count: num
           onClose()
         }}
       >
-        <header className="drag flex h-(--chrome-h) shrink-0 items-center justify-between pr-3 pl-4">
+        <header className="drag flex h-(--chrome-h) shrink-0 items-center justify-between px-3">
           <span className="text-ui font-semibold">
             Thread <span className="font-normal text-ink-3">{count === 1 ? "1 reply" : `${count} replies`}</span>
           </span>
